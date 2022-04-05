@@ -22,7 +22,7 @@ ipympl = "*"
 ipywidgets-bokeh = "*"
 lckr-jupyterlab-variableinspector = "*"
 scipy = "*"
-
+nbstripout = "*"
 
 [dev-packages]
 
