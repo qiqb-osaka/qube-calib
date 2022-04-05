@@ -1,0 +1,13 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+e7awg-sw = {path = "./e7awg_sw"}
+qubelsi = {path = "./adi_api_mod/python/qubelsi"}
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"
