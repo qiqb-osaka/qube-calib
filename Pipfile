@@ -6,6 +6,23 @@ name = "pypi"
 [packages]
 e7awg-sw = {path = "./e7awg_sw"}
 qubelsi = {path = "./adi_api_mod/python/qubelsi"}
+sphinx = "*"
+sphinx-sizzle-theme = "*"
+numpy = "*"
+matplotlib = "*"
+pylabrad = "*"
+jupyterlab = "*"
+pyvisa = "*"
+pyvisa-py = "*"
+ipywidgets = "*"
+bokeh = "*"
+notebook = "*"
+jupyter-bokeh = "*"
+ipympl = "*"
+ipywidgets-bokeh = "*"
+lckr-jupyterlab-variableinspector = "*"
+scipy = "*"
+
 
 [dev-packages]
 

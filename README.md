@@ -1,5 +1,6 @@
 ## Pre-requirements (Recommended)
 
+- libffi-dev libbz2-dev libreadline-dev libsqlite3-dev (for Ubuntu 20.04)
 - Pyenv
 - Python 3.9.10
 - Pipenv
@@ -7,6 +8,7 @@
 - adi_api_mod
 
 ```
+sudo apt install libffi-dev libbz2-dev libreadline-dev libsqlite3-dev # ex. for Ubuntu 20.04
 pyenv install 3.9.10
 git clone git@github.com:e-trees/e7awg_sw.git
 git clone git@github.com:qiqb-osaka/adi_api_mod.git
