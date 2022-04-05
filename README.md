@@ -25,10 +25,16 @@ pipenv install
 
 To setup QuBe,
 
-
 ```
 pipenv shell
 python examples/qube_ctrl/init.py 10.5.0.14 --bitfile=/home/miyo/bin/06805e.bit
 python examples/qube_ctrl/ad9082_read_info.py 10.5.0.14 
 python e7awg_sw/examples/send_recv/send_recv.py --ipaddr=10.1.0.14 
+```
+
+## With Jupyter-Lab
+
+```
+pipenv shell
+jupyter lab --ip=* --no-browser --NotebookApp.token='' 
 ```
