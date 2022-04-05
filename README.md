@@ -46,7 +46,7 @@ jupyter lab --ip=* --no-browser --NotebookApp.token=''
 git clone https://github.com/pyenv/pyenv.git .pyenv
 ```
 
-add the following in `.bashrc`
+Add the following in `.bashrc`,
 
 ```
 export PIPENV_VENV_IN_PROJECT=true
@@ -58,3 +58,5 @@ if [ -e $HOME/.pyenv ]; then
   #eval "$(pyenv init -)"
 fi
 ```
+
+After that, execute `source ~/.bashrc`.
