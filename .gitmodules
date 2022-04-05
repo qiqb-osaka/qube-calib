@@ -1,0 +1,6 @@
+[submodule "e7awg_sw"]
+	path = e7awg_sw
+	url = https://github.com/e-trees/e7awg_sw.git
+[submodule "adi_api_mod"]
+	path = adi_api_mod
+	url = https://github.com/qiqb-osaka/adi_api_mod.git
