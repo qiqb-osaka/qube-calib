@@ -27,10 +27,13 @@ To setup QuBe,
 
 ```
 pipenv shell
+source /tools/Xilinx/Vivado/2020.1/settings64.sh # depends on your installed path
 python examples/qube_ctrl/init.py 10.5.0.14 --bitfile=/home/miyo/bin/06805e.bit
 python examples/qube_ctrl/ad9082_read_info.py 10.5.0.14 
 python e7awg_sw/examples/send_recv/send_recv.py --ipaddr=10.1.0.14 
 ```
+
+In this example, `10.5.0.14` and `10.1.0.14` are IP-addresses of ctrl(1GbE) and data(10GbE), respectively.
 
 ## With Jupyter-Lab
 
