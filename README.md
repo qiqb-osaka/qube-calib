@@ -38,3 +38,23 @@ python e7awg_sw/examples/send_recv/send_recv.py --ipaddr=10.1.0.14
 pipenv shell
 jupyter lab --ip=* --no-browser --NotebookApp.token='' 
 ```
+
+
+## Setup Pyenv
+
+```
+git clone https://github.com/pyenv/pyenv.git .pyenv
+```
+
+add the following in `.bashrc`
+
+```
+export PIPENV_VENV_IN_PROJECT=true
+
+if [ -e $HOME/.pyenv ]; then
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init --path)"
+  #eval "$(pyenv init -)"
+fi
+```
