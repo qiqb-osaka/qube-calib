@@ -1,6 +1,7 @@
 import pyvisa
 import time
 import numpy as np
+from collections import namedtuple
 
 def new_resource_manager(interface_type='@py'):
     return pyvisa.ResourceManager(interface_type)
@@ -48,3 +49,16 @@ class MS2038_SPA(object):
         fstop = myconv(myfind('STOP_FREQ', p))
         npts = int(float(myfind('UI_DATA_POINTS', p).split('=')[1]))
         return np.linspace(fstart, fstop, npts)
+    @classmethod
+    def new_array_freq_trace_pair(cls, contents, old_format=False):
+        if old_format:
+            return np.array([
+                MS2038_SPA.extract_frequency_array_from_preamble(contents['preamble']),
+                MS2038_SPA.convert_trace_to_array(contents['trace']),
+            ])
+        else:
+            return np.array([
+                MS2038_SPA.extract_frequency_array_from_preamble(contents['preamble']),
+                MS2038_SPA.convert_trace_to_array(contents['trace']),
+            ])
+        
