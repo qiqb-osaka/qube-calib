@@ -33,16 +33,6 @@ class MS2038_SPA(object):
         return r
     def get_trace(self):
         return self.instrument.query(':TRAC?')
-    def convert_trace_to_array(self, trace):
-        return np.loadtxt(trace[6:].split(','))
-    def extract_frequency_array_from_preamble(self, preamble):
-        myfind = lambda k, l: next(filter(lambda x: x.startswith("{}=".format(k)), l))
-        myconv = lambda s: float(s.split('=')[1].replace(' MHZ', ''))
-        p = preamble[10:].split(',')
-        fstart = myconv(myfind('START_FREQ', p))
-        fstop = myconv(myfind('STOP_FREQ', p))
-        npts = int(float(myfind('UI_DATA_POINTS', p).split('=')[1]))
-        return np.linspace(fstart, fstop, npts)
     def measure(self):
         self.initiate()
         t = self.get_trace()
@@ -50,11 +40,19 @@ class MS2038_SPA(object):
         return {
             'trace': t,
             'preamble': p,
-            'numpy_array': np.array([
-                self.extract_frequency_array_from_preamble(p),
-                self.convert_trace_to_array(t),
-            ]),
         }
+    @classmethod
+    def convert_trace_to_array(cls, trace):
+        return np.loadtxt(trace[6:].split(','))
+    @classmethod
+    def extract_frequency_array_from_preamble(cls, preamble):
+        myfind = lambda k, l: next(filter(lambda x: x.startswith("{}=".format(k)), l))
+        myconv = lambda s: float(s.split('=')[1].replace(' MHZ', ''))
+        p = preamble[10:].split(',')
+        fstart = myconv(myfind('START_FREQ', p))
+        fstop = myconv(myfind('STOP_FREQ', p))
+        npts = int(float(myfind('UI_DATA_POINTS', p).split('=')[1]))
+        return np.linspace(fstart, fstop, npts)
 
 # # MS2038Cから測定データを読み出す
 # def get_freq_from_ms2038c(inst):
