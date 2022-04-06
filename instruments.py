@@ -58,7 +58,7 @@ class MS2038_SPA(object):
             ])
         else:
             return np.array([
-                MS2038_SPA.extract_frequency_array_from_preamble(contents['preamble']),
-                MS2038_SPA.convert_trace_to_array(contents['trace']),
+                MS2038_SPA.extract_frequency_array_from_preamble(contents.preamble),
+                MS2038_SPA.convert_trace_to_array(contents.trace),
             ])
         
