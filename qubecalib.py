@@ -1,6 +1,7 @@
 import yaml
 import e7awgsw
 import qubelsi.qube
+from collections import namedtuple
 
 class Qube(object):
     def __init__(self, config_file_name=None):

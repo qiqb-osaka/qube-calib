@@ -23,6 +23,7 @@ lckr-jupyterlab-variableinspector = "*"
 scipy = "*"
 nbstripout = "*"
 jupyterlab-widgets = "*"
+pyyaml = "*"
 
 [dev-packages]
 
