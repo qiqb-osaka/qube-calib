@@ -18,11 +18,12 @@ ipywidgets = "*"
 bokeh = "*"
 notebook = "*"
 jupyter-bokeh = "*"
-ipympl = "*"
 ipywidgets-bokeh = "*"
 lckr-jupyterlab-variableinspector = "*"
 scipy = "*"
 nbstripout = "*"
+jupyterlab-widgets = "*"
+pyyaml = "*"
 
 [dev-packages]
 
