@@ -2,96 +2,85 @@ import ipywidgets as ipw
 import long_send
 from collections import namedtuple
 import IPython.display
-#from IPython.display import display
+import qubecalib
 
 def display(*args, **kwargs):
     IPython.display.display(*args, **kwargs)
 
-class PanelWithEvent(ipw.VBox):
-    event_handler = {}
-    @classmethod
-    def bind(cls, e, func):
-        b = cls.event_handler
+class Event(object):
+    handler = {}
+    def bind(self, e, func):
+        b = self.handler
         if e in b:
-            b[e].append(func)
+            b[e].append(func) # append event listner
         else:
-            b[e] = [func,]
-    @classmethod
-    def clear(cls, e):
-        b = cls.event_handler
-        b[e] = []
+            b[e] = [func,] # add new event
     def invoke(self, e):
-        b = self.event_handler
+        b = self.handler
         if e in b:
             for func in b[e]:
                 func(self)
 
-class QubePanel(PanelWithEvent):
-    event_handler = {}
-    def __init__(self, qube, *args, **kwargs):
-        self.parent = qube
-        PanelWithEvent.__init__(self, *args, **kwargs)
-        
-class QubeLoadConfigPanel(QubePanel):
-    def __init__(self, qube, *args, **kwargs):
-        self.tb_fname = t = ipw.Text(description='Config', value='riken_1_1.yaml')
-        self.btn_load = b = ipw.Button(description='Load')
-        b.on_click(self.load)
-        QubePanel.clear('loaded')
-        QubePanel.__init__(self, qube, [ipw.HBox([t, b]),], *args, **kwargs)
-    def load(self, e):
-        self.parent.load(self.tb_fname.value)
-        self.invoke('loaded')
+class Qube(qubecalib.Qube):
+    def __init__(self, *args, **kwargs):
+        self.event = Event()
+        qubecalib.Qube.__init__(self, *args, **kwargs)
 
-class QubeSetupPanel(QubePanel):
+class QubeLoadConfigPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
+        self.qube = qube
+        self.tb_fname = t = ipw.Text(description='Config', value='qube_riken_1-01.yml')
+        self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
+        ipw.VBox.__init__(self, [ipw.HBox([t, b]),], *args, **kwargs)
+    def load(self, e):
+        self.qube.load(self.tb_fname.value)
+        self.qube.event.invoke('loaded')
+
+class QubeSetupPanel(ipw.VBox):
+    def __init__(self, qube, *args, **kwargs):
+        self.qube = qube
         self.tb_ip4lsi = tb_ip4lsi = ipw.Text(description='IP Address for eXtickGE', style={'description_width': 'initial'}, disabled=True)
         self.tb_path2api = tb_path2api = ipw.Text(description='Path to API', style={'description_width': 'initial'}, layout=ipw.Layout(width='50%'), disabled=True)
         self.cb_config_fpga = cb = ipw.Checkbox(value=False, description='Config FPGA', disabled=False, indent=False)
         self.tb_path_bitfile = bitfile = ipw.Text(
             description='Path to bitfile',
-            value='/home/qube/bin/069414.bit',
+            value='',
             style={'description_width': 'initial'},
             disabled=False)
-        self.btn_do_init = btn = ipw.Button(description='Do init', layout={'width': '50%', 'height': '80px'}, disabled=True)
-        self.btn_do_init.on_click(self.do_init)
-        self.btn_ad9082 = ad9082 = ipw.Button(description='Restart AD9082', layout={'width': '50%', 'height': '80px'}, disabled=True)
-        self.btn_ad9082.on_click(self.do_init_ad9082)
-        QubePanel.bind('loaded', self.loaded)
-        QubePanel.__init__(
+        self.btn_do_init = b = ipw.Button(description='Do init', layout={'width': '50%', 'height': '80px'}, disabled=True); b.on_click(self.do_init)
+        self.btn_ad9082 = b = ipw.Button(description='Restart AD9082', layout={'width': '50%', 'height': '80px'}, disabled=True); b.on_click(self.do_init_ad9082)
+        self.qube.event.bind('loaded', self.loaded)
+        ipw.VBox.__init__(
             self,
-            qube,
             [
                 tb_ip4lsi, tb_path2api,
                 ipw.HBox([cb, bitfile], layout={'width': '50%'}),
-                btn, ad9082,
+                self.btn_do_init, self.btn_ad9082,
             ],
             *args,
             **kwargs
         )
     def loaded(self, e):
-        print(e)
-        o = self.parent.qube
-        self.tb_ip4lsi.value = o.gpio.handle.addr
-        self.tb_path2api.value = o.path
+        o = self.qube
+        self.tb_ip4lsi.value = o.qube.gpio.handle.addr
+        self.tb_path2api.value = o.qube.path
+        self.tb_path_bitfile.value = o.config['bitfile']
         self.btn_do_init.disabled = False
         self.btn_ad9082.disabled = False
     def do_init(self, e):
-        o = self.parent.qube
+        o = self.qube
         if self.cb_config_fpga.value:
-            o.do_init(bitfile=self.tb_path_bitfile.value, message_out=True)
+            o.do_init(config_fpga=True, message_out=True)
         else:
             o.do_init(message_out=True)
     def do_init_ad9082(self, e):
-        o = self.parent.qube.ad9082
-        for c in o:
-            c.do_init(message_out=True)
+        self.qube.restart_ad9082(message_out=True)
 
-class QubeLoControlPanel(QubePanel): pass
+class QubeLoControlPanel(ipw.VBox): pass
 
-class QubeNcoControlPanel(QubePanel): pass
+class QubeNcoControlPanel(ipw.VBox): pass
 
-class QubeLongSendControlPanel(QubePanel): pass
+class QubeLongSendControlPanel(ipw.VBox): pass
 
 # class AwgPanel(object):
 #     class MultipleText(list):
