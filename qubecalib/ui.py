@@ -1,5 +1,4 @@
 import ipywidgets as ipw
-import long_send
 from collections import namedtuple
 import IPython.display
 import qubecalib
@@ -21,10 +20,10 @@ class Event(object):
             for func in b[e]:
                 func(self)
 
-class Qube(qubecalib.Qube):
+class QubeUnit(qubecalib.QubeUnit):
     def __init__(self, *args, **kwargs):
         self.event = Event()
-        qubecalib.Qube.__init__(self, *args, **kwargs)
+        qubecalib.QubeUnit.__init__(self, *args, **kwargs)
 
 class QubeLoadConfigPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
@@ -39,7 +38,7 @@ class QubeLoadConfigPanel(ipw.VBox):
 class QubeSetupPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
         self.qube = qube
-        self.tb_ip4lsi = tb_ip4lsi = ipw.Text(description='IP Address for eXtickGE', style={'description_width': 'initial'}, disabled=True)
+        self.tb_ip4lsi = tb_ip4lsi = ipw.Text(description='IP Address (LSI)', style={'description_width': 'initial'}, disabled=True)
         self.tb_path2api = tb_path2api = ipw.Text(description='Path to API', style={'description_width': 'initial'}, layout=ipw.Layout(width='50%'), disabled=True)
         self.cb_config_fpga = cb = ipw.Checkbox(value=False, description='Config FPGA', disabled=False, indent=False)
         self.tb_path_bitfile = bitfile = ipw.Text(
@@ -47,8 +46,9 @@ class QubeSetupPanel(ipw.VBox):
             value='',
             style={'description_width': 'initial'},
             disabled=False)
-        self.btn_do_init = b = ipw.Button(description='Do init', layout={'width': '50%', 'height': '80px'}, disabled=True); b.on_click(self.do_init)
-        self.btn_ad9082 = b = ipw.Button(description='Restart AD9082', layout={'width': '50%', 'height': '80px'}, disabled=True); b.on_click(self.do_init_ad9082)
+        kw = {'layout': {'width': '50%', 'height': '80px'}, 'disabled': True}
+        self.btn_do_init = b = ipw.Button(description='Do init', **kw); b.on_click(self.do_init)
+        self.btn_ad9082 = b = ipw.Button(description='Restart AD9082', **kw); b.on_click(self.do_init_ad9082)
         self.qube.event.bind('loaded', self.loaded)
         ipw.VBox.__init__(
             self,
