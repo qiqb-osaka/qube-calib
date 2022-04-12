@@ -12,6 +12,7 @@ class Qube(object):
             self.load(config_file_name)
     def load(self, config_file_name):
         with open('./.config/{}'.format(config_file_name)) as f:
+            self.config_file_name = config_file_name
             self.config = o = yaml.safe_load(f)
         self.qube = qubelsi.qube.Qube(
             o['iplsi'], # IP address of eXtickGE
