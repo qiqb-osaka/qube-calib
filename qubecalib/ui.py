@@ -2,39 +2,111 @@ import ipywidgets as ipw
 from collections import namedtuple
 import IPython.display
 import qubecalib
+from traitlets import HasTraits, Unicode, observe, link
 
 def display(*args, **kwargs):
     IPython.display.display(*args, **kwargs)
 
-class Event(object):
-    handler = {}
-    def bind(self, e, func):
-        b = self.handler
-        if e in b:
-            b[e].append(func) # append event listner
-        else:
-            b[e] = [func,] # add new event
-    def invoke(self, e):
-        b = self.handler
-        if e in b:
-            for func in b[e]:
-                func(self)
+class Qube(HasTraits): # todo: 多重継承の正しいやり方を知りたい qubecalib.Qube も継承させたい
+    config_file_name = Unicode()
+    iplsi = Unicode()
+    rftype = Unicode()
+    def __init__(self, addr=None, path=None, *args, **kwargs):
+        super().__init__()
+        self.qube = q = qubecalib.Qube(addr, path, *args, **kwargs)
+        if q.config_file_name != None:
+            self.config_file_name = q.config_file_name
+        self._ports = None
+    def _config_file_name_changed(self, change):
+        self.qube.config_file_name = getattr(self, change)
+    def load(self):
+        self.qube.load()
+        self.iplsi = self.qube.config['iplsi']
+        self.rftype = self.qube.config['type']
+    def do_init(self, rf_type='A', bitfile=None, message_out=False):
+        self.qube.do_init(rf_type, bitfile, message_out)
+    def config_fpga(self, bitfile, message_out=False):
+        self.qube.config_fpga(bitfile, message_out=False)
+    def restart_ad9082(self, message_out=True):
+        for o in self.qube.ad9082:
+            o.do_init(message_out=message_out)
+    @property
+    def config(self):
+        return self.qube.config
+    @property
+    def path(self):
+        return self.qube.path
+    @path.setter
+    def path(self, v):
+        self.qube.path = v
+    @property
+    def ad9082(self):
+        return self.qube.ad9082
+    @ad9082.setter
+    def ad9082(self, v):
+        self.qube.ad9082 = v
+    @property
+    def lmx2594(self):
+        return self.qube.lmx2594
+    @lmx2594.setter
+    def lmx2594(self, v):
+        self.qube.lmx2594 = v
+    @property
+    def lmx2594_ad9082(self):
+        return self.qube.lmx2594_ad9082
+    @lmx2594_ad9082.setter
+    def lmx2594_ad9082(self, v):
+        self.qube.lmx2594_ad9082 = v
+    @property
+    def adrf6780(self):
+        return self.qube.adrf6780
+    @adrf6780.setter
+    def adrf6780(self, v):
+        self.qube.adrf6780 = v
+    @property
+    def ad5328(self):
+        return self.qube.ad5328
+    @ad5328.setter
+    def ad5328(self, v):
+        self.qube.ad5328 = v
+    @property
+    def gpio(self):
+        return self.qube.gpio
+    @gpio.setter
+    def gpio(self, v):
+        self.qube.gpio = v
+    @property
+    def bitfile(self):
+        return self.qube.bitfile
+    @bitfile.setter
+    def bitfile(self, v):
+        self.qube.bitfile = v
+    @property
+    def rf_type(self):
+        return self.qube.rf_type
+    @rf_type.setter
+    def rf_type(self, v):
+        self.qube.rf_type = v
 
-class QubeUnit(qubecalib.QubeUnit):
-    def __init__(self, *args, **kwargs):
-        self.event = Event()
-        qubecalib.QubeUnit.__init__(self, *args, **kwargs)
-
-class QubeLoadConfigPanel(ipw.VBox):
+class LoadConfigPanel(ipw.HBox):
     def __init__(self, qube, *args, **kwargs):
         self.qube = qube
-        self.tb_fname = t = ipw.Text(description='Config', value='qube_riken_1-01.yml')
-        self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
-        ipw.VBox.__init__(self, [ipw.HBox([t, b]),], *args, **kwargs)
-    def load(self, e):
-        self.qube.load(self.tb_fname.value)
-        self.qube.event.invoke('loaded')
+        self.links = []
+        self.tb_fname = t = ipw.Text(description='Config')
+        if qube.config_file_name == '':
+            qube.config_file_name = 'qube_riken_1-01.yml'
+        self.links.append(link((qube, 'config_file_name'), (t, 'value')))
+        self.tb_iplsi = t = ipw.Text(description='IP (LSI)', disabled=True)
+        self.links.append(link((qube, 'iplsi'), (t, 'value')))
+        self.tb_rftype = t = ipw.Text(description='RF Type', disabled=True)
+        self.links.append(link((qube, 'rftype'), (t, 'value')))
+        self.btn_load = b = ipw.Button(description='Load'); b.on_click(lambda e: self.qube.load())
+        ipw.HBox.__init__(self, [self.tb_fname, b, self.tb_iplsi, self.tb_rftype], *args, **kwargs)
+    def unlink(self):
+        for o in self.links:
+            o.unlink()
 
+            
 class QubeSetupPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
         self.qube = qube
