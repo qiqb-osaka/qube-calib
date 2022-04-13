@@ -17,7 +17,11 @@ class Qube16(object):
     def __init__(self, config_file_name=None):
         pass
 
-class QubeUnit(object):
+class Qube3(object):
+    def __init__(self):
+        pass
+    
+class Qube(object):
     Vatt = namedtuple('Vatt', ('dac', 'ch'))
     Upconv = namedtuple('Upconv', ('vatt',))
     Ifdac = namedtuple('Ifdac', ('ad9082', 'ch'))
@@ -128,7 +132,7 @@ class OutputPort(object):
     def set_lo(self, frequency): # MHz
         pass
     def set_if(self, frequency): # MHz
-        self.if = frequency
+        self.fim = frequency
     def set_usb(self):
         pass
     def set_lsb(self):
@@ -139,7 +143,7 @@ class CtrlPort(OutputPort):
         super().__init__(self, local_osc, dac, up_conv)
         self.set_lsb()
     def get_status(self):
-        fl, fi = self.local_osc.read_freq_100M()*100, self.if
+        fl, fi = self.local_osc.read_freq_100M()*100, self.fim
         isusb = self.upconv.isUSB()
         r = ''
         r += 'RF = {:>5.3f} MHz '.format(fl + fi if isusb else fl - fi)
