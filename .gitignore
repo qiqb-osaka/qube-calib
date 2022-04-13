@@ -2,9 +2,7 @@
 *.log
 *.jou
 .ipynb_checkpoints
-.config
 log
 .DS_Store
 ._.DS_Store
 *.pickle
-Working.ipynb
