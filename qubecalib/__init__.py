@@ -19,6 +19,7 @@ class Qube16(object):
     def __init__(self, config_file_name=None):
         pass
 
+<<<<<<< HEAD
 # 極力 qubelsi.qube.Qube の API と揃える
 class Qube(object):
     def __init__(self, addr=None, path=None, *args, **kwargs):
@@ -29,6 +30,60 @@ class Qube(object):
     def load(self, config_file_name=None):
         if config_file_name == None:
             config_file_name = self.config_file_name
+=======
+class Qube3(object):
+    def __init__(self):
+        pass
+    
+class Qube(object):
+    Vatt = namedtuple('Vatt', ('dac', 'ch'))
+    Upconv = namedtuple('Upconv', ('vatt',))
+    Ifdac = namedtuple('Ifdac', ('ad9082', 'ch'))
+    CtrlPort = namedtuple('CtrlPort', ('losc', 'ifdac', 'upconv'))
+    PumpPort = namedtuple('CtrlPort', ('losc', 'ifdac', 'upconv'))
+    ReadoutPort = namedtuple('ReadoutPort', ('losc', 'ifdac', 'upconv'))
+    ReadinPort = namedtuple('ReadinPort', ('losc'))
+    def __init__(self, config_file_name=None):
+        self.qube = None
+        self.path_bitfile = '/home/qube/bin/'
+        if config_file_name is not None:
+            self.load(config_file_name)
+    def load(self, config_file_name):
+        self.config_file_name = config_file_name
+        with open('./.config/{}'.format(config_file_name)) as f:
+            self.config = o = yaml.safe_load(f)
+        self.qube = qubelsi.qube.Qube(
+            o['iplsi'], # IP address of eXtickGE
+            './adi_api_mod', # Path to API
+        )
+        self.ports = self._new_port_handler()
+    def _new_port_handler(self):
+        qube = self.qube
+        lmx2594, ad9082, ad5328 = qube.lmx2594, qube.ad9082, qube.ad5328
+        ReadoutPort = QubeUnit.ReadoutPort
+        ReadinPort = QubeUnit.ReadinPort
+        CtrlPort = QubeUnit.CtrlPort
+        PumpPort = QubeUnit.PumpPort
+        Ifdac = QubeUnit.Ifdac
+        Upconv = QubeUnit.Upconv
+        Vatt = QubeUnit.Vatt
+        return {
+            0 : ReadoutPort(lmx2594[0], Ifdac(ad9082[0], 0), Upconv(Vatt(ad5328, 0))),
+            1 : ReadinPort(lmx2594[0],),
+            2 : PumpPort(lmx2594[1], Ifdac(ad9082[0], 1), Upconv(Vatt(ad5328, 1))),
+            5 : CtrlPort(lmx2594[2], Ifdac(ad9082[0], 2), Upconv(Vatt(ad5328, 2))), # CTRL1
+            6 : CtrlPort(lmx2594[3], Ifdac(ad9082[0], 3), Upconv(Vatt(ad5328, 3))), # CTRL2
+            7 : CtrlPort(lmx2594[4], Ifdac(ad9082[1], 0), Upconv(Vatt(ad5328, 4))), # CTRL3
+            8 : CtrlPort(lmx2594[5], Ifdac(ad9082[1], 1), Upconv(Vatt(ad5328, 5))), # CTRL4
+            11 : PumpPort(lmx2594[6], Ifdac(ad9082[1], 2), Upconv(Vatt(ad5328, 6))),
+            12 : ReadinPort(lmx2594[7],),
+            13 : ReadoutPort(lmx2594[7], Ifdac(ad9082[1], 3), Upconv(Vatt(ad5328, 7))),
+        }
+    def do_init(self, config_fpga=False, message_out=True):
+        o = self.qube
+        if config_fpga:
+            o.do_init(bitfile=self.path_bitfile + self.config['bitfile'], message_out=message_out)
+>>>>>>> 5b5a326 (small change)
         else:
             self.config_file_name = config_file_name
         
@@ -239,12 +294,21 @@ class OutputPort(object):
     def __init__(self, local, dac, upconv):
         self.local = local
         self.dac = dac
+<<<<<<< HEAD
         self.upconv = upconv
         self.active = False
     def set_lo(self, mhz): # MHz
         self.local.set_freq(mhz)
     def set_if(self, mhz): # MHz
         self.dac.set_fnco(mhz)
+=======
+        self.awg_module = awg_modules
+        self.upconv = up_conv
+    def set_lo(self, frequency): # MHz
+        pass
+    def set_if(self, frequency): # MHz
+        self.fim = frequency
+>>>>>>> 5b5a326 (small change)
     def set_usb(self):
         self.upconv.lsi.set_usb()
     def set_lsb(self):
@@ -280,7 +344,12 @@ class ReadinPort(object):
     def set_if(self, mhz): # MHz
         self.adc.set_fnco(mhz)
     def get_status(self):
+<<<<<<< HEAD
         fl, fi = self.local.get_freq(), self.adc.fnco
+=======
+        fl, fi = self.local_osc.read_freq_100M()*100, self.fim
+        isusb = self.upconv.isUSB()
+>>>>>>> 5b5a326 (small change)
         r = ''
         r += 'RF = {:>5.3f} MHz '.format(fl + fi)
         r += 'LO = {:>5.0f}    MHz '.format(int(fl))
