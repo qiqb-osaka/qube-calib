@@ -31,9 +31,11 @@ class Qube(object):
             config_file_name = self.config_file_name
         else:
             self.config_file_name = config_file_name
-            
-        with open(PATH_TO_CONFIG + config_file_name, 'rb') as f:
+        
+        fname = PATH_TO_CONFIG + config_file_name
+        with open(fname, 'rb') as f:
             self.config = o = yaml.safe_load(f)
+        print(o)
             
         self.qube = qubelsi.qube.Qube(o['iplsi'], PATH_TO_API)
         self._ports = self._new_ports()
@@ -60,6 +62,7 @@ class Qube(object):
         o = self.qube
         AWG = e7awgsw.AWG
         CaptM = e7awgsw.CaptureModule
+        print(o, AWG, CaptM)
         return {
             0 : RO(LO(o.lmx2594[0]), DAC(o.ad9082[0], 0, self.config['ipfpga'], [AWG.U15,]), UC(o.adrf6780[0], UC.Vatt(o.ad5328, 0))), # Readout1
             1 : RI(LO(o.lmx2594[0]), ADC(o.ad9082[0], 3, self.config['ipfpga'], [CaptM.U1,])), # Readin1
