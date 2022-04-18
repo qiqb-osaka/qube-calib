@@ -20,6 +20,7 @@ class Qube(HasTraits): # todo: 多重継承の正しいやり方を知りたい 
     def _config_file_name_changed(self, change):
         self.qube.config_file_name = getattr(self, change)
     def load(self):
+        print('kizuna', self.qube.config_file_name)
         self.qube.load()
         self.iplsi = self.qube.config['iplsi']
         self.rftype = self.qube.config['type']
