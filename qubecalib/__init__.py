@@ -61,14 +61,14 @@ class Qube(object):
         AWG = e7awgsw.AWG
         CaptM = e7awgsw.CaptureModule
         return {
-            0 : RO(LO(o.lmx2594[0]), DAC(o.ad9082[0], 0, self.config['ipfpga'], [AWG.U15,]), UC(o.adrf6780[0], UC.Vatt(o.ad5328, 2))), # Readout1
-            1 : RI(LO(o.lmx2594[0]), ADC(o.ad9082[0], 0, self.config['ipfpga'], [CaptM.U1,])), # Readin1
+            0 : RO(LO(o.lmx2594[0]), DAC(o.ad9082[0], 0, self.config['ipfpga'], [AWG.U15,]), UC(o.adrf6780[0], UC.Vatt(o.ad5328, 0))), # Readout1
+            1 : RI(LO(o.lmx2594[0]), ADC(o.ad9082[0], 3, self.config['ipfpga'], [CaptM.U1,])), # Readin1
             5 : CP(LO(o.lmx2594[2]), DAC(o.ad9082[0], 2, self.config['ipfpga'], [AWG.U11, AWG.U12, AWG.U13,]), UC(o.adrf6780[2], UC.Vatt(o.ad5328, 2))), # CTRL1
             6 : CP(LO(o.lmx2594[3]), DAC(o.ad9082[0], 3, self.config['ipfpga'], [AWG.U8, AWG.U9, AWG.U10,]), UC(o.adrf6780[3], UC.Vatt(o.ad5328, 3))), # CTRL2
             7 : CP(LO(o.lmx2594[4]), DAC(o.ad9082[1], 0, self.config['ipfpga'], [AWG.U5, AWG.U6, AWG.U7,]), UC(o.adrf6780[4], UC.Vatt(o.ad5328, 4))), # CTRL3
             8 : CP(LO(o.lmx2594[5]), DAC(o.ad9082[1], 1, self.config['ipfpga'], [AWG.U0, AWG.U3, AWG.U4,]), UC(o.adrf6780[5], UC.Vatt(o.ad5328, 5))), # CTRL4
-            12 : RI(LO(o.lmx2594[7]), ADC(o.ad9082[1], 0, self.config['ipfpga'], [CaptM.U0,])), # Readin2
-            13 : RO(LO(o.lmx2594[7]), DAC(o.ad9082[1], 3, self.config['ipfpga'], [AWG.U2,]), UC(o.adrf6780[7], UC.Vatt(o.ad5328, 2))), # Readout2
+            12 : RI(LO(o.lmx2594[7]), ADC(o.ad9082[1], 3, self.config['ipfpga'], [CaptM.U0,])), # Readin2
+            13 : RO(LO(o.lmx2594[7]), DAC(o.ad9082[1], 3, self.config['ipfpga'], [AWG.U2,]), UC(o.adrf6780[7], UC.Vatt(o.ad5328, 7))), # Readout2
         }
     @property
     def ports(self):

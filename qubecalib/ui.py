@@ -4,6 +4,8 @@ import IPython.display
 import qubecalib
 from traitlets import HasTraits, Unicode, observe, link
 
+BITFILE_LOCATION = '/home/qube/bin/'
+
 def display(*args, **kwargs):
     IPython.display.display(*args, **kwargs)
 
@@ -106,7 +108,6 @@ class LoadConfigPanel(ipw.HBox):
     def unlink(self):
         for o in self.links:
             o.unlink()
-
             
 class QubeSetupPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
