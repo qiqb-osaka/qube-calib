@@ -6,12 +6,9 @@ from traitlets import HasTraits, Unicode, observe, link
 
 BITFILE_LOCATION = '/home/qube/bin/'
 
-BITFILE_LOCATION = '/home/qube/bin/'
-
 def display(*args, **kwargs):
     IPython.display.display(*args, **kwargs)
 
-<<<<<<< HEAD
 class Qube(HasTraits): # todo: 多重継承の正しいやり方を知りたい qubecalib.Qube も継承させたい
     config_file_name = Unicode()
     iplsi = Unicode()
@@ -25,7 +22,6 @@ class Qube(HasTraits): # todo: 多重継承の正しいやり方を知りたい 
     def _config_file_name_changed(self, change):
         self.qube.config_file_name = getattr(self, change)
     def load(self):
-        print('kizuna', self.qube.config_file_name)
         self.qube.load()
         self.iplsi = self.qube.config['iplsi']
         self.rftype = self.qube.config['type']
@@ -112,72 +108,46 @@ class LoadConfigPanel(ipw.HBox):
         for o in self.links:
             o.unlink()
             
-=======
 class HBox(ipw.HBox):
     pass
         
 class VBox(ipw.VBox):
     pass
     
-class Event(object):
-    handler = {}
-    def bind(self, e, func):
-        b = self.handler
-        if e in b:
-            b[e].append(func) # append event listner
-        else:
-            b[e] = [func,] # add new event
-    def invoke(self, e):
-        b = self.handler
-        if e in b:
-            for func in b[e]:
-                func(self)
+# class LoadConfigPanel(ipw.HBox):
+#     def __init__(self, qube, label='Config', *args, **kwargs):
+#         self.qube = qube
+#         try:
+#             fname = qube.config_file_name
+#         except AttributeError:
+#             fname = ''
+#         self.tb_fname = t = ipw.Text(description=label, value=fname)
+#         self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
+#         super().__init__([t, b])
+#     def load(self, e):
+#         self.qube.load(self.tb_fname.value)
+#         self.qube.event.invoke('loaded')
 
-class Qube(qubecalib.Qube):
-    def __init__(self, *args, **kwargs):
-        self.event = Event()
-        super().__init__(*args, **kwargs)
-
-class Qube3(qubecalib.Qube3):
-    def __init__(self, *args, **kwargs):
-        self.event = Event()
-        super().__init__(*args, **kwargs)
-
-class LoadConfigPanel(ipw.HBox):
-    def __init__(self, qube, label='Config', *args, **kwargs):
-        self.qube = qube
-        try:
-            fname = qube.config_file_name
-        except AttributeError:
-            fname = ''
-        self.tb_fname = t = ipw.Text(description=label, value=fname)
-        self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
-        super().__init__([t, b])
-    def load(self, e):
-        self.qube.load(self.tb_fname.value)
-        self.qube.event.invoke('loaded')
-
-class FPGAConfigPanel(ipw.VBox):
-    def __init__(self, qube, *args, **kwargs):
-        self.qube = qube
-        self.tb_bitfile = t = ipw.Text(value='')
-        self.btn_config = b = ipw.Button(description='Config'); b.on_click(self.config)
-        self.super().__init__([ipw.HBox([t, b]),], *args, **kwargs)
-        self.qube.event.bind('loaded', self.loaded)
-    def config(self, e):
-        self.qube.load(self.tb_fname.value)
-    def loaded(self, e):
-        self.tb_bitfile.value = self.qube.config['bitfile']
+# class FPGAConfigPanel(ipw.VBox):
+#     def __init__(self, qube, *args, **kwargs):
+#         self.qube = qube
+#         self.tb_bitfile = t = ipw.Text(value='')
+#         self.btn_config = b = ipw.Button(description='Config'); b.on_click(self.config)
+#         self.super().__init__([ipw.HBox([t, b]),], *args, **kwargs)
+#         self.qube.event.bind('loaded', self.loaded)
+#     def config(self, e):
+#         self.qube.load(self.tb_fname.value)
+#     def loaded(self, e):
+#         self.tb_bitfile.value = self.qube.config['bitfile']
         
-class QubeLoadConfigPanel(ipw.VBox):
-    def __init__(self, qube, *args, **kwargs):
-        self.qube = qube
-        self.tb_fname = t = ipw.Text(description='Config', value='qube_riken_1-01.yml')
-        self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
-        ipw.VBox.__init__(self, [ipw.HBox([t, b]),], *args, **kwargs)
-        # self.qube.event.bind('loaded', self.loaded)
+# class QubeLoadConfigPanel(ipw.VBox):
+#     def __init__(self, qube, *args, **kwargs):
+#         self.qube = qube
+#         self.tb_fname = t = ipw.Text(description='Config', value='qube_riken_1-01.yml')
+#         self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
+#         ipw.VBox.__init__(self, [ipw.HBox([t, b]),], *args, **kwargs)
+#         # self.qube.event.bind('loaded', self.loaded)
 
->>>>>>> 5b5a326 (small change)
 class QubeSetupPanel(ipw.VBox):
     def __init__(self, qube, *args, **kwargs):
         self.qube = qube
