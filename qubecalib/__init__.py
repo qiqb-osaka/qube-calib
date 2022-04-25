@@ -2,6 +2,8 @@
 
 __all__ =[
     'Qube',
+    'LongSend',
+    'Recv',
 ]
 
 from .qube import Qube
@@ -27,185 +29,6 @@ class Qube16(object):
     def __init__(self, config_file_name=None):
         pass
 
-# # 極力 qubelsi.qube.Qube の API と揃える
-# class Qube(object):
-#     def __init__(self, addr=None, path=None, *args, **kwargs):
-#         self.config_file_name = None
-#         self.config = {}
-#         self.qube = None if addr == None or path == None else qubelsi.qube.Qube(addr, path)
-        
-#     def load(self, config_file_name=None):
-#         if config_file_name == None:
-#             config_file_name = self.config_file_name
-#         else:
-#             self.config_file_name = config_file_name
-        
-#         fname = PATH_TO_CONFIG + config_file_name
-#         with open(fname, 'rb') as f:
-#             self.config = o = yaml.safe_load(f)
-            
-#         self.qube = qubelsi.qube.Qube(o['iplsi'], PATH_TO_API)
-#         self._ports = self._new_ports()
-        
-#     def do_init(self, rf_type='A', bitfile=None, message_out=False):
-#         self.qube.do_init(rf_type, bitfile, message_out)
-        
-#     def config_fpga(self, bitfile, message_out=False):
-#         os.environ['BITFILE'] = bitfile
-#         print("init FPGA")
-#         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_API)]
-#         ret = subprocess.check_output(commands , encoding='utf-8')
-#         print(ret)
-        
-#     def restart_ad9082(self, message_out=True):
-#         for o in self.ad9082:
-#             c.do_init(message_out=True)
-            
-#     def _new_ports(self):
-#         CP, LO, DAC, UC = CtrlPort, LocalOscillator, AD9082DAC, UpConverter
-#         ADC = AD9082ADC
-#         RO = ReadoutPort
-#         RI = ReadinPort
-#         o = self.qube
-#         AWG = e7awgsw.AWG
-#         CaptM = e7awgsw.CaptureModule
-#         return {
-#             0 : RO(LO(o.lmx2594[0]), DAC(o.ad9082[0], 0, self.config['ipfpga'], [AWG.U15,]), UC(o.adrf6780[0], UC.Vatt(o.ad5328, 0))), # Readout1
-#             1 : RI(LO(o.lmx2594[0]), ADC(o.ad9082[0], 3, self.config['ipfpga'], [CaptM.U1,])), # Readin1
-#             5 : CP(LO(o.lmx2594[2]), DAC(o.ad9082[0], 2, self.config['ipfpga'], [AWG.U11, AWG.U12, AWG.U13,]), UC(o.adrf6780[2], UC.Vatt(o.ad5328, 2))), # CTRL1
-#             6 : CP(LO(o.lmx2594[3]), DAC(o.ad9082[0], 3, self.config['ipfpga'], [AWG.U8, AWG.U9, AWG.U10,]), UC(o.adrf6780[3], UC.Vatt(o.ad5328, 3))), # CTRL2
-#             7 : CP(LO(o.lmx2594[4]), DAC(o.ad9082[1], 0, self.config['ipfpga'], [AWG.U5, AWG.U6, AWG.U7,]), UC(o.adrf6780[4], UC.Vatt(o.ad5328, 4))), # CTRL3
-#             8 : CP(LO(o.lmx2594[5]), DAC(o.ad9082[1], 1, self.config['ipfpga'], [AWG.U0, AWG.U3, AWG.U4,]), UC(o.adrf6780[5], UC.Vatt(o.ad5328, 5))), # CTRL4
-#             12 : RI(LO(o.lmx2594[7]), ADC(o.ad9082[1], 3, self.config['ipfpga'], [CaptM.U0,])), # Readin2
-#             13 : RO(LO(o.lmx2594[7]), DAC(o.ad9082[1], 3, self.config['ipfpga'], [AWG.U2,]), UC(o.adrf6780[7], UC.Vatt(o.ad5328, 7))), # Readout2
-#         }
-#     @property
-#     def ports(self):
-#         return self._ports
-#     @property
-#     def path(self):
-#         return self.qube.path
-#     @path.setter
-#     def path(self, v):
-#         self.qube.path = v
-#     @property
-#     def ad9082(self):
-#         return self.qube.ad9082
-#     @ad9082.setter
-#     def ad9082(self, v):
-#         self.qube.ad9082 = v
-#     @property
-#     def lmx2594(self):
-#         return self.qube.lmx2594
-#     @lmx2594.setter
-#     def lmx2594(self, v):
-#         self.qube.lmx2594 = v
-#     @property
-#     def lmx2594_ad9082(self):
-#         return self.qube.lmx2594_ad9082
-#     @lmx2594_ad9082.setter
-#     def lmx2594_ad9082(self, v):
-#         self.qube.lmx2594_ad9082 = v
-#     @property
-#     def adrf6780(self):
-#         return self.qube.adrf6780
-#     @adrf6780.setter
-#     def adrf6780(self, v):
-#         self.qube.adrf6780 = v
-#     @property
-#     def ad5328(self):
-#         return self.qube.ad5328
-#     @ad5328.setter
-#     def ad5328(self, v):
-#         self.qube.ad5328 = v
-#     @property
-#     def gpio(self):
-#         return self.qube.gpio
-#     @gpio.setter
-#     def gpio(self, v):
-#         self.qube.gpio = v
-#     @property
-#     def bitfile(self):
-#         return self.qube.bitfile
-#     @bitfile.setter
-#     def bitfile(self, v):
-#         self.qube.bitfile = v
-#     @property
-#     def rf_type(self):
-#         return self.qube.rf_type
-#     @rf_type.setter
-#     def rf_type(self, v):
-#         self.qube.rf_type = v
-
-    
-# class QubeUnit(object):
-#     Vatt = namedtuple('Vatt', ('dac', 'ch'))
-#     Upconv = namedtuple('Upconv', ('vatt',))
-#     Ifdac = namedtuple('Ifdac', ('ad9082', 'ch'))
-#     CtrlPort = namedtuple('CtrlPort', ('losc', 'ifdac', 'upconv'))
-#     PumpPort = namedtuple('CtrlPort', ('losc', 'ifdac', 'upconv'))
-#     ReadoutPort = namedtuple('ReadoutPort', ('losc', 'ifdac', 'upconv'))
-#     ReadinPort = namedtuple('ReadinPort', ('losc'))
-#     def __init__(self, config_file_name=None):
-#         self.qube = None
-#         self.path_bitfile = '/home/qube/bin/'
-#         if config_file_name is not None:
-#             self.load(config_file_name)
-#     def load(self, config_file_name):
-#         self.config_file_name = config_file_name
-#         with open('./.config/{}'.format(config_file_name)) as f:
-#             self.config = o = yaml.safe_load(f)
-#         self.qube = qubelsi.qube.Qube(
-#             o['iplsi'], # IP address of eXtickGE
-#             './adi_api_mod', # Path to API
-#         )
-#         self.ports = self._new_port_handler()
-#     def _new_port_handler(self):
-#         qube = self.qube
-#         lmx2594, ad9082, ad5328 = qube.lmx2594, qube.ad9082, qube.ad5328
-#         ReadoutPort = QubeUnit.ReadoutPort
-#         ReadinPort = QubeUnit.ReadinPort
-#         CtrlPort = QubeUnit.CtrlPort
-#         PumpPort = QubeUnit.PumpPort
-#         Ifdac = QubeUnit.Ifdac
-#         Upconv = QubeUnit.Upconv
-#         Vatt = QubeUnit.Vatt
-#         return {
-#             0 : ReadoutPort(lmx2594[0], Ifdac(ad9082[0], 0), Upconv(Vatt(ad5328, 0))),
-#             1 : ReadinPort(lmx2594[0],),
-#             2 : PumpPort(lmx2594[1], Ifdac(ad9082[0], 1), Upconv(Vatt(ad5328, 1))),
-#             5 : CtrlPort(lmx2594[2], Ifdac(ad9082[0], 2), Upconv(Vatt(ad5328, 2))), # CTRL1
-#             6 : CtrlPort(lmx2594[3], Ifdac(ad9082[0], 3), Upconv(Vatt(ad5328, 3))), # CTRL2
-#             7 : CtrlPort(lmx2594[4], Ifdac(ad9082[1], 0), Upconv(Vatt(ad5328, 4))), # CTRL3
-#             8 : CtrlPort(lmx2594[5], Ifdac(ad9082[1], 1), Upconv(Vatt(ad5328, 5))), # CTRL4
-#             11 : PumpPort(lmx2594[6], Ifdac(ad9082[1], 2), Upconv(Vatt(ad5328, 6))),
-#             12 : ReadinPort(lmx2594[7],),
-#             13 : ReadoutPort(lmx2594[7], Ifdac(ad9082[1], 3), Upconv(Vatt(ad5328, 7))),
-#         }
-#     def do_init(self, config_fpga=False, message_out=True):
-#         o = self.qube
-#         if config_fpga:
-#             o.do_init(bitfile=self.path_bitfile + self.config['bitfile'], message_out=message_out)
-#         else:
-#             o.do_init(message_out=message_out)
-#     def config_fpga(self, bitfile):
-#         os.environ['BITFILE'] = bitfile
-#         print("init FPGA")
-#         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_BITFILE)]
-#         ret = subprocess.check_output(commands , encoding='utf-8')
-#         print(ret)
-#     def restart_ad9082(self, message_out=True):
-#         o = self.qube.ad9082
-#         for c in o:
-#             c.do_init(message_out=True)
-#     def get_status(self):
-#         r = ''
-#         return r
-#     def get_port_status(self):
-#         r = ''
-#         for p in self.ports:
-#             r + str(p)
-#         return r
 
 class AD9082(object):
     def __init__(self, lsi, ch, ipfpga):
@@ -310,16 +133,6 @@ class LocalOscillator(object):
         self.lsi.write_freq_100M(v)
     def get_freq(self):
         return self.lsi.read_freq_100M() * 100
-
-# class DAC(object):
-#     def __init__(self, lsi, ch):
-#         self.lsi = lsi
-#         self.ch = ch
-#     def set_freq(self, mhz):
-#         self.freq = mhz
-#         self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch)
-#     def get_freq(self):
-#         return self.freq
 
 class LongSend(object):
     @classmethod
@@ -439,24 +252,6 @@ class Recv(object):
         
 
         
-# class Recv(object): pass
-# class SendRecv(object): pass
-
-# def set_flo_according_to_frf(lmx2594, frf, fif, apply=True): # MHz
-#     flo = frf + fif
-#     set_lmx2594_freq_100M(lmx2594, int(flo*1e-2))
-#     if apply:
-#         apply_lmx2594(lmx2594)
-#     return flo
-
-# def set_flo_fnco_according_to_frf(port, frf, fif, apply=True): #MHz
-#     fnco = fif - 2.5
-#     ifdac = port.ifdac
-#     ifdac.ad9082.set_nco(ch=ifdac.ch, freq=fnco*1e+6)
-#     flo = set_flo_according_to_frf(port.losc, frf, fif, apply=apply)
-#     return flo, fnco
-
-
 # -------------------- qubelsi
 
 
