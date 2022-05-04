@@ -20,6 +20,65 @@ timeout = 20
 
 ############################################################
 #
+# INDEX
+#
+
+"""
+grep --color -nH --null -e "^\(class\|def\|  def\)" QubeServer.py
+116:class QSConstants:
+142:  def __init__(self):
+145:class QSMessage:
+156:  def __init__(self):
+166:def pingger(host):
+177:class QuBE_ControlLine(DeviceWrapper):
+179:  def connect(self, *args, **kw ):
+210:  def get_connected(self):
+219:  def number_of_shots(self):
+222:  def number_of_shots(self,value):
+226:  def repetition_time(self):
+229:  def repetition_time(self,value_in_ns):
+234:  def sequence_length(self):
+237:  def sequence_length(self,value):
+240:  def get_lo_frequency(self):
+243:  def set_lo_frequency(self,freq_in_mhz):
+246:  def get_dac_coarse_frequency(self):
+249:  def set_dac_coarse_frequency(self,freq_in_mhz):
+254:  def static_get_dac_coarse_frequency(self,nco_ctrl,ch):
+258:  def static_get_dac_coarse_ftw(self,nco_ctrl,ch):
+267:  def static_check_lo_frequency(self,freq_in_mhz):
+271:  def static_check_dac_coarse_frequency(self,freq_in_mhz):
+275:  def static_check_dac_fine_frequency(self,freq_in_mhz):
+279:  def static_check_value(self,value,resolution,multiplier=50):
+285:  def static_check_repetition_time(self,reptime_in_nanosec):
+289:  def static_check_sequence_length(self,seqlen_in_nanosec):
+295:class QuBE_ReadoutLine(QuBE_ControlLine):
+297:  def connect(self, *args, **kw ):
+333:  def get_connected(self):
+356:  def set_adc_coarse_frequency(self,freq_in_mhz):
+361:  def get_adc_coarse_frequency(self):
+364:  def static_get_adc_coarse_frequency(self,nco_ctrl,ch):
+368:  def static_get_adc_coarse_ftw(self,nco_ctrl,ch):
+377:  def static_check_adc_coarse_frequency(self,freq_in_mhz):
+386:class QuBE_Server(DeviceServer):
+394:  def initServer(self):
+411:  def initContext(self, c):
+414:  def chooseDeviceWrapper(self, *args, **kw):
+418:  def instantiateChannel(self,name,channels,awg_ctrl,cap_ctrl,lsi_ctrl):
+457:  def instantiateQube(self,name,info):
+482:  def findDevices(self):
+507:  def number_of_shots(self,c,num_shots = None):
+516:  def repeat_count(self,c,repeat = None):
+521:  def repetition_time(self,c,reptime = None):
+532:  def sequence_length(self,c,length = None):
+575:  def local_frequency(self,c,frequency = None):
+587:  def coarse_tx_nco_frequency(self,c,frequency = None):
+599:  def coarse_rx_nco_frequency(self,c,frequency = None):
+619:def basic_config():
+657:def load_config(cxn,config):
+"""
+
+############################################################
+#
 # LABRAD SERVER FOR QIQB QUBE UNITS
 #   20220522 (draft) Yutaka Tabuchi
 #
@@ -61,14 +120,20 @@ class QSConstants:
   REGAPIPATH         = 'adi_api_path'
   SRVNAME            = 'QuBE Server'
   THREAD_MAX_WORKERS = 32
-  SEQ_MAXLEN         = 200*1000                             # nano-seconds
-  SEQ_INITLEN        = 8192                                 # nano-seconds
-  SEQ_INITREPTIME    = 40960                                # nano-seconds -> 320 JESD blocks
+  SEQ_MAXLEN         = 199936                               # nano-seconds -> 24,992 AWG Word
+  SEQ_INITLEN        = 8192                                 # nano-seconds -> 1,024 AWG Word
+  SEQ_INITREPTIME    = 30720                                # nano-seconds -> 3,840 AWG Word
   SEQ_INITSHOTS      = 1                                    # one shot
   ACQ_INITMODE       = '3'
   DAC_SAMPLE_R       = 12000                                # MHz
   ADC_SAMPLE_R       = 6000                                 # MHz
   DAQ_CNCO_BITS      = 48
+  DAQ_LO_RESOL       = 100                                  # MHz
+  DAC_CNCO_RESOL     = 12000/2**13                          # MHz; DAC_SAMPLE_R/2**13
+  DAC_FNCO_RESOL     = 2000/2**12                           # MHz; DAC_SAMPLE_R/M=6/2**12
+  ADC_CNCO_RESOL     = 1000/2**11                           # MHz; ADC_SAMPLE_R/M=6/2**11
+  DAQ_REPT_RESOL     = 10240                                # nanoseconds
+  DAQ_SEQL_RESOL     = 128                                  # nanoseconds
   #ACQ_INITMODE       = DspUnit.INTEGRATION
   ACQ_MAXWINDOW      = 2000                                 # nano-seconds
   ACQ_MODENUMBER     = {'1':0, '2':1, '3':2,'A':3,'B':4 }
@@ -84,6 +149,9 @@ class QSMessage:
   CONNECTED_CHANNEL  = 'Link : {}'
 
   ERR_HOST_NOTFOUND  = 'QuBE {} not found (ping unreachable)'
+  ERR_FREQ_SETTING   = '{} accepts a frequency multiple of {} MHz'
+  ERR_REP_SETTING    = '{} accepts a multiple of {} ns'
+  ERR_INVALID_DEV    = 'Invalid device. You may have called {} specific API in {}'
 
   def __init__(self):
     pass
@@ -133,10 +201,41 @@ class QuBE_ControlLine(DeviceWrapper):
       print(e)
 
     if self._initialized:
-      pass
+      yield self.get_connected()
     
     print(QSMessage.CONNECTED_CHANNEL.format(self.name))
     yield
+
+  @inlineCallbacks
+  def get_connected(self):
+
+    self.shots        = QSConstants.SEQ_INITSHOTS
+    self.rep_time     = QSConstants.SEQ_INITREPTIME
+    self.seqlen       = QSConstants.SEQ_INITLEN
+
+    yield
+
+  @property
+  def number_of_shots(self):
+    return self.shots
+  @number_of_shots.setter
+  def number_of_shots(self,value):
+    self.shots = value
+
+  @property
+  def repetition_time(self):
+    return self.rep_time
+  @repetition_time.setter
+  def repetition_time(self,value_in_ns):
+    self.rep_time = ((value_in_ns+QSConstants.DAQ_REPT_RESOL/2)//QSConstants.DAQ_REPT_RESOL) \
+                         *QSConstants.DAQ_REPT_RESOL
+
+  @property
+  def sequence_length(self):
+    return self.seqlen
+  @sequence_length.setter
+  def sequence_length(self,value):
+    self.seqlen = value
 
   def get_lo_frequency(self):
     return self.lo_ctrl.read_freq_100M()*100
@@ -165,6 +264,33 @@ class QuBE_ControlLine(DeviceWrapper):
       ftw = (ftw << 8 | res)
     return ftw
 
+  def static_check_lo_frequency(self,freq_in_mhz):
+    resolution = QSConstants.DAQ_LO_RESOL
+    return self.static_check_value(freq_in_mhz,resolution)
+
+  def static_check_dac_coarse_frequency(self,freq_in_mhz):
+    resolution = QSConstants.DAC_CNCO_RESOL
+    return self.static_check_value(freq_in_mhz,resolution)
+
+  def static_check_dac_fine_frequency(self,freq_in_mhz):
+    resolution = QSConstants.DAC_FNCO_RESOL
+    return self.static_check_value(freq_in_mhz,resolution)
+  
+  def static_check_value(self,value,resolution,multiplier=50):
+    resp = False
+    if resolution > multiplier * abs(((2*value + resolution) % (2*resolution)) - resolution):
+      resp = True
+    return resp
+
+  def static_check_repetition_time(self,reptime_in_nanosec):
+    resolution = QSConstants.DAQ_REPT_RESOL
+    return self.static_check_value(reptime_in_nanosec,resolution)
+
+  def static_check_sequence_length(self,seqlen_in_nanosec):
+    resolution = QSConstants.DAQ_SEQL_RESOL
+    return self.static_check_value(seqlen_in_nanosec,resolution)
+
+  
 
 class QuBE_ReadoutLine(QuBE_ControlLine):
   @inlineCallbacks
@@ -205,14 +331,13 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
 
   @inlineCallbacks
   def get_connected(self):
+    QuBE_ControlLine.get_connected(self)
                                                             # Capture default parameter settings
     self.window        = QSConstants.ACQ_INITWINDOW             
     self.acq_mode      = QSConstants.ACQ_INITMODE
     self.acq_n_windows = 1
 
-    self.shots         = QSConstants.SEQ_INITSHOTS
-    self.rep_time      = QSConstants.SEQ_INITREPTIME
-    self.seqlen        = QSConstants.SEQ_INITLEN
+                                                            # to be implemented later (from)
     # self.init_lpfcoef   = False
     # self.init_defwindow = False
     # try:
@@ -225,6 +350,7 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
     #   self.init_defwindow = True
     # except:
     #   print('Failed to set filter coefficients')
+                                                            # to be implemented later (end)
     yield
     
   def set_adc_coarse_frequency(self,freq_in_mhz):
@@ -248,6 +374,10 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
       piw = (piw << 8 | res)
     return piw
     
+  def static_check_adc_coarse_frequency(self,freq_in_mhz):
+    resolution = QSConstants.ADC_CNCO_RESOL
+    return self.static_check_value(freq_in_mhz,resolution)
+
 ############################################################
 #
 # QUBE SERVER
@@ -370,8 +500,76 @@ class QuBE_Server(DeviceServer):
       found.extend(devices)
       yield
 
-    print(sys._getframe().f_code.co_name,found)
+    print(sys._getframe().f_code.co_name,found)             # DEBUG
     returnValue(found)
+
+  @setting(900, 'Shots', num_shots = ['w'], returns=['w'])
+  def number_of_shots(self,c,num_shots = None):
+    dev = self.selectedDevice(c)
+    if num_shots is not None:
+      dev.number_of_shots = num_shots
+      return num_shots
+    else:
+      return dev.number_of_shots
+
+  @setting(401, 'Repeat Count', repeat = ['w'], returns=['w'])
+  def repeat_count(self,c,repeat = None):
+    raise Exception('obsoleted. use "shots" instead')
+    return self.number_of_shots(c,repeat)
+    
+  @setting(41, 'Repetition Time', reptime = ['v[s]'], returns=['v[s]'])
+  def repetition_time(self,c,reptime = None):
+    dev = self.selectedDevice(c)
+    if reptime is None:
+      return T.Value(dev.repetition_time,'ns')
+    elif dev.static_check_repetition_time(reptime['ns']):
+      dev.repetition_time = int(round(reptime['ns']))
+      return reptime
+    else:
+      raise ValueError(QSMessage.ERR_REP_SETTING.format('Sequencer',QSConstants.DAQ_REPT_RESOL))
+
+  @setting(45, 'DAQ Length', length = ['v[s]'], returns = ['v[s]'])
+  def sequence_length(self,c,length = None):
+    dev = self.selectedDevice(c)
+    if length is None:
+      return Value(dev.sequence_length,'ns')
+    elif dev.static_check_sequence_length(length['ns']):
+      dev.sequence_length = int(length['ns'])
+      return length
+    else:
+      raise ValueError(QSMessage.ERR_REP_SETTING.format('Sequencer',QSConstants.DAQ_SEQL_RESOL))
+
+#  @setting(52, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
+#  def acquisition_count(self,c,acqcount = None):
+#    dev = self.selectedDevice(c)
+#    if acqcount is not None:
+#      dev.set_acq_count(acqcount)
+#      return acqcount
+#    else:
+#      return dev.get_acq_count()
+#
+#  @setting(42, 'Acquisition Window', window = ['*(v[s]v[s])'], returns=['*(v[s]v[s])'])
+#  def acquisition_window(self,c,window = None):
+#    dev = self.selectedDevice(c)
+#    if window is not None:
+#      wl = list()
+#      for w in window:
+#        wl.append((w[0]['ns'],w[1]['ns']))
+#      dev.set_acq_window(wl)
+#    wl = dev.get_acq_window()
+#    window = list()
+#    for w in wl:
+#      window.append((Value(w[0],'ns'),Value(w[1],'ns')))
+#    return window
+#
+#  @setting(43, 'Acquisition Mode', mode = ['s'], returns=['s'])
+#  def acquisition_mode(self,c,mode = None):
+#    dev = self.selectedDevice(c)
+#    if mode is not None:
+#      dev.set_acq_mode(mode)
+#    return dev.get_acq_mode()
+
+  
 
   @setting(100, 'Frequency Local', frequency = ['v[Hz]'], returns = ['v[Hz]'])
   def local_frequency(self,c,frequency = None):
@@ -379,8 +577,36 @@ class QuBE_Server(DeviceServer):
     if frequency is None:
       resp = dev.get_lo_frequency()
       frequency = T.Value(resp,'MHz')
-    else:
+    elif dev.static_check_lo_frequency(freq_in_mhz):
       dev.set_lo_frequency(frequency['MHz'])
+    else:
+      raise ValueError(QSMessage.ERR_FREQ_SETTING.format('LO',QSConstants.DAC_CNCO_RESOL))
+    return frequency
+
+  @setting(201, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+  def coarse_tx_nco_frequency(self,c,frequency = None):
+    dev = self.selectedDevice(c)
+    if frequency is None:
+      resp = dev.get_dac_coarse_frequency()
+      frequency = T.Value(resp,'MHz')
+    elif dev.static_check_dac_coarse_frequency(frequency['MHz']):
+      dev.set_dac_coarse_frequency(frequency['MHz'])
+    else:
+      raise ValueError(QSMessage.ERR_FREQ_SETTING.format('TX Corse NCO',QSConstants.DAC_CNCO_RESOL))
+    return frequency
+  
+  @setting(202, 'Frequency RX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+  def coarse_rx_nco_frequency(self,c,frequency = None):
+    dev = self.selectedDevice(c)
+    if 'readout' not in dev.name:
+      raise Exception(QSMessage.ERR_INVALID_DEV.format('readout',dev.name))
+    elif frequency is None:
+      resp = dev.get_adc_coarse_frequency()
+      frequency = T.Value(resp,'MHz')
+    elif dev.static_check_adc_coarse_frequency(frequency['MHz']):
+      dev.set_adc_coarse_frequency(frequency['MHz'])
+    else:
+      raise ValueError(QSMessage.ERR_FREQ_SETTING.format('RX Corse NCO',QSConstants.ADC_CNCO_RESOL))
     return frequency
 
 ############################################################
@@ -458,6 +684,5 @@ if __name__ == '__main__':
                                                             #  if sys.argv:
                                                             #    del sys.argv[1:]
   util.runServer(__server__)
-  pass
 
     
