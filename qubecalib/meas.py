@@ -3,6 +3,7 @@ from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, AwgCtrl, WaveSeque
 import e7awgsw
 from collections import namedtuple
 import numpy as np
+import math
 from . import qube
 from .qube import PortFunc, Port, Lane, PortNo
 
