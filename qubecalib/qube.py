@@ -113,7 +113,7 @@ class Qube(alias.Qube):
         self._port = {
             PortNo.P0: Readout(
                 LO(lmx[0]),
-                DAC(ipfpga, ad9082[0], 0, [AWG.U15,]),
+                DAC(ipfpga, ad9082[0], 0, [(AWG.U15, 0),]),
                 UpConv(adrf[0], Vatt(ad5328, 0))
             ),
             PortNo.P1: Readin(
@@ -122,22 +122,22 @@ class Qube(alias.Qube):
             ),
             PortNo.P5: Ctrl(
                 LO(lmx[2]),
-                DAC(ipfpga, ad9082[0], 2, [AWG.U11, AWG.U12, AWG.U13,]),
+                DAC(ipfpga, ad9082[0], 2, [(AWG.U11, 2), (AWG.U12, 3), (AWG.U13, 4),]),
                 UpConv(adrf[2], Vatt(ad5328, 2))
             ),
             PortNo.P6: Ctrl(
                 LO(lmx[3]),
-                DAC(ipfpga, ad9082[0], 3, [AWG.U8, AWG.U9, AWG.U10,]),
+                DAC(ipfpga, ad9082[0], 3, [(AWG.U8, 5), (AWG.U9, 6), (AWG.U10, 7),]),
                 UpConv(adrf[3], Vatt(ad5328, 3))
             ),
             PortNo.P7: Ctrl(
                 LO(lmx[4]),
-                DAC(ipfpga, ad9082[1], 0, [AWG.U5, AWG.U6, AWG.U7,]),
+                DAC(ipfpga, ad9082[1], 0, [(AWG.U5, 0), (AWG.U6, 1), (AWG.U7, 2),]),
                 UpConv(adrf[4], Vatt(ad5328, 4))
             ),
             PortNo.P8: Ctrl(
                 LO(lmx[5]),
-                DAC(ipfpga, ad9082[1], 1, [AWG.U0, AWG.U3, AWG.U4,]),
+                DAC(ipfpga, ad9082[1], 1, [(AWG.U0, 3), (AWG.U3, 4), (AWG.U4, 5),]),
                 UpConv(adrf[5], Vatt(ad5328, 5))
             ),
             PortNo.P12: Readin(
@@ -146,7 +146,7 @@ class Qube(alias.Qube):
             ),
             PortNo.P13: Readout(
                 LO(lmx[7]),
-                DAC(ipfpga, ad9082[1], 3, [AWG.U2,]),
+                DAC(ipfpga, ad9082[1], 3, [(AWG.U2, 7),]),
                 UpConv(adrf[7], Vatt(ad5328, 7))
             ),
         }
@@ -207,22 +207,26 @@ class UpConv(FunctionBlock):
         lsi.write_value(0xA, 0x002) # apply value
         return v / 0xfff * 3.3 # volt
 
+    
 class NCO(object):
     def __init__(self, lsi, ch):
         self.lsi = lsi
         self.ch = ch
         self._freq = 1000 # 下位の API で決め打ち
 
+        
 class NCODAC(NCO):
-    def __init__(self, lsi, ch):
+    def __init__(self, lsi, ch, fine=False):
         super().__init__(lsi, ch)
+        self._fine = fine
     @property
     def freq(self):
         return self._freq # MHz
     @freq.setter
     def freq(self, mhz):
         self._freq = mhz
-        self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch, adc_mode=False)
+        self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch, adc_mode=False, fine_mode=self._fine)
+        
         
 class NCOADC(NCO):
     def __init__(self, lsi, ch):
@@ -243,14 +247,15 @@ class AD9082(object):
 class AD9082DAC(AD9082):
     def __init__(self, ipfpga, lsi, ch, awgs):
         super().__init__(ipfpga, lsi)
-        self.awgs = awgs
-        self.nco = NCODAC(lsi, ch)
+        self.awgs = [o[0] for o in awgs]
+        self.cnco = NCODAC(lsi, ch, fine=False)
+        self.fnco = [NCODAC(lsi, o[1], fine=True) for o in awgs]
         
 class AD9082ADC(AD9082):
     def __init__(self, ipfpga, lsi, ch, caps):
         super().__init__(ipfpga, lsi)
         self.caps = caps
-        self.nco = NCOADC(lsi, ch)
+        self.cnco = NCOADC(lsi, ch)
         
 
 class Port(object):
@@ -265,7 +270,7 @@ class Output(Port):
         self.upconv = upconv
         self.active = False # TODO: 実際の動作状況を確認するようにしたい
     
-    def set_freq(self, rf_mhz, lo_mhz):
+    def set_cnco_mhz(self, rf_mhz, lo_mhz):
         
         MAGIC_FREQ = 15.625
         trunc = lambda mhz: math.floor(mhz // MAGIC_FREQ) * MAGIC_FREQ
@@ -287,13 +292,27 @@ class Output(Port):
             awg_mhz = rf_mhz - lo_mhz - nco_mhz # rf_mhz = lo_mhz + (nco_mhz + awg_mhz)
         
         self.local.freq = lo_mhz
-        self.dac.nco.freq = nco_mhz
+        self.dac.cnco.freq = nco_mhz
         
         return nco_mhz, awg_mhz
     
+    def set_fnco_mhz(self, mhz, lane):
+        
+        MAGIC_FREQ = 15.625
+        trunc = lambda mhz: math.floor(mhz // MAGIC_FREQ) * MAGIC_FREQ
+        
+        nco_mhz = trunc(mhz)
+        
+        self.dac.fnco[lane].freq = nco_mhz
+        
+        return nco_mhz
+    
+    def set_freq(self, rf_mhz, lo_mhz):
+        return self.set_cnco_mhz(rf_mhz, lo_mhz)
+    
     @property
     def status(self):
-        fl, fi = self.local.freq, self.dac.nco.freq
+        fl, fi = self.local.freq, self.dac.cnco.freq
         m = self.upconv.mode
         rf_mhz = fl + fi if m == ConvMode.USB else fl - fi
         r = ''
@@ -326,7 +345,7 @@ class Input(Port):
     
     @property
     def status(self):
-        fl, fi = self.local.freq, self.adc.nco.freq
+        fl, fi = self.local.freq, self.adc.cnco.freq
         r = ''
         r += 'RF = {:>5.3f} MHz '.format(fl + fi) # assume USB mode
         r += 'LO = {:>5.0f}    MHz '.format(int(fl))
