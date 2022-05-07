@@ -24,121 +24,126 @@ timeout = 20
 #
 
 """
-184:class QSConstants:
-226:  def __init__(self):
-229:class QSMessage:
-253:  def __init__(self):
-263:def pingger(host):
-274:class QuBE_ControlLine(DeviceWrapper):
-276:  def connect(self, *args, **kw ):
-307:  def get_connected(self):
-317:  def number_of_shots(self):
-320:  def number_of_shots(self,value):
-324:  def repetition_time(self):
-327:  def repetition_time(self,value_in_ns):
-332:  def sequence_length(self):
-335:  def sequence_length(self,value):
-339:  def number_of_awgs(self):
-343:  def list_of_awg_ids(self):
-347:  def channel_enable(self):
-351:  def enabled_channels(self):
-355:  def enabled_awgs(self):
-362:  def check_awg_channels(self,channels):
-368:  def check_waveform(self,waveforms,channels):
-391:  def upload_parameters(self,channels):
-398:  def upload_waveform(self,waveforms,channels):
-412:  def start_daq(self,awg_ids):
-415:  def stop_daq(self,awg_ids,timeout):
-418:  def get_lo_frequency(self):
-421:  def set_lo_frequency(self,freq_in_mhz):
-424:  def get_dac_coarse_frequency(self):
-427:  def set_dac_coarse_frequency(self,freq_in_mhz):
-432:  def static_DACify(self, waveform):
-436:  def static_get_dac_coarse_frequency(self,nco_ctrl,ch):
-440:  def static_get_dac_coarse_ftw(self,nco_ctrl,ch):
-449:  def static_check_lo_frequency(self,freq_in_mhz):
-453:  def static_check_dac_coarse_frequency(self,freq_in_mhz):
-457:  def static_check_dac_fine_frequency(self,freq_in_mhz):
-461:  def static_check_value(self,value,resolution,multiplier=50):
-467:  def static_check_repetition_time(self,reptime_in_nanosec):
-471:  def static_check_sequence_length(self,seqlen_in_nanosec):
-476:class QuBE_ReadoutLine(QuBE_ControlLine):
-478:  def connect(self, *args, **kw ):
-516:  def get_connected(self):
-541:  def acquisition_window(self):
-544:  def acquisition_window(self, windows_in_ns):
-547:  def acquisition_mode(self):
-550:  def acquisition_mode(self,mode):
-553:  def acquisition_number_of_windows(self):
-556:  def acquisition_number_of_windows(self,n):
-560:  def acquisition_mux_enable(self):
-564:  def acquisition_enabled_channels(self):
-572:  def upload_readout_parameters(self,muxchs):
-634:  def set_trigger_board(self, awg_board ):
-640:  def set_adc_coarse_frequency(self,freq_in_mhz):
-645:  def get_adc_coarse_frequency(self):
-648:  def static_get_adc_coarse_frequency(self,nco_ctrl,ch):
-652:  def static_get_adc_coarse_ftw(self,nco_ctrl,ch):
-661:  def static_check_adc_coarse_frequency(self,freq_in_mhz):
-665:  def static_check_mux_channel_range(self,mux):
-669:  def static_check_acquisition_windows(self,list_of_windows):
-670:    def check_value(w):
-687:class QuBE_Server(DeviceServer):
-695:  def initServer(self):
-712:  def initContext(self, c):
-719:  def chooseDeviceWrapper(self, *args, **kw):
-723:  def instantiateChannel(self,name,channels,awg_ctrl,cap_ctrl,lsi_ctrl):
-724:    def gen_awg(name,channel,awg_ctrl,lsi_ctrl):
-735:    def gen_mux(name,channel,awg_ctrl,cap_ctrl,lsi_ctrl):
-763:  def instantiateQube(self,name,info):
-790:  def findDevices(self):
-815:  def number_of_shots(self,c,num_shots = None):
-835:  def repeat_count(self,c,repeat = None):
-851:  def repetition_time(self,c,reptime = None):
-875:  def sequence_length(self,c,length = None):
-899:  def daq_start(self,c):
-921:  def daq_trigger(self,c):
-932:  def daq_stop(self,c):
-941:  def daq_timeout(self,c,t = None):
-950:  def trigger_board(self,c,channel = None):
-963:  def upload_parameters(self,c,channels):
-983:  def upload_readout_parameters(self,c,muxchs):
-1004:  def upload_waveform(self,c, wavedata,channels):
-1034:  def acquisition_count(self,c,acqcount = None):
-1047:  def acquisition_number(self,c,muxch,acqnumb = None):
-1074:  def acquisition_window(self,c,muxch,window = None):
-1110:  def acquisition_mode(self,c,muxch,mode = None):
-1129:  def acquisition_mux_enable(self,c,muxch = None):
-1153:  def local_frequency(self,c,frequency = None):
-1165:  def coarse_tx_nco_frequency(self,c,frequency = None):
-1177:  def coarse_rx_nco_frequency(self,c,frequency = None):
-1191:  def debug_awg_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
-1221:  def debug_cap_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
-1259:def basic_config():
-1297:def load_config(cxn,config):
+189:class QSConstants:
+232:  def __init__(self):
+235:class QSMessage:
+259:  def __init__(self):
+269:def pingger(host):
+280:class QuBE_ControlLine(DeviceWrapper):
+282:  def connect(self, *args, **kw ):
+313:  def get_connected(self):
+323:  def number_of_shots(self):
+326:  def number_of_shots(self,value):
+330:  def repetition_time(self):
+333:  def repetition_time(self,value_in_ns):
+338:  def sequence_length(self):
+341:  def sequence_length(self,value):
+345:  def number_of_awgs(self):
+349:  def list_of_awg_ids(self):
+353:  def channel_enable(self):
+357:  def enabled_channels(self):
+361:  def enabled_awgs(self):
+368:  def check_awg_channels(self,channels):
+374:  def check_waveform(self,waveforms,channels):
+397:  def upload_parameters(self,channels):
+404:  def upload_waveform(self,waveforms,channels):
+418:  def start_daq(self,awg_ids):
+421:  def stop_daq(self,awg_ids,timeout):
+424:  def get_lo_frequency(self):
+427:  def set_lo_frequency(self,freq_in_mhz):
+430:  def get_dac_coarse_frequency(self):
+433:  def set_dac_coarse_frequency(self,freq_in_mhz):
+438:  def static_DACify(self, waveform):
+442:  def static_get_dac_coarse_frequency(self,nco_ctrl,ch):
+446:  def static_get_dac_coarse_ftw(self,nco_ctrl,ch):
+455:  def static_check_lo_frequency(self,freq_in_mhz):
+459:  def static_check_dac_coarse_frequency(self,freq_in_mhz):
+463:  def static_check_dac_fine_frequency(self,freq_in_mhz):
+467:  def static_check_value(self,value,resolution,multiplier=50):
+473:  def static_check_repetition_time(self,reptime_in_nanosec):
+477:  def static_check_sequence_length(self,seqlen_in_nanosec):
+482:class QuBE_ReadoutLine(QuBE_ControlLine):
+484:  def connect(self, *args, **kw ):
+522:  def get_connected(self):
+547:  def acquisition_window(self):
+550:  def acquisition_window(self, windows_in_ns):
+553:  def acquisition_mode(self):
+556:  def acquisition_mode(self,mode):
+559:  def acquisition_number_of_windows(self):
+562:  def acquisition_number_of_windows(self,n):
+566:  def acquisition_mux_enable(self):
+570:  def acquisition_enabled_channels(self):
+578:  def upload_readout_parameters(self,muxchs):
+637:  def download_waveform(self, muxchs):
+645:  def download_single_waveform(self, muxch):
+653:  def set_trigger_board(self, awg_board ):
+659:  def set_adc_coarse_frequency(self,freq_in_mhz):
+664:  def get_adc_coarse_frequency(self):
+667:  def static_get_adc_coarse_frequency(self,nco_ctrl,ch):
+671:  def static_get_adc_coarse_ftw(self,nco_ctrl,ch):
+680:  def static_check_adc_coarse_frequency(self,freq_in_mhz):
+684:  def static_check_mux_channel_range(self,mux):
+688:  def static_check_acquisition_windows(self,list_of_windows):
+689:    def check_value(w):
+706:class QuBE_Server(DeviceServer):
+714:  def initServer(self):
+731:  def initContext(self, c):
+738:  def chooseDeviceWrapper(self, *args, **kw):
+742:  def instantiateChannel(self,name,channels,awg_ctrl,cap_ctrl,lsi_ctrl):
+743:    def gen_awg(name,channel,awg_ctrl,lsi_ctrl):
+754:    def gen_mux(name,channel,awg_ctrl,cap_ctrl,lsi_ctrl):
+782:  def instantiateQube(self,name,info):
+809:  def findDevices(self):
+834:  def number_of_shots(self,c,num_shots = None):
+854:  def repeat_count(self,c,repeat = None):
+870:  def repetition_time(self,c,reptime = None):
+894:  def sequence_length(self,c,length = None):
+918:  def daq_start(self,c):
+940:  def daq_trigger(self,c):
+951:  def daq_stop(self,c):
+961:  def daq_timeout(self,c,t = None):
+970:  def trigger_board(self,c,channel = None):
+983:  def upload_parameters(self,c,channels):
+1003:  def upload_readout_parameters(self,c,muxchs):
+1024:  def upload_waveform(self,c, wavedata,channels):
+1055:  def download_waveform(self,c,muxchs):
+1082:  def acquisition_count(self,c,acqcount = None):
+1095:  def acquisition_number(self,c,muxch,acqnumb = None):
+1122:  def acquisition_window(self,c,muxch,window = None):
+1158:  def acquisition_mode(self,c,muxch,mode = None):
+1177:  def acquisition_mux_enable(self,c,muxch = None):
+1201:  def local_frequency(self,c,frequency = None):
+1213:  def coarse_tx_nco_frequency(self,c,frequency = None):
+1225:  def coarse_rx_nco_frequency(self,c,frequency = None):
+1239:  def debug_awg_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
+1269:  def debug_cap_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
+1307:def basic_config():
+1345:def load_config(cxn,config):
+1377:def usage():
 
-814:  @setting(100, 'Shots', num_shots = ['w'], returns=['w'])
-834:  @setting(101, 'Repeat Count', repeat = ['w'], returns=['w'])
-850:  @setting(102, 'Repetition Time', reptime = ['v[s]'], returns=['v[s]'])
-874:  @setting(103, 'DAQ Length', length = ['v[s]'], returns = ['v[s]'])
-898:  @setting(105, 'DAQ Start', returns = ['b'])
-920:  @setting(106, 'DAQ Trigger', returns = ['b'])
-931:  @setting(107, 'DAQ Stop', returns = ['b'])
-940:  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['b'])
-949:  @setting(109, 'Trigger Board', channel = ['w'], returns = ['b'])
-962:  @setting(200, 'Upload Parameters', channels=['w','*w'],returns=['b'])
-982:  @setting(201, 'Upload Readout Parameters', muxchs=['*w','w'],returns=['b'])
-1003:  @setting(202, 'Upload Waveform', wavedata =['*2c','*c'], channels=['*w','w'],returns=['b'])
-1033:  @setting(300, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
-1046:  @setting(301, 'Acquisition Number', muxch = ['w'], acqnumb = ['w'], returns = ['w'])
-1073:  @setting(302, 'Acquisition Window', muxch = ['w'], window = ['*(v[s]v[s])'], returns=['*(v[s]v[s])'])
-1109:  @setting(303, 'Acquisition Mode', muxch = ['w'], mode = ['s'], returns=['s'])
-1128:  @setting(304, 'Acquisition Mux Enable', muxch = ['w'], returns = ['b','*b'])
-1152:  @setting(400, 'Frequency Local', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1164:  @setting(401, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1176:  @setting(402, 'Frequency RX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1190:  @setting(502, 'DEBUG AWG REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
-1220:  @setting(501, 'DEBUG CAP REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
+833:  @setting(100, 'Shots', num_shots = ['w'], returns=['w'])
+853:  @setting(101, 'Repeat Count', repeat = ['w'], returns=['w'])
+869:  @setting(102, 'Repetition Time', reptime = ['v[s]'], returns=['v[s]'])
+893:  @setting(103, 'DAQ Length', length = ['v[s]'], returns = ['v[s]'])
+917:  @setting(105, 'DAQ Start', returns = ['b'])
+939:  @setting(106, 'DAQ Trigger', returns = ['b'])
+950:  @setting(107, 'DAQ Stop', returns = ['b'])
+960:  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['v[s]'])
+969:  @setting(109, 'Trigger Board', channel = ['w'], returns = ['b'])
+982:  @setting(200, 'Upload Parameters', channels=['w','*w'],returns=['b'])
+1002:  @setting(201, 'Upload Readout Parameters', muxchs=['*w','w'],returns=['b'])
+1023:  @setting(202, 'Upload Waveform', wavedata =['*2c','*c'], channels=['*w','w'],returns=['b'])
+1054:  @setting(203, 'Download Waveform', muxchs = ['*w','w'], returns = ['*c','*2c'])
+1081:  @setting(300, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
+1094:  @setting(301, 'Acquisition Number', muxch = ['w'], acqnumb = ['w'], returns = ['w'])
+1121:  @setting(302, 'Acquisition Window', muxch = ['w'], window = ['*(v[s]v[s])'], returns=['*(v[s]v[s])'])
+1157:  @setting(303, 'Acquisition Mode', muxch = ['w'], mode = ['s'], returns=['s'])
+1176:  @setting(304, 'Acquisition Mux Enable', muxch = ['w'], returns = ['b','*b'])
+1200:  @setting(400, 'Frequency Local', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1212:  @setting(401, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1224:  @setting(402, 'Frequency RX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1238:  @setting(502, 'DEBUG AWG REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
+1268:  @setting(501, 'DEBUG CAP REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
 """
 
 ############################################################
@@ -205,7 +210,8 @@ class QSConstants:
   DAQ_LO_RESOL       = 100                                  # MHz
   DAC_CNCO_RESOL     = 12000/2**13                          # MHz; DAC_SAMPLE_R/2**13
   DAC_FNCO_RESOL     = 2000/2**12                           # MHz; DAC_SAMPLE_R/M=6/2**12
-  ADC_CNCO_RESOL     = 1000/2**11                           # MHz; ADC_SAMPLE_R/M=6/2**11
+  ADC_CNCO_RESOL     = 6000/2**13                           # MHz; ADC_SAMPLE_R/2**13
+  ADC_FNCO_RESOL     = 1000/2**11                           # MHz; ADC_SAMPLE_R/M=6/2**11
   DAQ_REPT_RESOL     = 10240                                # nanoseconds
   DAQ_SEQL_RESOL     = 128                                  # nanoseconds
   #ACQ_INITMODE       = DspUnit.INTEGRATION
@@ -459,9 +465,9 @@ class QuBE_ControlLine(DeviceWrapper):
     return self.static_check_value(freq_in_mhz,resolution)
 
   def static_check_value(self,value,resolution,multiplier=50):
-    resp = False
-    if resolution > multiplier * abs(((2*value + resolution) % (2*resolution)) - resolution):
-      resp = True
+    resp = value > resolution
+    if resp:
+      resp = resolution > multiplier * abs(((2*value + resolution) % (2*resolution)) - resolution)
     return resp
 
   def static_check_repetition_time(self,reptime_in_nanosec):
@@ -624,12 +630,25 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
       param.num_words_to_sum  = \
          CaptureParam.MAX_SUM_SECTION_LEN                   # UNUSED FOR NOW
 
-      if param.num_samples_to_process * 2 != self.repetition_time:
-        raise Exception(None)
-      else:
-        self.cap_ctrl.set_capture_params(mux, param)
-        self.mux_enabled[mux] = True
+      self.cap_ctrl.set_capture_params(self.cap_unit[mux], param)
+      self.mux_enabled[mux] = True
     return True
+
+  def download_waveform(self, muxchs):
+
+    vault = []
+    for mux in muxchs:
+      data = self.download_single_waveform(mux)
+      vault.append(data)
+    return np.vstack(vault)
+
+  def download_single_waveform(self, muxch):
+    capture_unit   = self.cap_unit[muxch]
+
+    n_of_samples   = self.cap_ctrl.num_captured_samples(capture_unit)
+    iq_tuple_data  = self.cap_ctrl.get_capture_data(capture_unit, n_of_samples)
+
+    return np.array([(_i+1j*_q) for _i,_q in iq_tuple_data]).astype(complex)
 
   def set_trigger_board(self, awg_board ):
     self.cap_ctrl.select_trigger_awg(self.cap_mod_id, awg_board)
@@ -933,11 +952,12 @@ class QuBE_Server(DeviceServer):
     dev = self.selectedDevice(c)
     if len(c[QSConstants.DAC_CNXT_TAG]) > 0:
       dev.stop_daq(c[QSConstants.DAC_CNXT_TAG], c[QSConstants.DAQ_TOUT_TAG])
+      c[QSConstants.DAC_CNXT_TAG] = list()
     else:
       raise Exception(QSMessage.ERR_NOARMED_DAC)
     return True
 
-  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['b'])
+  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['v[s]'])
   def daq_timeout(self,c,t = None):
     if t is None:
       val = c[QSConstants.DAQ_TOUT_TAG]
@@ -1024,11 +1044,39 @@ class QuBE_Server(DeviceServer):
 
     if not dev.check_awg_channels(channels):
       raise ValueError(QSMessage.ERR_INVALID_RANG.format('awg index',0,dev.number_of_awgs - 1))
+
     resp,number_of_chans,data_length = dev.check_waveform(waveforms,channels)
     if not resp:
       raise ValueError(QSMessage.ERR_INVALID_WAVD.format(number_of_chans))
 
     return dev.upload_waveform(waveforms,channels)
+
+  @setting(203, 'Download Waveform', muxchs = ['*w','w'], returns = ['*c','*2c'])
+  def download_waveform(self,c,muxchs):
+    """
+    Download acquired waveforms (or processed data points).
+
+    Transfer waveforms or datapoints from Alevo FPGA to a host computer.
+
+    Args:
+        muxchs  : *w, w
+
+    Returns:
+        data    : *2c,*c
+    """
+    dev = self.selectedDevice(c)
+    if 'readout' not in dev.name:
+      raise Exception(QSMessage.ERR_INVALID_DEV.format('readout',dev.name))
+
+    muxchs  = np.atleast_1d(muxchs).astype(int)
+    for _mux in muxchs:
+      if not dev.static_check_mux_channel_range(_mux):
+        raise Exception(QSMessage.ERR_INVALID_RANG.format('muxch',0,QSConstants.ACQ_MULP - 1))
+
+    data = dev.download_waveform(muxchs)
+
+    return data
+
 
   @setting(300, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
   def acquisition_count(self,c,acqcount = None):
@@ -1130,14 +1178,14 @@ class QuBE_Server(DeviceServer):
     """
     Obtain enabled demodulation mux channels
 
-    Mux demodulation channels are enabled in upload_readout_parameters(). 
+    Mux demodulation channels are enabled in upload_readout_parameters().
 
     Args:
         muxch : w
-            multiplex channel   0 to 3 [QSConstants.ACQ_MULP-1]. 
+            multiplex channel   0 to 3 [QSConstants.ACQ_MULP-1].
             Read all channel if None.
     Returns:
-        Enabled(True)/Disabled(False) status of the channel. 
+        Enabled(True)/Disabled(False) status of the channel.
     """
     dev = self.selectedDevice(c)
     if 'readout' not in dev.name:
@@ -1155,7 +1203,7 @@ class QuBE_Server(DeviceServer):
     if frequency is None:
       resp = dev.get_lo_frequency()
       frequency = T.Value(resp,'MHz')
-    elif dev.static_check_lo_frequency(freq_in_mhz):
+    elif dev.static_check_lo_frequency(frequency['MHz']):
       dev.set_lo_frequency(frequency['MHz'])
     else:
       raise ValueError(QSMessage.ERR_FREQ_SETTING.format('LO',QSConstants.DAC_CNCO_RESOL))
@@ -1314,7 +1362,7 @@ def load_config(cxn,config):
 __server__ = QuBE_Server()
 
 if __name__ == '__main__':
-                                                            #  # Import Psyco if available
+                                                            ## Import Psyco if available
                                                             #  try:
                                                             #    import psyco
                                                             #    psyco.full()
@@ -1326,24 +1374,81 @@ if __name__ == '__main__':
   util.runServer(__server__)
 
 
-"""
-# Typical usage
-qs.select_device(0)
-data=np.zeros(8192).astype(complex)
-qs.daq_length(16384*ns)
-qs.upload_waveform([data],0)
-qs.upload_parameters([0])
-qs.upload_readout_parameters([3])
-#
-qs.select_device(2)
-qs.daq_length(16384*ns)
-qs.upload_parameters([1])
-qs.upload_waveform([data],1)
-qs.trigger_board(1)
-[(qs.select_device(i),qs.daq_start()) for i in [0,2]]
-qs.daq_trigger()
-qs.debug_awg_reg(0,0x04,0,16)
-qs.debug_awg_reg(0,0x10,0,16)
-qs.debug_awg_reg(0,0x14,0,16)
-qs.debug_awg_reg(0,0x18,0,16)
-"""
+def usage():                                                # Typical usage
+  import labrad
+  import base64
+  import pickle
+
+  from plotly                 import graph_objects as go
+  from labrad                 import types as T
+  from labrad.units           import ns
+
+  cxn= labrad.connect()
+  qs = cxn.qube_server
+
+                                                            # Common settings
+  [(qs.select_device(i),qs.shots     (10000)) for i in [0,2]]
+  [(qs.select_device(i),qs.daq_timeout(T.Value(30,'s'))) for i in [0,2]]
+  [(qs.select_device(i),qs.daq_length(16384*ns)) for i in [0,2]]
+  [(qs.select_device(i),qs.repetition_time(100*10240*ns)) for i in [0,2]]
+  data=0.5*np.exp(-1j*2*np.pi*(10./500)*np.arange(8192))
+
+  qs.select_device(0)                                       # Readout daq=dac/adc
+  qs.upload_waveform([data],0)
+  qs.upload_parameters([0])
+  qs.acquisition_window(2,[(0*ns,1024*ns),(2224*ns,(2224+1024)*ns)])
+  qs.acquisition_window(3,[(512*ns,(512+2048)*ns)])
+  qs.upload_readout_parameters([2,3])
+  qs.frequency_local(T.Value(8700,'MHz'))                   # 8.7+1.5=10.2GHz
+  qs.frequency_rx_nco(T.Value((6000/2**13)*2034,'MHz'))
+  qs.frequency_tx_nco(T.Value((6000/2**13)*2048,'MHz'))     # 1.5GHz
+
+  qs.select_device(2)                                       # control settings
+  qs.upload_parameters([2])
+  qs.upload_waveform([data],2)
+  qs.trigger_board(2)
+
+  [(qs.select_device(i),qs.daq_start()) for i in [0,2]]     # daq_start
+
+  qs.daq_trigger()
+  qs.daq_stop()                                             # daq_stop waits for done
+
+  qs.select_device(0)
+  dat=qs.download_waveform([2,3])
+  mx,length = dat.shape
+  cxn.disconnect()
+
+  graph_data = []
+  graph_data.append(
+    go.Scatter ( x   = np.arange(length),
+                 y   = np.real(dat[0]),
+                 name= "real")
+  )
+  graph_data.append(
+    go.Scatter ( x   = np.arange(length),
+                 y   = np.imag(dat[0]),
+                 name= "imag")
+  )
+  graph_data.append(
+    go.Scatter ( x   = np.arange(length),
+                 y   = np.real(dat[1]),
+                 name= "real")
+  )
+  graph_data.append(
+    go.Scatter ( x   = np.arange(length),
+                 y   = np.imag(dat[1]),
+                 name= "imag")
+  )
+  layout = go.Layout( title = 'Spur in RX',
+                      xaxis=dict(title='Frequency (GHz)',dtick=0.05),
+                      yaxis=dict(title='Dataset',dtick=20)
+                     )
+
+  fig = go.Figure( graph_data )
+  fig.write_html("1.html")
+
+  #qs.debug_awg_reg(0,0x04,0,16)
+  #qs.debug_awg_reg(0,0x10,0,16)
+  #qs.debug_awg_reg(0,0x14,0,16)
+  #qs.debug_awg_reg(0,0x18,0,16)
+
