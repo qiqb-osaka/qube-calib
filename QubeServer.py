@@ -1601,7 +1601,7 @@ def basic_config():
      'type'    : 'control',
      'ch_dac'  : [11,12,13],                                # awg id
      'cnco_dac' : (0,2),                                    # chip, main path id
-     'fnco_dac' : [(0,2),(0,3),(0,4)],                      # chip, link no
+     'fnco_dac' : [(0,4),(0,3),(0,2)],                      # chip, link no
      'lo_dac'   : 2,                                        # local oscillator id
     },
    ]
@@ -1645,46 +1645,72 @@ def usage():
   cxn= labrad.connect()
   qs = cxn.qube_server
                                                             # Common settings
-  [(qs.select_device(i),qs.shots(100))                   for i in [0,2]]
+  [(qs.select_device(i),qs.shots(100*10000))             for i in [0,2]]
   [(qs.select_device(i),qs.daq_timeout(T.Value(30,'s'))) for i in [0,2]]
   [(qs.select_device(i),qs.daq_length(10240*ns))         for i in [0,2]]
   [(qs.select_device(i),qs.repetition_time(10240*ns))    for i in [0,2]]
   data=0.99*np.exp(1j*2*np.pi*(0/500)*np.arange(5120))
-  data[0:2560]=0.0+1j*0.0
+  #data[0:2560]=0.0+1j*0.0
                                                             # This is positive frequency shift of +10MHz
 
   qs.select_device(0)                                       # [Trigger settings] must have
   qs.trigger_board(0)                                       # done before update_parameraters()
                                                             # and update_readout_parameters().
 
-  qs.select_device(0)                                       # Readout daq=dac/adc
+  qs.select_device('qube004-readout_01')                    # Readout daq=dac/adc
+  """
+    Readout setting
+      LO         = 8.5 GHz
+      NCO        = 1.5 GHz
+      fine NCO0  = 0.0 MHz
+      NCO (RX)   = 1.5 GHz
+      f(readout) = 8.5 GHz + 1.5 GHz + 0.0 MHz = 10.0 GHz
+  """
   dac_chan = 0
   qs.upload_waveform([data],dac_chan)
   qs.upload_parameters([dac_chan])
-  mux_chan = 2
-  qs.acquisition_window(mux_chan, [(   0*ns,      1024 *ns),# two sections 1 us x 2
-                                   (2224*ns,(2224+1024)*ns)])
-  qs.acquisition_mode  (mux_chan, 'A' )
-  mux_chan = 3
-  qs.acquisition_window(mux_chan, [(0*ns,(2048)*ns)])       # single section 2us
-  qs.acquisition_mode  (mux_chan, 'A' )
-  mux_chan = [2,3]
-  qs.upload_readout_parameters(mux_chan)
   qs.frequency_local      (          T.Value(8500,'MHz'))   # 8.7+1.5=10.2GHz
   qs.frequency_tx_nco     (          T.Value(1500,'MHz'))   # 1.5GHz
   qs.frequency_tx_fine_nco( dac_chan,T.Value(   0,'MHz'))
   qs.frequency_rx_nco     (          T.Value(1500,'MHz'))
+  """
+    MUX Window setting
+      Enabled channel = 2 & 3
+  """
+  mux_chan = 2
+  qs.acquisition_window(mux_chan, [(   0*ns,      1024 *ns),# two sections 1 us x 2
+                                   (2224*ns,(2224+1024)*ns)])
+  qs.acquisition_mode  (mux_chan, '3' )
+  mux_chan = 3
+  qs.acquisition_window(mux_chan, [(0*ns,(2048)*ns)])       # single section 2us
+  qs.acquisition_mode  (mux_chan, '3' )
+  mux_chan = [2,3]
+  qs.upload_readout_parameters(mux_chan)
 
-  qs.select_device(2)                                       # control settings
-  dac_chan = 2
-  qs.upload_parameters([dac_chan])
-  qs.upload_waveform  ([data],dac_chan)
-  qs.frequency_tx_fine_nco(dac_chan, T.Value(-int(60/(2000/2**12)+0.5)*(2000/2**12),'MHz'))
-                                                            # almost -60 MHz
+
+
+  qs.select_device('qube004-control_5')                     # control settings
+  """
+    Control frequency setting
+      LO  = 11 GHz
+      NCO =  3 GHz
+      fine NCO0 = -24.9 MHz
+      fine NCO1 =   4.9 MHz
+      fine NCO2 =  14.5 MHz
+      f1 = 11 GHz - 3 GHz -   24.9 MHz = 7975.1 with amp = 0.25
+      f2 = 11 GHz - 3 GHz -    4.9 MHz = 7995.1 with amp = 0.12
+      f3 = 11 GHz - 3 GHz - (-14.6 MHz)= 8014.6 with amp = 0.10
+  """
+  qs.upload_parameters([0,1,2])
+  qs.upload_waveform  ([0.25*data,0.12*data,0.10*data],[0,1,2])
+  qs.frequency_local      (          T.Value(  11,'GHz'))
+  qs.frequency_tx_nco     (          T.Value(3000,'MHz'))   # 3.0GHz
+  dac_chan = 0; qs.frequency_tx_fine_nco( dac_chan,T.Value( 24.90234375,'MHz'))
+  dac_chan = 1; qs.frequency_tx_fine_nco( dac_chan,T.Value(  4.8828125, 'MHz'))
+  dac_chan = 2; qs.frequency_tx_fine_nco( dac_chan,T.Value(-14.6484375, 'MHz'))
 
   [(qs.select_device(i),qs.daq_start()) for i in [0,2]]     # daq_start
-
-  qs.daq_trigger()
+  qs.daq_trigger()                                          # daq_trigger
   qs.daq_stop()                                             # daq_stop waits for done
 
   #qs.debug_awg_reg(0,0x04,0,16)
