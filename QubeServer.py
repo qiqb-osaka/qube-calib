@@ -702,10 +702,10 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
         mode      : character
             Acceptable parameters are '1', '2', '3', 'A', 'B'
     """
-    dsp = self.configure_readout_mode(mode,mode)
+    dsp = self.configure_readout_dsp(param,mode)
     param.sel_dsp_units_to_enable(*dsp)
 
-  def configure_readout_mode_1(self,mode,param):
+  def configure_readout_dsp(self,param,mode):
     dsp = []
     decim,averg,summn = QSConstants.ACQ_MODEFUNC[mode]
 
@@ -1636,10 +1636,10 @@ def usage():
   mux_chan = 2
   qs.acquisition_window(mux_chan, [(   0*ns,      1024 *ns),# two sections 1 us x 2
                                    (2224*ns,(2224+1024)*ns)])
-  qs.acquisition_mode  (mux_chan, '3' )
+  qs.acquisition_mode  (mux_chan, '1' )
   mux_chan = 3
   qs.acquisition_window(mux_chan, [(0*ns,(2048)*ns)])       # single section 2us
-  qs.acquisition_mode  (mux_chan, 'A' )
+  qs.acquisition_mode  (mux_chan, '2' )
   mux_chan = [2,3]
   qs.upload_readout_parameters(mux_chan)
 
