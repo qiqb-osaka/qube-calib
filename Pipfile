@@ -24,6 +24,7 @@ scipy = "*"
 nbstripout = "*"
 jupyterlab-widgets = "*"
 pyyaml = "*"
+urllib3 = "*"
 
 [dev-packages]
 
