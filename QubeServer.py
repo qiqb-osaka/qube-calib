@@ -1392,7 +1392,8 @@ class QuBE_Server(DeviceServer):
              SUM |   NO   |           |           |
              MAT +--------+-----------|-----------+--
              ION |  YES   |     C     |           |
-    DEBUG: The mode "C" has not been implemented yet.
+
+    DEBUG, The mode "C" has not been implemented yet.
 
     Args:
         muxch    : w
@@ -1646,7 +1647,7 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
                     0x14 [16bits] ready
                     0x18 [16bits] done
         pos   : w   Bit location
-        bits  : w   Bumber of bits to read/write
+        bits  : w   Number of bits to read/write
         data  : w   Data. Read operation is performed if None
     """
     dev = self.selectedDevice(c)
@@ -1822,6 +1823,20 @@ def basic_config():
      'fnco_dac' : [(0,5),(0,6),(0,7)],                      # chip, link no
      'lo_dac'   : 3,                                        # local oscillator id
     },
+    {'name'    : 'control_7',
+     'type'    : 'control',
+     'ch_dac'  : [5,6,7],                                   # awg id
+     'cnco_dac' : (1,0),                                    # chip, main path id
+     'fnco_dac' : [(1,2),(1,1),(1,0)],                      # chip, link no
+     'lo_dac'   : 4,                                        # local oscillator id
+    },
+    {'name'    : 'control_8',
+     'type'    : 'control',
+     'ch_dac'  : [0,3,4],                                   # awg id
+     'cnco_dac' : (1,1),                                    # chip, main path id
+     'fnco_dac' : [(1,5),(1,4),(1,3)],                      # chip, link no
+     'lo_dac'   : 5,                                        # local oscillator id
+    },
    ]
 
   servers = \
@@ -1862,15 +1877,17 @@ def usage():
 
   cxn= labrad.connect()
   qs = cxn.qube_server
+
+  devices = ['qube004-readout_01']
                                                             # Common settings
-  Twaveform = 10.240*4                                      # micro-seconds
+  Twaveform = 80*0.128                 # = 10.24            # micro-seconds
   nsample   = int(Twaveform * QSConstants.DACBB_SAMPLE_R + 0.5)
                                                             # points
   freq      =-189/1.024                                     # MHz, baseband signal frequency
-  [(qs.select_device(i),qs.shots(36000))                       for i in [0,2]]
-  [(qs.select_device(i),qs.daq_timeout(T.Value(1,'s')))       for i in [0,2]]
-  [(qs.select_device(i),qs.daq_length     (Twaveform*us))      for i in [0,2]]
-  [(qs.select_device(i),qs.repetition_time(1250*Twaveform*us)) for i in [0,2]]
+  [(qs.select_device(i),qs.shots          (43200))           for i in devices]
+  [(qs.select_device(i),qs.daq_timeout    (T.Value(10,'s'))) for i in devices]
+  [(qs.select_device(i),qs.daq_length     (Twaveform*us))    for i in devices]
+  [(qs.select_device(i),qs.repetition_time(97656*10.24*us))    for i in devices]
   data=np.exp(1j*2*np.pi*(freq/QSConstants.DACBB_SAMPLE_R)*np.arange(nsample))*(1-1e-3)
                                                             # This set spositive frequency shift
                                                             # of {freq} MHz for upper sideband modu-
@@ -1881,25 +1898,26 @@ def usage():
                                                             # for pulse operation, try:
                                                             #   data[0:2560]=0.0+1j*0.0
 
-  qs.select_device(0)                                       # [Trigger settings] must have
+  qs.select_device(devices[0])                              # [Trigger settings] must have
   qs.trigger_board(0)                                       # done before update_parameraters()
                                                             # and update_readout_parameters().
 
-  qs.select_device('qube004-readout_01')                    # Readout daq=dac/adc
+  qs.select_device(devices[0])                              # Readout daq=dac/adc
   """
     Readout setting
       LO         = 8.5 GHz
-      NCO        = 1.5 GHz
+      NCO        = 1.5 GHz (12000/8 MHz = 15360/10.24 MHz)
       fine NCO0  = 0.0 MHz
       NCO (RX)   = 1.5 GHz
       f(readout) = 8.5 GHz + 1.5 GHz + 0.0 MHz = 10.0 GHz
   """
   dac_chan = 0
-  qs.upload_waveform([data],dac_chan)
-  qs.upload_parameters([dac_chan])
-  qs.frequency_local      (          T.Value(8500,'MHz'))   # 8.7+1.5=10.2GHz
-  qs.frequency_tx_nco     (          T.Value(1500,'MHz'))   # 1.5GHz
+  qs.upload_waveform      ([data],dac_chan)
+  qs.upload_parameters    ([dac_chan])
+  qs.frequency_local      (          T.Value(8500,'MHz'))   # 8.5+1.5=10.2GHz
+  qs.frequency_tx_nco     (   T.Value(1599.609375,'MHz'))   # ~ 1.6GHz.
   qs.frequency_rx_nco     (          T.Value(1500,'MHz'))   # better to be the same as tx_nco
+                                                            #   but this time is not. = 1.5 GHz = 1536/1.024
   qs.frequency_tx_fine_nco( dac_chan,T.Value(   0,'MHz'))   # better not to use it.
   """
     MUX Window setting
@@ -1913,44 +1931,50 @@ def usage():
   qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq,'MHz'))
   qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq,'MHz'))
   qs.acquisition_mode(mux_chan, 'A' )
-  mux_channels.append(mux_chan)
+  # mux_channels.append(mux_chan)                           # DEBUG, disable mux 0 channel
 
   mux_chan       = 1
-  dT=1.024*us
-  readout_window = [(   dT, 3*dT), ( 4*dT, 6*dT),
-                    ( 7*dT, 9*dT), (10*dT,12*dT),
-                    (13*dT,15*dT), (16*dT,18*dT),
-                    (19*dT,21*dT), (22*dT,24*dT),
-                    (25*dT,27*dT), (28*dT,30*dT)]           # 10 sections of 2us
+  dT=2.048*us
+  readout_window = []
+  s =  512*ns    ; readout_window.append(( s, s + dT))
+  for i in range(3):
+    s += dT + 8*ns ; readout_window.append(( s, s + dT))
+    if (s+dT)['us'] > 10.24-0*(2.048+2*0.008):
+      print(i)
+      raise Exception(None)
+  #for i in range(32):
+  #  readout_window.append(( (6*i+1)*dT, (6*i+3)*dT))
+  #  readout_window.append(( (6*i+4)*dT, (6*i+6)*dT))
   qs.acquisition_window(mux_chan, readout_window)
   qs.acquisition_mode(mux_chan, 'A' )
-  qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq,'MHz'))
-  qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq,'MHz'))
+  qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq+102/1.024,'MHz')) # offset, DEBUG
+  qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq+102/1.024,'MHz')) # offset, DEBUG
   mux_channels.append(mux_chan)
   qs.upload_readout_parameters(mux_channels)
 
+  add_control = False
+  if add_control:
+    qs.select_device(devices[1])                     # control settings
+    """
+      Control frequency setting
+        LO  = 11 GHz
+        NCO =  3 GHz
+        fine NCO0 = -24.9 MHz =-255/10.24 (Lower side-band modulation)
+        fine NCO1 =   4.9 MHz =  50/10.24 (Lower side-band modulation)
+        fine NCO2 =  14.5 MHz = 150/10.24 (Lower side-band modulation)
+        f1 = 11 GHz - 3 GHz -   24.9 MHz = 7975.1 with amp = 0.25
+        f2 = 11 GHz - 3 GHz -    4.9 MHz = 7995.1 with amp = 0.12
+        f3 = 11 GHz - 3 GHz - (-14.6 MHz)= 8014.6 with amp = 0.10
+    """
+    qs.upload_parameters([0,1,2])
+    qs.upload_waveform  ([0.25*data,0.12*data,0.10*data],[0,1,2])
+    qs.frequency_local      (          T.Value(  11,'GHz'))
+    qs.frequency_tx_nco     (          T.Value(3000,'MHz'))   # 3.0GHz
+    dac_chan = 0; qs.frequency_tx_fine_nco( dac_chan,T.Value( 24.90234375,'MHz'))
+    dac_chan = 1; qs.frequency_tx_fine_nco( dac_chan,T.Value(  4.8828125, 'MHz'))
+    dac_chan = 2; qs.frequency_tx_fine_nco( dac_chan,T.Value(-14.6484375, 'MHz'))
 
-  qs.select_device('qube004-control_5')                     # control settings
-  """
-    Control frequency setting
-      LO  = 11 GHz
-      NCO =  3 GHz
-      fine NCO0 = -24.9 MHz
-      fine NCO1 =   4.9 MHz
-      fine NCO2 =  14.5 MHz
-      f1 = 11 GHz - 3 GHz -   24.9 MHz = 7975.1 with amp = 0.25
-      f2 = 11 GHz - 3 GHz -    4.9 MHz = 7995.1 with amp = 0.12
-      f3 = 11 GHz - 3 GHz - (-14.6 MHz)= 8014.6 with amp = 0.10
-  """
-  qs.upload_parameters([0,1,2])
-  qs.upload_waveform  ([0.25*data,0.12*data,0.10*data],[0,1,2])
-  qs.frequency_local      (          T.Value(  11,'GHz'))
-  qs.frequency_tx_nco     (          T.Value(3000,'MHz'))   # 3.0GHz
-  dac_chan = 0; qs.frequency_tx_fine_nco( dac_chan,T.Value( 24.90234375,'MHz'))
-  dac_chan = 1; qs.frequency_tx_fine_nco( dac_chan,T.Value(  4.8828125, 'MHz'))
-  dac_chan = 2; qs.frequency_tx_fine_nco( dac_chan,T.Value(-14.6484375, 'MHz'))
-
-  [(qs.select_device(i),qs.daq_start()) for i in [0,2]]     # daq_start
+  [(qs.select_device(i),qs.daq_start()) for i in devices]   # daq_start
   qs.daq_trigger()                                          # daq_trigger
   qs.daq_stop()                                             # daq_stop waits for done
 
@@ -1959,28 +1983,29 @@ def usage():
   #qs.debug_awg_reg(0,0x14,0,16)
   #qs.debug_awg_reg(0,0x18,0,16)
 
-  qs.select_device(0)
-  dat=qs.download_waveform([1])
+  qs.select_device(devices[0])
+  dat=qs.download_waveform([mux_chan])
   cxn.disconnect()
 
-
-  mx,length = dat.shape
-  tdat=dat[0].reshape((length//10,10))
-  dat=np.sum(tdat,axis=1)/10.
-  e=np.exp(-1j*2*np.pi*(3.41796875/62.5)*np.arange(length))
+  data_view = False
+  if data_view:
+    mx,length = dat.shape
+    tdat=dat[0].reshape((length//10,10))
+    dat=np.sum(tdat,axis=1)/10.
+    e=np.exp(-1j*2*np.pi*(3.41796875/62.5)*np.arange(length))
                                                             # You can apply fft if need
                                                             #  dat[0]=np.fft.fft(dat[0])
-  graph_data = []
-  graph_data.append(
-    go.Scatter ( x   = np.arange(length),
-                 y   = np.real(dat),
-                 name= "real")
-  )
-  graph_data.append(
-    go.Scatter ( x   = np.arange(length),
-                 y   = np.imag(dat),
-                 name= "imag")
-  )
+    graph_data = []
+    graph_data.append(
+      go.Scatter ( x   = np.arange(length),
+                   y   = np.real(dat),
+                   name= "real")
+    )
+    graph_data.append(
+      go.Scatter ( x   = np.arange(length),
+                   y   = np.imag(dat),
+                   name= "imag")
+    )
                                                             #graph_data.append(
                                                             #  go.Scatter ( x   = np.arange(length),
                                                             #               y   = np.real(dat[1]),
@@ -1991,43 +2016,177 @@ def usage():
                                                             #               y   = np.imag(dat[1]),
                                                             #               name= "imag")
                                                             #)
-  layout = go.Layout( title = 'Spur in RX',
-                      xaxis=dict(title='Frequency (GHz)',dtick=0.05),
-                      yaxis=dict(title='Dataset',dtick=20)
-                     )
+    layout = go.Layout( title = 'Spur in RX',
+                        xaxis=dict(title='Frequency (GHz)',dtick=0.05),
+                        yaxis=dict(title='Dataset',dtick=20)
+                       )
 
-  fig = go.Figure( graph_data )
-  fig.write_html("1.html")
+    fig = go.Figure( graph_data )
+    fig.write_html("1.html")
 
-def ch6test():
+def test_control_ch(device_name):
   from labrad.units           import ns,us
   import labrad
 
   cxn= labrad.connect()
   qs = cxn.qube_server
 
-  nsample = 8192
+  nsample = 4*5120
   data=np.exp(1j*2*np.pi*(0/QSConstants.DACBB_SAMPLE_R)*np.arange(nsample))*(1-1e-3)
 
-  qs.select_device('qube004-control_6')
+  qs.select_device(device_name)                             # 'qube004-control_6'
 
-  qs.shots(1*100*1000)
+  qs.shots(1*25*1000*10)                                    # 10 seconds
   qs.daq_timeout(T.Value(30,'s'))
-  qs.daq_length( T.Value(16.384,'us'))
+  qs.daq_length( T.Value(2*nsample,'ns'))
   qs.repetition_time(T.Value(4*10.24,'us'))
 
   qs.upload_parameters([0,1,2])
-  qs.upload_waveform  ([0.0*data,0.0*data,1.00*data],[0,1,2])
+  qs.upload_waveform  ([0.5*data,0.3*data,0.1*data],[0,1,2])
   qs.frequency_local      (          T.Value(  11,'GHz'))
   qs.frequency_tx_nco     (          T.Value(3000,'MHz'))   # 3.0GHz ~ 8 GHz
-  qs.frequency_tx_fine_nco( 0,T.Value( 24.90234375,'MHz'))
-  qs.frequency_tx_fine_nco( 1,T.Value(  4.8828125, 'MHz'))
-  qs.frequency_tx_fine_nco( 2,T.Value(-14.6484375, 'MHz'))
+  qs.frequency_tx_fine_nco( 0, T.Value( 29.296875,'MHz'))
+  qs.frequency_tx_fine_nco( 1, T.Value( 5.37109375, 'MHz'))
+  qs.frequency_tx_fine_nco( 2, T.Value(-14.6484375, 'MHz'))
 
   qs.daq_start()
   qs.daq_trigger()
   qs.daq_stop()
 
+def test_control_ch_bandwidth(device_name):
+  from labrad.units           import ns,us
+  import labrad
+
+  cxn= labrad.connect()
+  qs = cxn.qube_server
+
+  nsample = 4*5120
+  data=np.exp(1j*2*np.pi*(0/QSConstants.DACBB_SAMPLE_R)*np.arange(nsample))*(1-1e-3)
+
+  qs.select_device(device_name)                             # 'qube004-control_6'
+
+  qs.shots          ( 1*1000*25 )                           # 1 seconds
+  qs.daq_timeout    ( T.Value(30,'s'))
+  qs.daq_length     ( T.Value(2*nsample,'ns'))
+  qs.repetition_time( T.Value(4*10.24,'us'))
+
+  qs.upload_parameters    ([0,1,2])
+  qs.upload_waveform      ([0.0*data, 1.0*data, 0.0*data], [0,1,2])
+  qs.frequency_local      (    T.Value(  11,'GHz'))
+  qs.frequency_tx_nco     (    T.Value(3000,'MHz'))         # 3.0GHz ~ 8 GHz
+  qs.frequency_tx_fine_nco( 0, T.Value( 29.296875,'MHz'))
+  qs.frequency_tx_fine_nco( 1, T.Value( 5.37109375, 'MHz'))
+  qs.frequency_tx_fine_nco( 2, T.Value(-14.6484375, 'MHz'))
+
+  if False:                                                 # IF NCO sweep
+    for i in range(256):
+      fnco = (i*8+1024)*(12000/2**13)
+      qs.frequency_tx_nco (    T.Value(fnco,'MHz'))
+      qs.daq_start()
+      qs.daq_trigger()
+      qs.daq_stop()
+  else:                                                     # BB AWG waveform sweep
+    for i in range(256):
+      bbfreq       = (i*20-2560)/10.24
+      phase_factor = 2*np.pi*(bbfreq/QSConstants.DACBB_SAMPLE_R)
+      data         =   np.exp(1j*phase_factor*np.arange(nsample))*(1-1e-3)
+      qs.upload_parameters([1])
+      qs.upload_waveform  ([data],[1])
+      qs.daq_start()
+      qs.daq_trigger()
+      qs.daq_stop()
+
+def test_readout_ch_bandwidth_and_spurious(device_name):
+
+  from labrad.units           import ns,us
+  import labrad
+  import time
+  import pickle
+
+  def spectrum_analyzer_get():
+    import socket
+    import numpy as np
+    import pickle
+    import struct
+    sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    sock.settimeout(1)
+    sock.connect(('localhost',19001))
+    sock.send(b':TRAC:DATA? 1\n')
+    rdat=b''
+    while True:
+      try:
+        r=sock.recv(1024)
+        rdat=rdat+r
+      except Exception as e:
+        break
+    sock.close()
+    y=np.array(struct.unpack('<501d',rdat[6:]))
+    return y
+
+  cxn= labrad.connect()
+  qs = cxn.qube_server
+
+  nsample      = 4*5120                                     # 4 x 10.24us = 40.96us
+  phase_factor = 2*np.pi*(-189/1.024/QSConstants.DACBB_SAMPLE_R)     # 2pi x normalized frequency
+  data         = np.exp(1j*phase_factor*np.arange(nsample))*(1-1e-3)
+
+  qs.select_device(device_name)                             # 'qube004-control_6'
+
+  qs.shots                ( 6*1000*25 )                     # 6 seconds
+  qs.daq_timeout          ( T.Value(30,'s'))
+  qs.daq_length           ( T.Value(2*nsample,'ns'))
+  qs.repetition_time      ( T.Value(4*10.24,'us'))          # identical to the daq_length = CW operation
+
+  qs.upload_parameters    ([0])
+  qs.upload_waveform      ([data],[0])
+  qs.frequency_local      (    T.Value(8500,'MHz'))
+  qs.frequency_tx_nco     (    T.Value(1599.609375,'MHz'))         # 1.5GHz
+  qs.frequency_tx_fine_nco( 0, T.Value(   0,'MHz'))
+
+  def experiment_nco_sweep( vault, fnco, file_idx ):
+    qs.frequency_tx_nco   (    T.Value(fnco,'MHz'))
+    qs.daq_start()
+    qs.daq_trigger()
+    time.sleep(3.5)
+    dat = spectrum_analyzer_get()
+    print(file_idx,fnco)
+    vault.append(dat)
+    with open('data{0:03d}.pkl'.format(file_idx),'wb') as f:
+      pickle.dump(np.array(vault), f)
+    qs.daq_stop()
+
+  if False:
+    vault = []
+    for i in range(512):
+      fnco = (i*2+512)*(12000/2**13)
+      experiment_nco_sweep( vault, fnco, 0 )
+
+  elif False:
+    for freq_lo, j in zip(range(9500,8000,-100),range(15)):
+      qs.frequency_local( T.Value( freq_lo,'MHz'))
+      vault = []
+      for i in range(256):
+        fnco = (i*4+512)*(12000/2**13)
+        experiment_nco_sweep( vault, fnco, j )
+
+  elif False:
+    for i in range(256):
+      bbfreq       = (i*20-2560)/10.24
+      phase_factor = 2*np.pi*(bbfreq/QSConstants.DACBB_SAMPLE_R)
+      data         = np.exp(1j*phase_factor*np.arange(nsample))*(1-1e-3)
+      qs.upload_waveform  ([data],[0])
+      qs.upload_parameters([0])
+      qs.daq_start()
+      qs.daq_trigger()
+      qs.daq_stop()
+  else:
+    qs.daq_start()
+    qs.daq_trigger()
+    time.sleep(3.5)
+    dat = spectrum_analyzer_get()
+    with open('data.pkl','wb') as f:
+      pickle.dump(np.array(dat), f)
+    qs.daq_stop()
 
 
 ############################################################
