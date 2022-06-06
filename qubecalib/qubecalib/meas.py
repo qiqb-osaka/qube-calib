@@ -4,6 +4,7 @@ import e7awgsw
 from collections import namedtuple
 import numpy as np
 import math
+import warnings
 from . import qube
 from .qube import PortFunc, Port, Lane, PortNo
 
@@ -131,11 +132,12 @@ class SimpleSendRecvProto(object):
             
             self.t0 = t0 # 位相基準時間 [s]
             self.phi = phi # 位相基準時間での位相オフセット [rad]
+            assert mag <= 32767, 'Mag must be less than 32767'
             self.mag = mag # 信号の振幅 15 bits
             self.mhz = mhz # SSB変調周波数 [MHz]
     
     class WaveSequenceFactory(object):
-        
+
         def __init__(self, num_wait_words, num_repeats, duration, *, enable_lib_log = True, logger = get_null_logger()):
             
             self._num_wait_words = num_wait_words
@@ -200,12 +202,9 @@ class SimpleSendRecvProto(object):
         
         self._duration = duration
         self._wait_words = wait_words
-        self._readin_port = readin_port
+       
+        self.readin_port = readin_port
         self._readout_awg = readout_awg
-        self._ipfpga = readin_port.adc.ipfpga
-        
-        self._capture_modules = c = readin_port.adc.caps
-        self._capture_units = CaptureModule.get_units(*c)
         
         self.additional_capture_length = 1e-6 # [s]
         self.capture_delay = 0
@@ -216,6 +215,22 @@ class SimpleSendRecvProto(object):
         self.repeats = 1
         self.trigger = None
         
+    @property
+    def readin_port(self):
+        return self._readin_port
+
+    @readin_port.setter
+    def readin_port(self, v):
+        assert isinstance(v, Port) or isinstance(v, list), 'Must be instance of qubecalib.qube.Port or list'
+        if isinstance(v, list):
+            self._readin_port = l = v
+            self._ipfpga = v[0].adc.ipfpga
+        else:
+            self._readin_port = l = [v,]
+            self._ipfpga = v.adc.ipfpga
+        self._capture_modules = c = sum([p.adc.caps for p in l], [])
+        self._capture_units = CaptureModule.get_units(*c)
+
     def assign(self, awg, seq):
         
         self.sequence[awg] = seq
@@ -328,8 +343,8 @@ class SimpleSendRecvProto(object):
                 data[c] = d[:,0] + 1j * d[:,1]
             return data
 
-        capture_modules = c = self._readin_port.adc.caps
-        capture_units = CaptureModule.get_units(*c)
+        capture_modules = self._capture_modules
+        capture_units = self._capture_units
         
         # readout 用の waves_sequence が登録されているかチェック
         if self._readout_awg not in self.sequence:
