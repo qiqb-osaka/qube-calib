@@ -51,11 +51,13 @@ class LongSend(object):
     # 単一の awg のみを受け付けるように変更した
     # 複数必要な場合は [start(a) for a in awgs] のようにする
     @classmethod
-    def start(cls, port, awg, att=0, freq=2.5e6, amax=32767):
+    def start(cls, port, lane=0, att=0, freq=2.5e6, amax=32767):
         if port.active:
             cls.stop(port)
         
+        awg = port.dac.awgs[lane]
         ipaddr = port.dac.ipfpga
+        
         amp = amax*10**(-att/20)
         with e7awgsw.AwgCtrl(ipaddr) as awg_ctrl:
             # 初期化
@@ -68,12 +70,15 @@ class LongSend(object):
         port.active = True
     
     @classmethod
-    def stop(cls, port, awg):
+    def stop(cls, port, lane=0):
+        
+        awg = port.dac.awgs[lane]
         ipaddr = port.dac.ipfpga
-        awg_ctrl = e7awgsw.AwgCtrl(ipaddr)
-        awg_ctrl.terminate_awgs(awg)
+        
+        with e7awgsw.AwgCtrl(ipaddr) as awg_ctrl:
+            awg_ctrl.terminate_awgs(awg)
+            
         port.active = False
-        # API を変更したので，このフラグをとりあえず外した
         # AWG が稼働中を示すフラグをとりあえずつけた．でもできればlsiから読み出したい．
 
 class Recv(object):
