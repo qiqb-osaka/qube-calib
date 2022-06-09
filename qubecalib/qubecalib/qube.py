@@ -416,145 +416,16 @@ class Readout(Output):
         super().__init__(local, dac, upconv)
         self.upconv.mode = ConvMode.USB
 
+class Pump(Output):
+    
+    def __init__(self, local, dac, upconv):
+        super().__init__(local, dac, upconv)
+        self.upconv.mode = ConvMode.USB
 
 class Readin(Input):
     
     def __init__(self, local, adc):
         super().__init__(local, adc)
-        
-        
-        
-# import os
-# import math
-# import subprocess
-# import yaml
-# import e7awgsw
-# import qubelsi.qube
-# from collections import namedtuple
-
-
-# PATH_TO_BITFILE = '/home/qube/bin/'
-# PATH_TO_API = './adi_api_mod'
-# PATH_TO_CONFIG = './.config/'
-
-# class Qube64(object):
-#     def __init__(self, config_file_name=None):
-#         pass
-
-# class Qube16(object):
-#     def __init__(self, config_file_name=None):
-#         pass
-
-
-# class AD9082(object):
-#     def __init__(self, lsi, ch, ipfpga):
-#         self.lsi = lsi
-#         self.ch = ch
-#         self.fnco = 1000
-#         self.ipfpga = ipfpga
-#     def get_fnco(self):
-#         return self.fnco # MHz
-
-# class AD9082DAC(AD9082):
-#     def __init__(self, lsi, ch, ipfpga, awgs):
-#         super().__init__(lsi, ch, ipfpga)
-#         self.awgs = awgs
-#     def set_fnco(self, mhz):
-#         self.fnco = mhz # ここはlsi読み出しに変更したい
-#         self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch)
-
-# class AD9082ADC(AD9082):
-#     def __init__(self, lsi, ch, ipfpga, caps):
-#         super().__init__(lsi, ch, ipfpga)
-#         self.caps = caps
-#     def set_fnco(self, mhz):
-#         self.fnco = mhz # ここはlsi読み出しに変更したい
-#         self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch, adc_mode=True)
-
-# # DAC
-# # 1CB ~ 1D0 まで 48 bit
-# # アドレス選択
-# # 0x001B [3:0] DAC MASK
-
-# # ADC
-# # 0x0A05 ~ 0x0A0A まで 48 bit
-# # 0x0018 [3:0] ADC MASK
-
-# class OutputPort(object):
-#     def __init__(self, local, dac, upconv):
-#         self.local = local
-#         self.dac = dac
-#         self.upconv = upconv
-#         self.active = False
-#     def set_lo(self, mhz): # MHz
-#         self.local.set_freq(mhz)
-#     def set_if(self, mhz): # MHz
-#         self.dac.set_fnco(mhz)
-#     def set_usb(self):
-#         self.upconv.lsi.set_usb()
-#     def set_lsb(self):
-#         self.upconv.lsi.set_lsb()
-#     def get_status(self):
-#         fl, fi = self.local.get_freq(), self.dac.fnco
-#         is_usb = self.upconv.is_setUSB()
-#         r = ''
-#         r += 'RF = {:>5.3f} MHz '.format(fl + fi if is_usb else fl - fi)
-#         r += 'LO = {:>5.0f}    MHz '.format(int(fl))
-#         r += 'IF = {:>5.3f} MHz '.format(fi)
-#         r += 'LSB/USB: {} MODE '.format('USB' if is_usb else 'LSB')
-#         r += 'AWG: {}'.format('Active' if self.active else 'Inactive')
-#         return r
-    
-# class CtrlPort(OutputPort):
-#     def __init__(self, local, dac, upconv):
-#         super().__init__(local, dac, upconv)
-#         self.set_lsb()
-
-# class ReadoutPort(OutputPort):
-#     def __init__(self, local_osc, dac, up_conv):
-#         super().__init__(local_osc, dac, up_conv)
-#         self.set_usb()
-
-# class ReadinPort(object):
-#     def __init__(self, local, adc):
-#         self.local = local
-#         self.adc = adc
-#         self.active = False
-#     def set_lo(self, mhz): # MHz
-#         self.local.set_freq(mhz)
-#     def set_if(self, mhz): # MHz
-#         self.adc.set_fnco(mhz)
-#     def get_status(self):
-#         fl, fi = self.local.get_freq(), self.adc.fnco
-#         r = ''
-#         r += 'RF = {:>5.3f} MHz '.format(fl + fi)
-#         r += 'LO = {:>5.0f}    MHz '.format(int(fl))
-#         r += 'IF = {:>5.3f} MHz '.format(fi)
-#         return r
-        
-        
-# class UpConverter(object):
-#     Vatt = namedtuple('Vatt', ('lsi', 'ch'))
-#     def __init__(self, lsi, vatt):
-#         self.lsi = lsi
-#         self.vatt = vatt
-#     def is_setUSB(self):
-#         return True if self.lsi.read_mode() == 0 else False
-
-# class LocalOscillator(object):
-#     def __init__(self, lsi):
-#         self.lsi = lsi
-#     def set_freq(self, mhz): # 100 MHz or less truncated
-#         v = math.floor(mhz/100)
-#         self.lsi.write_freq_100M(v)
-#     def get_freq(self):
-#         return self.lsi.read_freq_100M() * 100
-
-
-
-
-        
-
         
 # # -------------------- qubelsi
 

@@ -32,39 +32,48 @@ class LongSend(object):
         return wave_seq
     
     @classmethod
-    def set_wave_sequence(cls, awg_ctrl, awgs, amps, freqs):
+    def set_wave_sequence(cls, awg_ctrl, awg, amp, freq):
         awg_to_wave_sequence = {}
-        for awg_id, a, f in zip(awgs, amps, freqs):
-            # print("{}: freq={}, amp={}".format(awg_id, f, a))
-            wave_seq = cls.gen_wave_seq(f, a) # 5 MHz  5MHz x 8 周期では切れ目のない波形はできない
-            awg_to_wave_sequence[awg_id] = wave_seq
-            awg_ctrl.set_wave_sequence(awg_id, wave_seq)
+        
+        # 単一の awg のみを受け付けるように変更
+        # for awg_id, a, f in zip(awgs, amps, freqs):
+        #     # print("{}: freq={}, amp={}".format(awg_id, f, a))
+        #     wave_seq = cls.gen_wave_seq(f, a) # 5 MHz  5MHz x 8 周期では切れ目のない波形はできない
+        #     awg_to_wave_sequence[awg_id] = wave_seq
+        #     awg_ctrl.set_wave_sequence(awg_id, wave_seq)
+        
+        wave_seq = cls.gen_wave_seq(freq, amp) # 5 MHz  5MHz x 8 周期では切れ目のない波形はできない
+        awg_to_wave_sequence[awg] = wave_seq
+        awg_ctrl.set_wave_sequence(awg, wave_seq)
+        
         return awg_to_wave_sequence
-    
+        
+    # 単一の awg のみを受け付けるように変更した
+    # 複数必要な場合は [start(a) for a in awgs] のようにする
     @classmethod
-    def start(cls, port, atts=[0, 0, 0], freqs=[2.5e6, 2.5e6, 2.5e6]):
+    def start(cls, port, awg, att=0, freq=2.5e6, amax=32767):
         if port.active:
             cls.stop(port)
+        
         ipaddr = port.dac.ipfpga
-        amps = [10922*10**(-v/20) for v in atts]
-        awgs = port.dac.awgs
+        amp = amax*10**(-att/20)
         with e7awgsw.AwgCtrl(ipaddr) as awg_ctrl:
-            awg_ctrl = e7awgsw.AwgCtrl(ipaddr)
             # 初期化
-            awg_ctrl.initialize(*awgs)
+            awg_ctrl.initialize(awg)
             # 波形シーケンスの設定
-            awg_to_wave_sequence = cls.set_wave_sequence(awg_ctrl, awgs, amps, freqs)
+            awg_to_wave_sequence = cls.set_wave_sequence(awg_ctrl, awg, amp, freq)
             # 波形送信スタート
-            awg_ctrl.start_awgs(*awgs)
+            awg_ctrl.start_awgs(awg)
+            
         port.active = True
     
     @classmethod
-    def stop(cls, port):
+    def stop(cls, port, awg):
         ipaddr = port.dac.ipfpga
-        awgs = port.dac.awgs
         awg_ctrl = e7awgsw.AwgCtrl(ipaddr)
-        awg_ctrl.terminate_awgs(*awgs)
+        awg_ctrl.terminate_awgs(awg)
         port.active = False
+        # API を変更したので，このフラグをとりあえず外した
         # AWG が稼働中を示すフラグをとりあえずつけた．でもできればlsiから読み出したい．
 
 class Recv(object):
