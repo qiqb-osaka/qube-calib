@@ -150,6 +150,30 @@ class Qube(alias.Qube):
                 UpConv(adrf[7], Vatt(ad5328, 7))
             ),
         }
+
+        if self.config['type'] == 'B':
+            self._port[PortNo.P0] = Ctrl(
+                LO(lmx[0]),
+                DAC(ipfpga, ad9082[0], 0, [(AWG.U15, 0),]),
+                UpConv(adrf[0], Vatt(ad5328, 0))
+            )
+            del self._port[PortNo.P1]
+            self._port[PortNo.P2] = Ctrl(
+                LO(lmx[1]),
+                DAC(ipfpga, ad9082[0], 1, [(AWG.U14, 1),]),
+                UpConv(adrf[1], Vatt(ad5328, 1))
+            )
+            self._port[PortNo.P11] = Ctrl(
+                LO(lmx[6]),
+                DAC(ipfpga, ad9082[1], 2, [(AWG.U1, 6),]),
+                UpConv(adrf[6], Vatt(ad5328, 6))
+            )
+            del self._port[PortNo.P12]
+            self._port[PortNo.P13] = Ctrl(
+                LO(lmx[7]),
+                DAC(ipfpga, ad9082[1], 3, [(AWG.U2, 7),]),
+                UpConv(adrf[7], Vatt(ad5328, 7))
+            )
     
     @property
     def awg(self):
