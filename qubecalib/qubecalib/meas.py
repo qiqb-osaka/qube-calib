@@ -1,5 +1,5 @@
 from enum import IntEnum
-from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, AwgCtrl, WaveSequence, DspUnit, IqWave, get_null_logger, AWG, AwgCtrlRegs
+from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, AwgCtrl, WaveSequence, DspUnit, IqWave, AWG
 import e7awgsw
 from collections import namedtuple
 import numpy as np
@@ -152,12 +152,11 @@ class SimpleSendRecvProto(object):
     
     class WaveSequenceFactory(object):
 
-        def __init__(self, num_wait_words, num_repeats, duration, *, enable_lib_log = True, logger = get_null_logger()):
+        def __init__(self, num_wait_words, num_repeats, duration, *, enable_lib_log = True):
             
             self._num_wait_words = num_wait_words
             self._num_repeats = 1
             self._enable_lib_log = enable_lib_log
-            self._logger = logger
             
             self._duration = duration
             self._timeline = self._gen_timeline()
@@ -202,7 +201,7 @@ class SimpleSendRecvProto(object):
             
             num_blank_samples = max(int(AwgCtrl.SAMPLING_RATE * self.blank), 0) # 非負値
             
-            wseq = WaveSequence(self._num_wait_words, self._num_repeats, enable_lib_log = self._enable_lib_log, logger = self._logger)
+            wseq = WaveSequence(self._num_wait_words, self._num_repeats, enable_lib_log = self._enable_lib_log)
             
             wseq.add_chunk(
                 iq_samples = s,

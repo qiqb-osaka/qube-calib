@@ -120,6 +120,11 @@ class Qube(alias.Qube):
                 LO(lmx[0]),
                 ADC(ipfpga, ad9082[0], 3, [CapM.U1,])
             ),
+            PortNo.P2: Ctrl(
+                LO(lmx[1]),
+                DAC(ipfpga, ad9082[0], 1, [(AWG.U14, 1),]),
+                UpConv(adrf[2], Vatt(ad5328, 1))
+            ),
             PortNo.P5: Ctrl(
                 LO(lmx[2]),
                 DAC(ipfpga, ad9082[0], 2, [(AWG.U11, 2), (AWG.U12, 3), (AWG.U13, 4),]),
@@ -139,6 +144,11 @@ class Qube(alias.Qube):
                 LO(lmx[5]),
                 DAC(ipfpga, ad9082[1], 1, [(AWG.U0, 3), (AWG.U3, 4), (AWG.U4, 5),]),
                 UpConv(adrf[5], Vatt(ad5328, 5))
+            ),
+            PortNo.P11: Ctrl(
+                LO(lmx[6]),
+                DAC(ipfpga, ad9082[1], 2, [(AWG.U1, 6),]),
+                UpConv(adrf[6], Vatt(ad5328, 6))
             ),
             PortNo.P12: Readin(
                 LO(lmx[7]),
