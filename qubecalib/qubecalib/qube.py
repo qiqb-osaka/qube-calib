@@ -123,7 +123,7 @@ class Qube(alias.Qube):
             PortNo.P2: Ctrl(
                 LO(lmx[1]),
                 DAC(ipfpga, ad9082[0], 1, [(AWG.U14, 1),]),
-                UpConv(adrf[2], Vatt(ad5328, 1))
+                UpConv(adrf[1], Vatt(ad5328, 1))
             ),
             PortNo.P5: Ctrl(
                 LO(lmx[2]),
