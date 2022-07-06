@@ -1,496 +1,694 @@
 from . import alias
 
-import os
-import math
-import subprocess
+from abc import ABC, abstractmethod
+from enum import Enum, auto
 import yaml
-from collections import namedtuple
-from enum import Enum, IntEnum, auto
+import math
+import warnings
+import traceback
 from e7awgsw import AWG, CaptureModule
 import e7awgsw
 
+class LSI(ABC):
+    
+    def __init__(self, lsi):
+        self.lsi = lsi
+        
+    @abstractmethod
+    def _status(self):
+        pass
+    
+    @property
+    def status(self):
+        return self._status()
+    
+class LMX2594(LSI):
+    
+    @property
+    def mhz(self):
+        return self.lsi.read_freq_100M() * 100
+    @mhz.setter
+    def mhz(self, v):
+        
+        if v < 8000 or 15000 < v:
+            raise ValueError('The frequency must be between 8000MHz and 15000MHz.')
+            
+        mhz = math.floor(v / 100)
 
-class Lane(IntEnum):
-    L0 = 0
-    L1 = 1
-    L2 = 2
+        if v % 100:
+            warnings.warn('The frequency can only be set in multiples of 100MHz. {}MHz is set.'.format(mhz*100), stacklevel=2)
+            
+        if mhz*100 % 500:
+            warnings.warn('To synchronize the output phase, the frequency must be a multiple of 500MHz.', stacklevel=2)
+            
+        self.lsi.write_freq_100M(mhz)
+        
+    def _status(self):
+        
+        return {
+            'mhz': self.mhz
+        }
+
+
+class AD5328(LSI):
+    
+    def __init__(self, lsi, ch):
+        super().__init__(lsi)
+        self.ch = ch
+        self._value = 0x800
+    
+    @property
+    def value(self):
+        return self._value
+    
+    @value.setter
+    def value(self, v):
+        lsi, ch = self.lsi, self.ch
+        lsi.write_value(ch, v)
+        lsi.write_value(0xA, 0x002) # apply value
+        self._value = v
+        return v / 0xfff * 3.3 # volt
+    
+    def _status(self):
+        
+        return {
+            'value': self.value
+        }
+
+    
+class SSB(Enum):
+    USB = auto()
+    LSB = auto()
+
+    
+class ADRF6780(LSI):
+    
+    def __init__(self, lsi, ad5328):
+        
+        super().__init__(lsi)
+        self.ad5328 = ad5328
+        
+    @property
+    def ssb(self):
+        
+        return SSB.USB if self.lsi.read_mode() == 0 else SSB.LSB
+    
+    @ssb.setter
+    def ssb(self, v):
+        
+        if v == SSB.USB:
+            self.lsi.set_usb()
+        elif v == SSB.LSB:
+            self.lsi.set_lsb()
+    
+    @property
+    def vatt(self):
+        
+        return self.ad5328.value
+    
+    @vatt.setter
+    def vatt(self, v):
+        
+        self.ad5328.value = v
+
+    def _status(self):
+        
+        return {
+            'ssb': self.ssb,
+            'vatt': self.vatt,
+        }
+        
+        
+class AD9082(LSI):
+    def __init__(self, lsi):
+        super().__init__(lsi)
+        
+        
+class NCO(AD9082):
+    
+    def __init__(self, lsi, ch):
+        
+        super().__init__(lsi)
+        self.ch = ch
+        self._mhz = 0
+        
+    @abstractmethod
+    def _set_frequency(self, v):
+        
+        pass
+    
+    @property
+    def mhz(self):
+        
+        return self._mhz
+    
+    @mhz.setter
+    def mhz(self, v):
+        
+        self._mhz = v
+        self._set_frequency(v)
+        
+    def _status(self):
+        
+        return {'mhz': self.mhz}
+        
+        
+class CNCODAC(NCO):
+    
+    def __init__(self, lsi, ch):
+        super().__init__(lsi, ch)
+        self._mhz = 970 # 下位の API で決め打ち
+        
+    def _set_frequency(self, v):
+        self.lsi.set_nco(freq=v*1e+6, ch=self.ch, adc_mode=False, fine_mode=False)
+        
+        
+class FNCODAC(NCO):
+    
+    def __init__(self, lsi, ch):
+        super().__init__(lsi, ch)
+        self._mhz = 0 # 下位の API で決め打ち
+        
+    def _set_frequency(self, v):
+        self.lsi.set_nco(freq=v*1e+6, ch=self.ch, adc_mode=False, fine_mode=True)
+        
+        
+class CNCOADC(NCO):
+    
+    def __init__(self, lsi, ch):
+        super().__init__(lsi, ch)
+        self._mhz = 970 # 下位の API で決め打ち
+        
+    def _set_frequency(self, v):
+        self.lsi.set_nco(freq=v*1e+6, ch=self.ch, adc_mode=True, fine_mode=False)
+        
+        
+class FNCOADC(NCO):
+    
+    def __init__(self, lsi, ch):
+        super().__init__(lsi, ch)
+        self._mhz = 0 # 下位の API で決め打ち
+        
+    def _set_frequency(self, v):
+        self.lsi.set_nco(freq=v*1e+6, ch=self.ch, adc_mode=True, fine_mode=True)
+        
+
+class AWG(AD9082):
+    
+    def __init__(self, lsi, awg, ipfpga, nco):
+        super().__init__(lsi)
+        self.awg = awg
+        self.ipfpga = ipfpga
+        self.nco = nco
+        
+    def _status(self):
+        
+        return {
+            'nco': self.nco.status,
+        }
+        
+        
+class CPT(AD9082):
+    
+    def __init__(self, lsi, cpt, ipfpga):
+        super().__init__(lsi)
+        self.cpt = cpt
+        self.ipfpga = ipfpga
+        
+    def _status(self):
+        
+        return None
+        
+        
+class DAC(AD9082):
+    
+    def __init__(self, lsi, ch, ipfpga, awgs):
+        super().__init__(lsi)
+        self.nco = CNCODAC(lsi, ch)
+        self.nawgs = len(awgs)
+        f = lambda a: AWG(lsi, a[0], ipfpga, FNCODAC(lsi, a[1]))
+        k = lambda i: 'awg{}'.format(i)
+        self._awgs = a =  {k(i): f(awg) for i, awg in enumerate(awgs)}
+        for k, v in a.items():
+            setattr(self, k, v)
+        # for i, awg in enumerate(awgs):
+        #     setattr(self, 'awg{}'.format(i), AWG(lsi, awg[0], ipfpga, FNCODAC(lsi, awg[1])))
+    
+    def _status(self):
+        
+        return {
+            'nco': self.nco.status,
+            'awgs': {k: v.status for k, v in self._awgs.items()},
+        }
+
+    
+class ADC(AD9082):
+    
+    def __init__(self, lsi, ch, ipfpga, cpts):
+        super().__init__(lsi)
+        self.nco = CNCOADC(lsi, ch)
+        for i, cpt in enumerate(cpts):
+            k = lambda i: 'cpt{}'.format(i)
+            setattr(self, k(i), CPT(lsi, cpt, ipfpga))
+
+    def _status(self):
+        
+        return {
+            'nco': self.nco.status,
+        }
+
+class RF(object):
+    
+    def __init__(self, func):
+        
+        self.func = func
+        
+    @property
+    def mhz(self):
+        
+        return self.func()
+    
+class Port(object):
+    
+    @abstractmethod
+    def __init__(self):
+        
+        pass
+        
+    @abstractmethod
+    def _status(self):
+        
+        pass
+    
+    @property
+    def status(self):
+        
+        return self._status()
+        
+        
+class Output(Port):
+    
+    def __init__(self, dac, lo, mix):
+        self._rf = RF(self._calc_rf)
+        self.dac = dac
+        self.lo = lo
+        self.mix = mix
+        
+        setattr(self, 'awg', dac.awg0)
+        for i in range(dac.nawgs):
+            awg = getattr(dac, 'awg{}'.format(i))
+            setattr(self, 'awg{}'.format(i), awg)
+        
+    @property
+    def nco(self):
+        
+        return self.dac.nco
+        
+    @property
+    def awgs(self):
+        
+        n = self.dac.nawgs
+        k = lambda i: 'awg{}'.format(i)
+        
+        return {k(i): getattr(self.dac, k(i)) for i in range(n)}
+        
+    @property
+    def rf(self):
+        
+        return self._rf
+        
+    def _calc_rf(self):
+        
+        rst = {}
+        
+        lo = self.lo.mhz
+        cnco = self.nco.mhz
+        for k, v in self.awgs.items():
+            if self.mix.ssb == SSB.LSB:
+                rst[k] = lo - cnco - v.nco.mhz
+            if self.mix.ssb == SSB.USB:
+                rst[k] = lo + cnco + v.nco.mhz
+        
+        return rst
+        
+    def _status(self):
+        
+        return {
+            'dac': self.dac.status,
+            'lo': self.lo.status,
+            'mix': self.mix.status,
+        }
+        
+        
+class Input(Port):
+    
+    def __init__(self, adc, lo):
+        self._rf = RF(self._calc_rf)
+        self.adc = adc
+        self.lo = lo
+        
+    @property
+    def nco(self):
+        
+        return self.adc.nco
+    
+    @property
+    def rf(self):
+        
+        return self._rf
+        
+    def _calc_rf(self):
+        
+        lo = self.lo.mhz
+        cnco = self.nco.mhz
+        
+        return (lo - cnco, lo + cnco)
+        
+        
+    def _status(self):
+        
+        return {
+            'adc': self.adc.status,
+            'lo': self.lo.status,
+        }
+        
+        
+class Monitorout(Port):
+    
+    def __init__(self):
+        self._rf = RF(self._calc_rf)
+    
+    def _calc_rf(self):
+        
+        return None
+        
+class NotAvailable(Port):
+    
+    def __init__(self):
+        self._rf = RF(self._calc_rf)
+        
+    def _calc_rf(self):
+        
+        return None
+    
+        
+class Ctrl(Output):
+    
+    def __init__(self, dac, lo, mix):
+        super().__init__(dac, lo, mix)
+        self.mix.ssb = SSB.LSB
+
+
+class Readout(Output):
+    
+    def __init__(self, dac, lo, mix):
+        super().__init__(dac, lo, mix)
+        self.mix.ssb = SSB.USB
     
     
-class PortFunc(IntEnum):
-    Readout0 = 0
-    Readin0 = 1
-    Pump0 = 2
-    Ctrl0 = 5
-    Ctrl1 = 6
-    Ctrl2 = 7
-    Ctrl3 = 8
-    Pump1 = 11
-    Readin1 = 12
-    Readout1 = 13
+class Pump(Output):
+    
+    def __init__(self, dac, lo, mix):
+        super().__init__(dac, lo, mix)
+        self.mix.ssb = SSB.USB
+    
+    def _calc_rf(self):
+        
+        rst = super()._calc_rf()
+        
+        return {k: v * 2 for k, v in rst.items()}
+    
+class Readin(Input):
+    
+    def __init__(self, adc, lo):
+        super().__init__(adc, lo)
     
     
-class PortNo(IntEnum):
-    P0 = 0
-    P1 = 1
-    P2 = 2
-    P5 = 5
-    P6 = 6
-    P7 = 7
-    P8 = 8
-    P11 = 11
-    P12 = 12
-    P13 = 13
+class Monitorin(Input):
+    
+    def __init__(self, adc, lo):
+        super().__init__(adc, lo)
     
     
-class Qube(alias.Qube):
+class Qube(object): # QubeInstanceFactory
+    PATH_TO_CONFIG = './.config'
+    
+    @classmethod
+    def load(cls, c):
+        
+        name = '{}/{}'.format(cls.PATH_TO_CONFIG, c)
+        with open(name, 'rb') as f:
+            o = yaml.safe_load(f)
+        
+        return o
+
+    @classmethod
+    def create(cls, config_file_name):
+        
+        o = cls.load(config_file_name)
+        if o['type'] == 'A':
+            QubeA.PATH_TO_CONFIG = cls.PATH_TO_CONFIG
+            return QubeA(config_file_name)
+        if o['type'] == 'B':
+            QubeB.PATH_TO_CONFIG = cls.PATH_TO_CONFIG
+            return QubeB(config_file_name)
+
+
+class QubeBase(alias.Qube):
+    '''
+    config ファイルを読んでから接続する (GUI用)
+    qube = Qube()
+    qube.prepare()
+    任意の IPADDR で設定する
+    qube = Qube()
+    qube.prepare(ipaddr, path_to_api)
+    '''
+    
     PATH_TO_BITFILE = '/home/qube/bin'
     PATH_TO_API = './adi_api_mod'
     PATH_TO_CONFIG = './.config'
     
-    def __init__(self, addr=None, path=None, config_file_name=None):
-        super().__init__(addr, path)
-        self._port = None
-        self.config = dict()
+    def __init__(self, config_file_name=None):
+        
+        self._attr = None
+        
         if config_file_name is not None:
-            self.load_config(config_file_name)
-            
-    def load_config(self,config_file_name):
+            self.load(config_file_name)
+            self.prepare()
+    
+    def prepare(self, ipaddr=None):
         
-        name = '{}/{}'.format(self.PATH_TO_CONFIG, config_file_name)
+        if ipaddr is None:
+            if self._attr is not None:
+                ipaddr = self['iplsi']
+            else:
+                raise(ValueError, 'The config file must be loaded or ipaddr must be specified.')
+        self._attr['iplsi'] = ipaddr
+        super().prepare(ipaddr, self.PATH_TO_API)
+
+    def __getitem__(self, v):
+        
+        return self._attr[v]
+        
+    def load(self, c):
+        
+        name = '{}/{}'.format(self.PATH_TO_CONFIG, c)
         with open(name, 'rb') as f:
-            self.config = o = yaml.safe_load(f)
+            self._attr = o = yaml.safe_load(f)
             
-        self.prepare(o['iplsi'], self.PATH_TO_API)
+        ipaddr = self['ipfpga']
+        s = ipaddr.split('.')
+        s[1] = "2"
+        self._attr['ipmulti'] = '.'.join(map(str, s))
+
+    def config(self, bitfile=None):
         
-    def save(self, state_file_name):
-        """qubelsi達の設定を保存する"""
-        pass
-    
-    def load(self, state_file_name):
-        """qubelsi達の設定を復旧する"""
-        pass
-    
-    def config_fpga(self, bitfile=None, message_out=False):
-        
-        if bitfile is None and not 'bitfile' in self.config:
+        if bitfile is None and not 'bitfile' in self:
             raise ValueError('Specify bitfile.')
         
         if bitfile is None:
-            bitfile = self.config['bitfile']
+            bitfile = self['bitfile']
+            
+        self._config(bitfile)
+            
+    def _config(self, bitfile):
         
         os.environ['BITFILE'] = '{}/{}'.format(self.PATH_TO_BITFILE, bitfile)
         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(self.PATH_TO_API)]
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
     
-    def __getitem__(self, v):
-        return self.port[v]
-    
     @property
-    def port(self):
+    def attr(self):
         
-        if self._port is None:
-            self._prepare_port()
-        return self._port
-    
-    def _prepare_port(self):
-        
-        try:
-            self._qube
-        except AttributeError:
-            raise ValueError('Exec prepare method first.')
-        
-        ADC, DAC = AD9082ADC, AD9082DAC
-        Rin, Rout = Readin, Readout
-        Vatt = UpConv.Vatt
-        ipfpga = self.config['ipfpga']
-        ad9082 = self.ad9082
-        lmx = self.lmx2594
-        adrf = self.adrf6780
-        ad5328 = self.ad5328
-        CapM = CaptureModule
-        
-        self._port = {
-            PortNo.P0: Readout(
-                LO(lmx[0]),
-                DAC(ipfpga, ad9082[0], 0, [(AWG.U15, 0),]),
-                UpConv(adrf[0], Vatt(ad5328, 0))
-            ),
-            PortNo.P1: Readin(
-                LO(lmx[0]),
-                ADC(ipfpga, ad9082[0], 3, [CapM.U1,])
-            ),
-            PortNo.P2: Ctrl(
-                LO(lmx[1]),
-                DAC(ipfpga, ad9082[0], 1, [(AWG.U14, 1),]),
-                UpConv(adrf[1], Vatt(ad5328, 1))
-            ),
-            PortNo.P5: Ctrl(
-                LO(lmx[2]),
-                DAC(ipfpga, ad9082[0], 2, [(AWG.U11, 2), (AWG.U12, 3), (AWG.U13, 4),]),
-                UpConv(adrf[2], Vatt(ad5328, 2))
-            ),
-            PortNo.P6: Ctrl(
-                LO(lmx[3]),
-                DAC(ipfpga, ad9082[0], 3, [(AWG.U8, 5), (AWG.U9, 6), (AWG.U10, 7),]),
-                UpConv(adrf[3], Vatt(ad5328, 3))
-            ),
-            PortNo.P7: Ctrl(
-                LO(lmx[4]),
-                DAC(ipfpga, ad9082[1], 0, [(AWG.U5, 0), (AWG.U6, 1), (AWG.U7, 2),]),
-                UpConv(adrf[4], Vatt(ad5328, 4))
-            ),
-            PortNo.P8: Ctrl(
-                LO(lmx[5]),
-                DAC(ipfpga, ad9082[1], 1, [(AWG.U0, 3), (AWG.U3, 4), (AWG.U4, 5),]),
-                UpConv(adrf[5], Vatt(ad5328, 5))
-            ),
-            PortNo.P11: Ctrl(
-                LO(lmx[6]),
-                DAC(ipfpga, ad9082[1], 2, [(AWG.U1, 6),]),
-                UpConv(adrf[6], Vatt(ad5328, 6))
-            ),
-            PortNo.P12: Readin(
-                LO(lmx[7]),
-                ADC(ipfpga, ad9082[1], 3, [CapM.U0,])
-            ),
-            PortNo.P13: Readout(
-                LO(lmx[7]),
-                DAC(ipfpga, ad9082[1], 3, [(AWG.U2, 7),]),
-                UpConv(adrf[7], Vatt(ad5328, 7))
-            ),
-        }
-
-        if self.config['type'] == 'B':
-            self._port[PortNo.P0] = Ctrl(
-                LO(lmx[0]),
-                DAC(ipfpga, ad9082[0], 0, [(AWG.U15, 0),]),
-                UpConv(adrf[0], Vatt(ad5328, 0))
-            )
-            del self._port[PortNo.P1]
-            self._port[PortNo.P2] = Ctrl(
-                LO(lmx[1]),
-                DAC(ipfpga, ad9082[0], 1, [(AWG.U14, 1),]),
-                UpConv(adrf[1], Vatt(ad5328, 1))
-            )
-            self._port[PortNo.P11] = Ctrl(
-                LO(lmx[6]),
-                DAC(ipfpga, ad9082[1], 2, [(AWG.U1, 6),]),
-                UpConv(adrf[6], Vatt(ad5328, 6))
-            )
-            del self._port[PortNo.P12]
-            self._port[PortNo.P13] = Ctrl(
-                LO(lmx[7]),
-                DAC(ipfpga, ad9082[1], 3, [(AWG.U2, 7),]),
-                UpConv(adrf[7], Vatt(ad5328, 7))
-            )
-    
-    @property
-    def awg(self):
-        l2d = lambda l: {k: v for k, v in zip([Lane.L0, Lane.L1, Lane.L2],l)}
-        r = {}
-        for k, v in self.port.items():
-            if isinstance(v, Readout):
-                r[k] = v.dac.awgs[0]
-            elif isinstance(v, Ctrl):
-                r[k] = l2d(v.dac.awgs)
-        return r
-
-class FunctionBlock(object):
-    pass
-    
-class LO(FunctionBlock):
-    def __init__(self, lsi):
-        self.lsi = lsi
-    @property
-    def freq(self):
-        return self.lsi.read_freq_100M() * 100
-    @freq.setter
-    def freq(self, mhz):
-        v = math.floor(mhz / 100)
-        self.lsi.write_freq_100M(v)
-
-class UpConv(FunctionBlock):
-    Vatt = namedtuple('Vatt', ('lsi', 'ch'))
-    def __init__(self, lsi, vatt):
-        self.lsi = lsi
-        self._vatt = vatt
-        self._vatt_value = 0x800
+        return self._attr
         
     @property
-    def mode(self):
-        return ConvMode.USB if self.lsi.read_mode() == 0 else ConvMode.LSB
-    @mode.setter
-    def mode(self, v):
-        if v == ConvMode.USB:
-            self.lsi.set_usb()
-        elif v == ConvMode.LSB:
-            self.lsi.set_lsb()
-    
-    @property
-    def vatt(self):
-        # raise ValueError('This feature has not yet been implemented.')
-        # return None
+    def ports(self):
         
-        return self._vatt_value
-    
-    @vatt.setter
-    def vatt(self, v):
-        lsi, ch = self._vatt.lsi, self._vatt.ch
-        lsi.write_value(ch, v)
-        lsi.write_value(0xA, 0x002) # apply value
-        return v / 0xfff * 3.3 # volt
-
-    
-class NCO(object):
-    def __init__(self, lsi, ch):
-        self.lsi = lsi
-        self.ch = ch
-        self._freq = 1000 # 下位の API で決め打ち
-
+        k = lambda i: 'port{}'.format(i)
+        p = {k(i): getattr(self, k(i)) for i in range(self['nports'])}
+        return p
         
-class NCODAC(NCO):
-    def __init__(self, lsi, ch, fine=False):
-        super().__init__(lsi, ch)
-        self._fine = fine
-    @property
-    def freq(self):
-        return self._freq # MHz
-    @freq.setter
-    def freq(self, mhz):
-        self._freq = mhz
-        self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch, adc_mode=False, fine_mode=self._fine)
+class QubeA(QubeBase):
+    def __init__(self, config_file_name=None):
+        super().__init__(config_file_name)
+        self._attr['nports'] = 14
+        ip = self['ipfpga']
+        dac = self.ad9082
+        adc = self.ad9082
+        lo = self.lmx2594
+        mix = self.adrf6780
+        vatt = self.ad5328
+        e7 = e7awgsw
+        
+        self.port0 = Readout(
+            dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
+            lo = LMX2594(lsi = lo[0]),
+            mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
+        )
+        
+        self.port1 = Readin(
+            adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [CaptureModule.U1,]),
+            lo = LMX2594(lsi = lo[0]),
+        )
+
+        self.port2 = Pump(
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
+            lo = LMX2594(lsi = lo[1]),
+            mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
+        )
+        
+        self.port3 = Monitorin(
+            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
+            lo = LMX2594(lsi = lo[1]),
+        )
+        
+        self.port4 = Monitorout()
+
+        self.port5 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2),(e7.AWG.U12, 3),(e7.AWG.U13, 4),]),
+            lo = LMX2594(lsi = lo[2]),
+            mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
+        )
+        
+        self.port6 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
+            lo = LMX2594(lsi = lo[3]),
+            mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
+        )
+        
+        self.port7 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0),(e7.AWG.U6, 1),(e7.AWG.U7, 2),]),
+            lo = LMX2594(lsi = lo[4]),
+            mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
+        )
+        
+        self.port8 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3),(e7.AWG.U3, 4),(e7.AWG.U4, 5),]),
+            lo = LMX2594(lsi = lo[5]),
+            mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
+        )
+        
+        self.port9 = Monitorout()
+
+        self.port10 = Monitorin(
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            lo = LMX2594(lsi = lo[6]),
+        )
+        
+        self.port11 = Pump(
+            dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
+            lo = LMX2594(lsi = lo[6]),
+            mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
+        )
+        
+        self.port12 = Readin(
+            adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            lo = LMX2594(lsi = lo[7]),
+        )
+        
+        self.port13 = Readout(
+            dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
+            lo = LMX2594(lsi = lo[7]),
+            mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
+        )
         
         
-class NCOADC(NCO):
-    def __init__(self, lsi, ch):
-        super().__init__(lsi, ch)
-    @property
-    def freq(self):
-        return self._freq # MHz
-    @freq.setter
-    def freq(self, mhz):
-        self._freq = mhz
-        self.lsi.set_nco(freq=mhz*1e+6, ch=self.ch, adc_mode=True)
+class QubeB(QubeBase):
+    def __init__(self, config_file_name=None):
+        super().__init__(config_file_name)
+        self._attr['nports'] = 14
+        ip = self['ipfpga']
+        dac = self.ad9082
+        adc = self.ad9082
+        lo = self.lmx2594
+        mix = self.adrf6780
+        vatt = self.ad5328
         
-class AD9082(object):
-    def __init__(self, ipfpga, lsi):
-        self.ipfpga = ipfpga
-        self.lsi = lsi
+        self.port0 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWGU15, 0),]),
+            lo = LMX2594(lsi = lo[0]),
+            mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
+        )
         
-class AD9082DAC(AD9082):
-    def __init__(self, ipfpga, lsi, ch, awgs):
-        super().__init__(ipfpga, lsi)
-        self.awgs = [o[0] for o in awgs]
-        self.cnco = NCODAC(lsi, ch, fine=False)
-        self.fnco = [NCODAC(lsi, o[1], fine=True) for o in awgs]
+        self.port1 = NotAvailable()
+
+        self.port2 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWGU4, 1),]),
+            lo = LMX2594(lsi = lo[1]),
+            mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
+        )
         
-class AD9082ADC(AD9082):
-    def __init__(self, ipfpga, lsi, ch, caps):
-        super().__init__(ipfpga, lsi)
-        self.caps = caps
-        self.cnco = NCOADC(lsi, ch)
+        self.port3 = Monitorin(
+            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [CaptureModule.U1,]),
+            lo = LMX2594(lsi = lo[1]),
+        )
         
+        self.port4 = Monitorout()
 
-class Port(object):
-    pass
-
-
-class Output(Port):
-    
-    def __init__(self, local, dac, upconv):
-        self.local = local
-        self.dac = dac
-        self.upconv = upconv
-        self.active = False # TODO: 実際の動作状況を確認するようにしたい
-    
-    def set_cnco_mhz(self, rf_mhz, lo_mhz):
+        self.port5 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWGU11, 2), (e7.AWGU12, 3), (e7.AWGU13, 4),]),
+            lo = LMX2594(lsi = lo[2]),
+            mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
+        )
         
-        MAGIC_FREQ = 15.625
-        trunc = lambda mhz: math.floor(mhz // MAGIC_FREQ) * MAGIC_FREQ
+        self.port6 = Ctrl(
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWGU8, 5), (e7.AWGU9, 6), (e7.AWGU10, 7),]),
+            lo = LMX2594(lsi = lo[3]),
+            mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
+        )
         
-        if lo_mhz % 500 != 0:
-            raise ValueError('lo_mhz must be a multiple of 500.')
+        self.port7 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWGU5, 0), (e7.AWGU6, 1), (e7.AWGU7, 2),]),
+            lo = LMX2594(lsi = lo[4]),
+            mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
+        )
         
-        mode = self.upconv.mode
-        if mode == ConvMode.LSB:
-            nco_mhz = trunc(lo_mhz - rf_mhz)
-            if nco_mhz == lo_mhz - rf_mhz:
-                nco_mhz += MAGIC_FREQ
-            awg_mhz = lo_mhz - nco_mhz - rf_mhz # rf_mhz = lo_mhz - (nco_mhz + awg_mhz)
-            
-        elif mode == ConvMode.USB:
-            nco_mhz = trunc(rf_mhz - lo_mhz)
-            if nco_mhz == rf_mhz - lo_mhz:
-                nco_mhz -= MAGIC_FREQ
-            awg_mhz = rf_mhz - lo_mhz - nco_mhz # rf_mhz = lo_mhz + (nco_mhz + awg_mhz)
+        self.port8 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWGU0, 3), (e7.AWGU3, 4), (e7.AWGU4, 5),]),
+            lo = LMX2594(lsi = lo[5]),
+            mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
+        )
         
-        self.local.freq = lo_mhz
-        self.dac.cnco.freq = nco_mhz
+        self.port9 = Monitorout()
+
+        self.port10 = Monitorin(
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            lo = LMX2594(lsi = lo[6]),
+        )
         
-        return nco_mhz, awg_mhz
-    
-    def set_fnco_mhz(self, mhz, lane):
+        self.port11 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWGU1, 6),]),
+            lo = LMX2594(lsi = lo[6]),
+            mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
+        )
         
-        MAGIC_FREQ = 15.625
-        trunc = lambda mhz: math.floor(mhz // MAGIC_FREQ) * MAGIC_FREQ
+        self.port12 =  NotAvailable()
         
-        nco_mhz = trunc(mhz)
+        self.port13 = Ctrl(
+            dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWGU2, 7),]),
+            lo = LMX2594(lsi = lo[7]),
+            mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
+        )
         
-        self.dac.fnco[lane].freq = nco_mhz
-        
-        return nco_mhz
-    
-    def set_freq(self, rf_mhz, lo_mhz):
-        return self.set_cnco_mhz(rf_mhz, lo_mhz)
-    
-    @property
-    def status(self):
-        fl, fi = self.local.freq, self.dac.cnco.freq
-        m = self.upconv.mode
-        rf_mhz = fl + fi if m == ConvMode.USB else fl - fi
-        r = ''
-        r += 'RF = {:>5.3f} MHz '.format(rf_mhz)
-        r += 'LO = {:>5.0f}    MHz '.format(int(fl))
-        r += 'IF = {:>5.3f} MHz '.format(fi)
-        r += 'LSB/USB: {} MODE '.format('USB' if m == ConvMode.USB else 'LSB')
-        r += 'AWG: {}'.format('Active' if self.active else 'Inactive')
-        return r
-    
-    @property
-    def vatt(self):
-        
-        return self.upconv.vatt
-    
-    @vatt.setter
-    def vatt(self, v):
-        
-        self.upconv.vatt = v
-    
-class ConvMode(IntEnum):
-    LSB = 0
-    USB = 1
-    
-class Input(Port):
-    
-    def __init__(self, local, adc):
-        self.local = local
-        self.adc = adc
-    
-    @property
-    def status(self):
-        fl, fi = self.local.freq, self.adc.cnco.freq
-        r = ''
-        r += 'RF = {:>5.3f} MHz '.format(fl + fi) # assume USB mode
-        r += 'LO = {:>5.0f}    MHz '.format(int(fl))
-        r += 'IF = {:>5.3f} MHz '.format(fi)
-        return r
-
-    def set_freq(self, rf_mhz, lo_mhz):
-        
-        MAGIC_FREQ = 15.625
-        trunc = lambda mhz: math.floor(mhz // MAGIC_FREQ) * MAGIC_FREQ
-        
-        if lo_mhz % 500 != 0:
-            raise ValueError('lo_mhz must be a multiple of 500.')
-        
-        mode = self.upconv.mode
-        if mode == ConvMode.LSB:
-            nco_mhz = trunc(lo_mhz - rf_mhz)
-            if nco_mhz == lo_mhz - rf_mhz:
-                nco_mhz += MAGIC_FREQ
-            awg_mhz = lo_mhz - nco_mhz - rf_mhz # rf_mhz = lo_mhz - (nco_mhz + awg_mhz)
-            
-        elif mode == ConvMode.USB:
-            nco_mhz = trunc(rf_mhz - lo_mhz)
-            if nco_mhz == rf_mhz - lo_mhz:
-                nco_mhz -= MAGIC_FREQ
-            awg_mhz = rf_mhz - lo_mhz - nco_mhz # rf_mhz = lo_mhz + (nco_mhz + awg_mhz)
-        
-        self.local.freq = lo_mhz
-        self.dac.nco.freq = nco_mhz
-        
-        return nco_mhz, awg_mhz
-
-
-class Ctrl(Output):
-    
-    def __init__(self, local, dac, upconv):
-        super().__init__(local, dac, upconv)
-        self.upconv.mode = ConvMode.LSB
-
-
-class Readout(Output):
-    
-    def __init__(self, local, dac, upconv):
-        super().__init__(local, dac, upconv)
-        self.upconv.mode = ConvMode.USB
-
-class Pump(Output):
-    
-    def __init__(self, local, dac, upconv):
-        super().__init__(local, dac, upconv)
-        self.upconv.mode = ConvMode.USB
-
-class Readin(Input):
-    
-    def __init__(self, local, adc):
-        super().__init__(local, adc)
-        
-# # -------------------- qubelsi
-
-
-# def set_lmx2594_freq_100M(lmx2594, n): # equivalent to qubelsi.lmx2594.write_freq_100M
-#     lmx2594.write_value(0x24, n)
-#     return n
-
-# def apply_lmx2594(o): # fixed ?
-#     o.write_value(0x00, 0x6418)
-#     return True
-
-# # needs pull request to qubelsi
-    
-# def apply_vatt(ad5328):
-#     ad5328.write_value(0xA, 0x002)
-#     return True
-
-# def set_vatt(vatt, v, apply=True): # max 4095
-#     vatt.lsi.write_value(vatt.ch, v)
-#     if apply:
-#         apply_vatt(vatt.lsi)
-#     return v/0xfff*3.3
-
-# def read_dac_nco(ad9082, ch):
-#     return None
-
-# def read_adc_nco(ad9082, ch):
-#     return None
-
-# # not so important
-
-# def set_lmx2594_OUTA_PD(o, b):
-#     if b:
-#         v = o.read_value(44) & 0b1111111110111111
-#     else:
-#         v = o.read_value(44) | 0b0000000001000000
-#     o.write_value(44, v)
-#     return v
-
-# def set_lmx2594_OUTB_PD(o, b):
-#     if b:
-#         v = o.read_value(44) & 0b1111111101111111
-#     else:
-#         v = o.read_value(44) | 0b0000000010000000
-#     o.write_value(44, v)
-#     return v
-
-# def set_lmx2594_OUTA_PWR(o, n): # 0 - 63
-#     v = o.read_value(44) & 0b1100000011111111 | n * 0x100
-#     o.write_value(44, v)
-#     return v
-
-# def set_lmx2594_OUTB_PWR(o, n): # 0 - 63
-#     v = o.read_value(45) & 0b1111111111000000 | n
-#     o.write_value(45, v)
-#     return v
-
