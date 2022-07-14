@@ -197,7 +197,7 @@ class AWG(AD9082):
     
     def __init__(self, lsi, awg, ipfpga, nco):
         super().__init__(lsi)
-        self.awg = awg
+        self.id = awg
         self.ipfpga = ipfpga
         self.nco = nco
         
@@ -210,9 +210,9 @@ class AWG(AD9082):
         
 class CPT(AD9082):
     
-    def __init__(self, lsi, cpt, ipfpga):
+    def __init__(self, lsi, cptm, ipfpga):
         super().__init__(lsi)
-        self.cpt = cpt
+        self.id = cptm
         self.ipfpga = ipfpga
         
     def _status(self):
@@ -231,8 +231,6 @@ class DAC(AD9082):
         self._awgs = a =  {k(i): f(awg) for i, awg in enumerate(awgs)}
         for k, v in a.items():
             setattr(self, k, v)
-        # for i, awg in enumerate(awgs):
-        #     setattr(self, 'awg{}'.format(i), AWG(lsi, awg[0], ipfpga, FNCODAC(lsi, awg[1])))
     
     def _status(self):
         
@@ -248,7 +246,7 @@ class ADC(AD9082):
         super().__init__(lsi)
         self.nco = CNCOADC(lsi, ch)
         for i, cpt in enumerate(cpts):
-            k = lambda i: 'cpt{}'.format(i)
+            k = lambda i: 'capt{}'.format(i)
             setattr(self, k(i), CPT(lsi, cpt, ipfpga))
 
     def _status(self):
@@ -347,6 +345,11 @@ class Input(Port):
         self.adc = adc
         self.lo = lo
         
+    @property
+    def capt(self):
+        
+        return self.adc.capt0
+
     @property
     def nco(self):
         
@@ -470,7 +473,7 @@ class QubeBase(alias.Qube):
     
     def __init__(self, config_file_name=None):
         
-        self._attr = None
+        self._config = None
         
         if config_file_name is not None:
             self.load(config_file_name)
@@ -479,29 +482,29 @@ class QubeBase(alias.Qube):
     def prepare(self, ipaddr=None):
         
         if ipaddr is None:
-            if self._attr is not None:
+            if self._config is not None:
                 ipaddr = self['iplsi']
             else:
                 raise(ValueError, 'The config file must be loaded or ipaddr must be specified.')
-        self._attr['iplsi'] = ipaddr
+        self._config['iplsi'] = ipaddr
         super().prepare(ipaddr, self.PATH_TO_API)
 
     def __getitem__(self, v):
         
-        return self._attr[v]
+        return self._config[v]
         
     def load(self, c):
         
         name = '{}/{}'.format(self.PATH_TO_CONFIG, c)
         with open(name, 'rb') as f:
-            self._attr = o = yaml.safe_load(f)
+            self._config = o = yaml.safe_load(f)
             
         ipaddr = self['ipfpga']
         s = ipaddr.split('.')
         s[1] = "2"
-        self._attr['ipmulti'] = '.'.join(map(str, s))
+        self._config['ipmulti'] = '.'.join(map(str, s))
 
-    def config(self, bitfile=None):
+    def config_fpga(self, bitfile=None):
         
         if bitfile is None and not 'bitfile' in self:
             raise ValueError('Specify bitfile.')
@@ -509,9 +512,9 @@ class QubeBase(alias.Qube):
         if bitfile is None:
             bitfile = self['bitfile']
             
-        self._config(bitfile)
+        self._config_fpga(bitfile)
             
-    def _config(self, bitfile):
+    def _config_fpga(self, bitfile):
         
         os.environ['BITFILE'] = '{}/{}'.format(self.PATH_TO_BITFILE, bitfile)
         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(self.PATH_TO_API)]
@@ -519,9 +522,9 @@ class QubeBase(alias.Qube):
         return ret
     
     @property
-    def attr(self):
+    def config(self):
         
-        return self._attr
+        return self._config
         
     @property
     def ports(self):
@@ -533,7 +536,7 @@ class QubeBase(alias.Qube):
 class QubeA(QubeBase):
     def __init__(self, config_file_name=None):
         super().__init__(config_file_name)
-        self._attr['nports'] = 14
+        self._config['nports'] = 14
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
@@ -618,16 +621,17 @@ class QubeA(QubeBase):
 class QubeB(QubeBase):
     def __init__(self, config_file_name=None):
         super().__init__(config_file_name)
-        self._attr['nports'] = 14
+        self._config['nports'] = 14
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
         lo = self.lmx2594
         mix = self.adrf6780
         vatt = self.ad5328
+        e7 = e7awgsw
         
         self.port0 = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWGU15, 0),]),
+            dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
             lo = LMX2594(lsi = lo[0]),
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
@@ -635,7 +639,7 @@ class QubeB(QubeBase):
         self.port1 = NotAvailable()
 
         self.port2 = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWGU4, 1),]),
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
@@ -648,25 +652,25 @@ class QubeB(QubeBase):
         self.port4 = Monitorout()
 
         self.port5 = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWGU11, 2), (e7.AWGU12, 3), (e7.AWGU13, 4),]),
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2), (e7.AWG.U12, 3), (e7.AWG.U13, 4),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         
         self.port6 = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWGU8, 5), (e7.AWGU9, 6), (e7.AWGU10, 7),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         
         self.port7 = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWGU5, 0), (e7.AWGU6, 1), (e7.AWGU7, 2),]),
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0), (e7.AWG.U6, 1), (e7.AWG.U7, 2),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         
         self.port8 = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWGU0, 3), (e7.AWGU3, 4), (e7.AWGU4, 5),]),
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3), (e7.AWG.U3, 4), (e7.AWG.U4, 5),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
@@ -679,7 +683,7 @@ class QubeB(QubeBase):
         )
         
         self.port11 = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWGU1, 6),]),
+            dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
             lo = LMX2594(lsi = lo[6]),
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
@@ -687,7 +691,7 @@ class QubeB(QubeBase):
         self.port12 =  NotAvailable()
         
         self.port13 = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWGU2, 7),]),
+            dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
             lo = LMX2594(lsi = lo[7]),
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
