@@ -1,24 +1,144 @@
-from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, AwgCtrl, WaveSequence, DspUnit, IqWave, AWG
+from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, DspUnit, AWG
+from e7awgsw import AwgCtrl, IqWave, WaveSequence
 import e7awgsw
 import numpy as np
 
-class WaveSequence(e7awgsw.WaveSequence):
+class CaptureCtrl(e7awgsw.CaptureCtrl):
     
-    def set_iq(self, iq, amp=32767):
+    def check_err(self, *capu):
+        e = super().check_err(*capu)
+        if any(e):
+            raise IOError('CaptureCtrl error.')
+    
+    def get_capture_data(self, *units):
+        return CaptureData(super(), *units)
+    
+class CaptureData(object):
+    def __init__(self, cap_ctrl, *units):
+        self.data = v = {}
+        for u in units:
+            n = cap_ctrl.num_captured_samples(u)
+            c = np.array(cap_ctrl.get_capture_data(u, n))
+            v[u] = c[:,0] + 1j * c[:,1]
+            
+class Recv(object):
+    
+    def __init__(self, ipaddr, modules):
+        self._trigger = None
+        self.ipaddr = ipaddr
+        self.captms = [o if isinstance(o, CaptureModule) else o.id for o in modules]
+        self.data = None
         
-        iq = amp * iq
+    def start(self, param, timeout=5):
+        units = CaptureModule.get_units(*self.captms)
+        with CaptureCtrl(self.ipaddr) as cap_ctrl:
+            cap_ctrl.initialize(*units)
+            for i in units:
+                cap_ctrl.set_capture_params(i, param)
+            cap_ctrl.start_capture_units(*units)
+            cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
+            cap_ctrl.check_err(*units)
+            self.data = cap_ctrl.get_capture_data(*units)
+            
+    def wait(self, param, timeout=5):
+        units = CaptureModule.get_units(*self.captms)
+        with CaptureCtrl(self.ipaddr) as cap_ctrl:
+            cap_ctrl.initialize(*units)
+            if self._trigger is not None:
+                for i in self.captms:
+                    cap_ctrl.select_trigger_awg(i, self._trigger)
+                    cap_ctrl.enable_start_trigger(*CaptureModule.get_units(i))
+            for i in units:
+                cap_ctrl.set_capture_params(i, param)
+            cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
+            cap_ctrl.check_err(*units)
+            self.data = cap_ctrl.get_capture_data(*units)
+        
+    @property
+    def trigger(self):
+        return self._trigger
+        
+    @trigger.setter
+    def trigger(self, awg):
+        self._trigger = awg if isinstance(awg, AWG) else awg.id
+        
+        
+class Send(object):
+    
+    def __init__(self, ipaddr, awgs, wave_seqs):
+        self.ipaddr = ipaddr
+        self.awgs = awgs
+        self.wave_seqs = wave_seqs
+    
+    def start(self):
+        awgs, wavs = self.awgs, self.wave_seqs
+        with AwgCtrl(self.ipaddr) as awg_ctrl:
+            awg_ctrl.initialize(*awgs)
+            for a, w in zip(awgs, wavs):
+                awg_ctrl.set_wave_sequence(a, w)
+            awg_ctrl.start_awgs(*self.awgs)
+
+    def terminate(self):
+        with AwgCtrl(self.ipaddr) as awg_ctrl:
+            awg_ctrl.terminate_awgs(*self.awgs)
+            
+    def wait(self, timeout=5):
+        awgs, wavs = self.awgs, self.wave_seqs
+        with AwgCtrl(self.ipaddr) as awg_ctrl:
+            awg_ctrl.initialize(*awgs)
+            for a, w in zip(awgs, wavs):
+                awg_ctrl.set_wave_sequence(a, w)
+            print('wait for started by sequencer.')
+            awg_ctrl.wait_for_awgs_to_stop(timeout, *self.awgs)
+
+class WaveChunkFactory(object):
+    
+    def get_timestamp(self):
+        period = 1 / AwgCtrl.SAMPLING_RATE
+        return np.arange(0, self.dulation, period)
+    
+    def __init__(self, dulation=128e-9, amp=32767, blank=0, repeats=1):
+        # dulation の初期値は CW 出力を想定して設定した
+        # int(dulation * AwgCtrl.SAMPLING_RATE) が 64 の倍数だと切れ目のない波形が出力される．
+        # 波形チャンクの最小サイズが 128ns (500Msps の繰り返し周期は 2ns)
+        
+        self.dulation = dulation
+        self.amp = amp
+        self.iq = np.zeros(*self.get_timestamp().shape).astype(complex)
+        self.blank = blank # [s]
+        self.repeats = repeats # times
+        
+    @property
+    def chunk(self):
+        
+        iq = self.amp * self.iq
         i, q = np.real(iq).astype(int), np.imag(iq).astype(int)
-        s = IqWave.convert_to_iq_format(i, q, self.NUM_SAMPLES_IN_WAVE_BLOCK)
+        s = IqWave.convert_to_iq_format(i, q, WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK)
         
         r = AwgCtrl.SAMPLING_RATE
-        blank = 0.03e-3 # [s] ???
-        b = max(int(r * blank), 0)
-        n = self.NUM_SAMPLES_IN_AWG_WORD
-        self.add_chunk(
-            iq_samples = s,
-            num_blank_words = b // n,
-            num_repeats = 1, # num_cunk_repeats
-        )
+        b = max(int(r * self.blank), 0) # 非負の値を取るように
+        n = WaveSequence.NUM_SAMPLES_IN_AWG_WORD
+        
+        return {'iq_samples': s, 'num_blank_words': b // n, 'num_repeats': self.repeats}
+      
+
+# class WaveSequence(e7awgsw.WaveSequence):
+    
+#     def set_iq(self, iq, amp=32767):
+        
+#         iq = amp * iq
+#         i, q = np.real(iq).astype(int), np.imag(iq).astype(int)
+#         s = IqWave.convert_to_iq_format(i, q, self.NUM_SAMPLES_IN_WAVE_BLOCK)
+        
+#         r = AwgCtrl.SAMPLING_RATE
+#         blank = 0.03e-3 # [s] ???
+#         b = max(int(r * blank), 0)
+#         n = self.NUM_SAMPLES_IN_AWG_WORD
+#         self.add_chunk(
+#             iq_samples = s,
+#             num_blank_words = b // n,
+#             num_repeats = 1, # num_cunk_repeats
+#         )
         
 
 class SendRecvAwgCtrl(AwgCtrl):
@@ -45,7 +165,7 @@ class SendRecvCaptureCtrl(CaptureCtrl):
             
     def wait(self, timeout, *capu):
         
-        self.wait_for_capture_units_to_stor(timeout, *capu)
+        self.wait_for_capture_units_to_stop(timeout, *capu)
         
     def get_capture_data(self, *capu):
         

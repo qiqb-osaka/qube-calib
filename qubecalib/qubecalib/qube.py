@@ -6,6 +6,7 @@ import yaml
 import math
 import warnings
 import traceback
+import qubelsi.qube
 from e7awgsw import AWG, CaptureModule
 import e7awgsw
 
@@ -432,16 +433,40 @@ class Monitorin(Input):
     def __init__(self, adc, lo):
         super().__init__(adc, lo)
     
-    
-class Qube(object): # QubeInstanceFactory
-    PATH_TO_CONFIG = './.config'
+
+class ConfigFPGA(object):
+    PATH_TO_BITFILE: str = "/home/qube/bin"
+    PATH_TO_API: str = "./adi_api_mod"
     
     @classmethod
-    def load(cls, c):
+    def config(cls, bitfile: str) -> None:
+        os.environ['BITFILE'] = '{}/{}'.format(cls.PATH_TO_BITFILE, bitfile)
+        commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(cls.PATH_TO_API)]
+        ret = subprocess.check_output(commands , encoding='utf-8')
+        return ret
         
-        name = '{}/{}'.format(cls.PATH_TO_CONFIG, c)
+
+class Qube(object): # QubeInstanceFactory
+    '''
+    config ファイルを読んで適切な QubeBase インスタンスを生成する
+    qube = Qube.create(<config_file_name>)
+    '''
+
+    PATH_TO_CONFIG = './.config'
+    PATH_TO_BITFILE = '/home/qube/bin'
+    PATH_TO_API = './adi_api_mod'
+
+    
+    @classmethod
+    def load(cls, config_file_name):
+        
+        name = '{}/{}'.format(cls.PATH_TO_CONFIG, config_file_name)
         with open(name, 'rb') as f:
             o = yaml.safe_load(f)
+        
+        s = o['ipfpga'].split('.')
+        s[1] = "2"
+        o['ipmulti'] = '.'.join(map(str, s))
         
         return o
 
@@ -449,61 +474,34 @@ class Qube(object): # QubeInstanceFactory
     def create(cls, config_file_name):
         
         o = cls.load(config_file_name)
+        
         if o['type'] == 'A':
-            QubeA.PATH_TO_CONFIG = cls.PATH_TO_CONFIG
-            return QubeA(config_file_name)
+            QubeA.PATH_TO_API = Qube.PATH_TO_API
+            return QubeA(o['iplsi'], Qube.PATH_TO_API, o)
+        
         if o['type'] == 'B':
-            QubeB.PATH_TO_CONFIG = cls.PATH_TO_CONFIG
-            return QubeB(config_file_name)
-
-
-class QubeBase(alias.Qube):
+            QubeB.PATH_TO_API = Qube.PATH_TO_API
+            return QubeB(o['iplsi'], Qube.PATH_TO_API, o)
+        
+        
+class QubeBase(qubelsi.qube.Qube):
     '''
-    config ファイルを読んでから接続する (GUI用)
-    qube = Qube()
-    qube.prepare()
     任意の IPADDR で設定する
-    qube = Qube()
-    qube.prepare(ipaddr, path_to_api)
+    qube = QubeA(ipaddr, path_to_api) | QubeB(ipaddr, path_to_api)
     '''
     
     PATH_TO_BITFILE = '/home/qube/bin'
     PATH_TO_API = './adi_api_mod'
-    PATH_TO_CONFIG = './.config'
     
-    def __init__(self, config_file_name=None):
+    def __init__(self, addr, path, config=None):
         
-        self._config = None
+        super().__init__(addr, path)
+        self._config = config
         
-        if config_file_name is not None:
-            self.load(config_file_name)
-            self.prepare()
-    
-    def prepare(self, ipaddr=None):
-        
-        if ipaddr is None:
-            if self._config is not None:
-                ipaddr = self['iplsi']
-            else:
-                raise(ValueError, 'The config file must be loaded or ipaddr must be specified.')
-        self._config['iplsi'] = ipaddr
-        super().prepare(ipaddr, self.PATH_TO_API)
-
     def __getitem__(self, v):
         
         return self._config[v]
         
-    def load(self, c):
-        
-        name = '{}/{}'.format(self.PATH_TO_CONFIG, c)
-        with open(name, 'rb') as f:
-            self._config = o = yaml.safe_load(f)
-            
-        ipaddr = self['ipfpga']
-        s = ipaddr.split('.')
-        s[1] = "2"
-        self._config['ipmulti'] = '.'.join(map(str, s))
-
     def config_fpga(self, bitfile=None):
         
         if bitfile is None and not 'bitfile' in self:
@@ -521,6 +519,20 @@ class QubeBase(alias.Qube):
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
     
+    def are_ad9082s_connected_normally(self):
+        ad9082s = self.ad9082
+        return [dict(o.get_jesd_status())['0x55E'] == '0xE0' for o in ad9082s] == [True, True]
+
+    def restart_ad9082s(self):
+        ad9082s = self.ad9082
+        for i in range(100):
+            print(i+1, end=' ', flush=True)
+            for o in ad9082s:
+                o.do_init(message_out=False)
+                print(dict(o.get_jesd_status())['0x55E'], end=' ', flush=True)
+            if self.are_ad9082s_connected_normally():
+                break
+
     @property
     def config(self):
         
@@ -533,9 +545,65 @@ class QubeBase(alias.Qube):
         p = {k(i): getattr(self, k(i)) for i in range(self['nports'])}
         return p
         
+    @property
+    def port0(self):
+        return self._port0
+
+    @property
+    def port1(self):
+        return self._port1
+
+    @property
+    def port2(self):
+        return self._port2
+
+    @property
+    def port3(self):
+        return self._port3
+
+    @property
+    def port4(self):
+        return self._port4
+
+    @property
+    def port5(self):
+        return self._port5
+
+    @property
+    def port6(self):
+        return self._port6
+
+    @property
+    def port7(self):
+        return self._port7
+
+    @property
+    def port8(self):
+        return self._port8
+
+    @property
+    def port9(self):
+        return self._port9
+
+    @property
+    def port10(self):
+        return self._port10
+
+    @property
+    def port11(self):
+        return self._port11
+
+    @property
+    def port12(self):
+        return self._port12
+
+    @property
+    def port13(self):
+        return self._port13
+
 class QubeA(QubeBase):
-    def __init__(self, config_file_name=None):
-        super().__init__(config_file_name)
+    def __init__(self, addr, path, config):
+        super().__init__(addr, path, config)
         self._config['nports'] = 14
         ip = self['ipfpga']
         dac = self.ad9082
@@ -545,82 +613,138 @@ class QubeA(QubeBase):
         vatt = self.ad5328
         e7 = e7awgsw
         
-        self.port0 = Readout(
+        self._port0 = Readout(
             dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
             lo = LMX2594(lsi = lo[0]),
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
         
-        self.port1 = Readin(
+        self._port1 = Readin(
             adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[0]),
         )
 
-        self.port2 = Pump(
+        self._port2 = Pump(
             dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         
-        self.port3 = Monitorin(
+        self._port3 = Monitorin(
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
         
-        self.port4 = Monitorout()
+        self._port4 = Monitorout()
 
-        self.port5 = Ctrl(
+        self._port5 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2),(e7.AWG.U12, 3),(e7.AWG.U13, 4),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         
-        self.port6 = Ctrl(
+        self._port6 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         
-        self.port7 = Ctrl(
+        self._port7 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0),(e7.AWG.U6, 1),(e7.AWG.U7, 2),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         
-        self.port8 = Ctrl(
+        self._port8 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3),(e7.AWG.U3, 4),(e7.AWG.U4, 5),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         
-        self.port9 = Monitorout()
+        self._port9 = Monitorout()
 
-        self.port10 = Monitorin(
+        self._port10 = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
         
-        self.port11 = Pump(
+        self._port11 = Pump(
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
             lo = LMX2594(lsi = lo[6]),
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
         
-        self.port12 = Readin(
+        self._port12 = Readin(
             adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[7]),
         )
         
-        self.port13 = Readout(
+        self._port13 = Readout(
             dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
             lo = LMX2594(lsi = lo[7]),
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
         
+    @property
+    def readout0(self):
+        return self._port0
+
+    @property
+    def readin0(self):
+        return self._port1
+
+    @property
+    def pump0(self):
+        return self._port2
+
+    @property
+    def auxin0(self):
+        return self._port3
+
+    @property
+    def auxout0(self):
+        return self._port4
+
+    @property
+    def ctrl0(self):
+        return self._port5
+
+    @property
+    def ctrl1(self):
+        return self._port6
+
+    @property
+    def ctrl2(self):
+        return self._port7
+
+    @property
+    def ctrl3(self):
+        return self._port8
+
+    @property
+    def auxout1(self):
+        return self._port9
+
+    @property
+    def auxin1(self):
+        return self._port10
+
+    @property
+    def pump1(self):
+        return self._port11
+
+    @property
+    def readin1(self):
+        return self._port12
+
+    @property
+    def readout1(self):
+        return self._port13
+
         
 class QubeB(QubeBase):
-    def __init__(self, config_file_name=None):
-        super().__init__(config_file_name)
+    def __init__(self, addr, path, config):
+        super().__init__(addr, path, config)
         self._config['nports'] = 14
         ip = self['ipfpga']
         dac = self.ad9082
@@ -630,69 +754,117 @@ class QubeB(QubeBase):
         vatt = self.ad5328
         e7 = e7awgsw
         
-        self.port0 = Ctrl(
+        self._port0 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
             lo = LMX2594(lsi = lo[0]),
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
         
-        self.port1 = NotAvailable()
+        self._port1 = NotAvailable()
 
-        self.port2 = Ctrl(
+        self._port2 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         
-        self.port3 = Monitorin(
+        self._port3 = Monitorin(
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
         
-        self.port4 = Monitorout()
+        self._port4 = Monitorout()
 
-        self.port5 = Ctrl(
+        self._port5 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2), (e7.AWG.U12, 3), (e7.AWG.U13, 4),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         
-        self.port6 = Ctrl(
+        self._port6 = Ctrl(
             dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         
-        self.port7 = Ctrl(
+        self._port7 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0), (e7.AWG.U6, 1), (e7.AWG.U7, 2),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         
-        self.port8 = Ctrl(
+        self._port8 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3), (e7.AWG.U3, 4), (e7.AWG.U4, 5),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         
-        self.port9 = Monitorout()
+        self._port9 = Monitorout()
 
-        self.port10 = Monitorin(
+        self._port10 = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
         
-        self.port11 = Ctrl(
+        self._port11 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
             lo = LMX2594(lsi = lo[6]),
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
         
-        self.port12 =  NotAvailable()
+        self._port12 =  NotAvailable()
         
-        self.port13 = Ctrl(
+        self._port13 = Ctrl(
             dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
             lo = LMX2594(lsi = lo[7]),
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
         
+    @property
+    def ctrl4(self):
+        return self._port0
+
+    @property
+    def ctrl5(self):
+        return self._port2
+
+    @property
+    def auxin0(self):
+        return self._port3
+
+    @property
+    def auxout0(self):
+        return self._port4
+
+    @property
+    def ctrl0(self):
+        return self._port5
+
+    @property
+    def ctrl1(self):
+        return self._port6
+
+    @property
+    def ctrl2(self):
+        return self._port7
+
+    @property
+    def ctrl3(self):
+        return self._port8
+
+    @property
+    def auxout1(self):
+        return self._port9
+
+    @property
+    def auxin1(self):
+        return self._port10
+
+    @property
+    def ctrl6(self):
+        return self._port11
+
+    @property
+    def ctrl7(self):
+        return self._port13
+
