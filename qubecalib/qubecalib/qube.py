@@ -519,6 +519,7 @@ class QubeBase(qubelsi.qube.Qube):
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
     
+    @property
     def are_ad9082s_connected_normally(self):
         ad9082s = self.ad9082
         return [dict(o.get_jesd_status())['0x55E'] == '0xE0' for o in ad9082s] == [True, True]
@@ -763,7 +764,7 @@ class QubeB(QubeBase):
         self._port1 = NotAvailable()
 
         self._port2 = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U14, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
