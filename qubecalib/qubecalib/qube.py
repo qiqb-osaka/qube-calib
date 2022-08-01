@@ -512,6 +512,7 @@ class QubeBase(qubelsi.qube.Qube):
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
     
+    @property
     def are_ad9082s_connected_normally(self):
         ad9082s = self.ad9082
         s = [dict(o.get_jesd_status())['0x55E'] == '0xE0' for o in ad9082s]
