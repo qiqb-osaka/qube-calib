@@ -76,7 +76,8 @@ class Send(object):
             awg_ctrl.initialize(*awgs)
             for a, w in zip(awgs, wavs):
                 awg_ctrl.set_wave_sequence(a, w)
-            awg_ctrl.start_awgs(*self.awgs)
+            awg_ctrl.start_awgs(*awgs)
+            awg_ctrl.wait_for_awgs_to_stop(timeout, *self.awgs)
 
     def terminate(self):
         with AwgCtrl(self.ipaddr) as awg_ctrl:
