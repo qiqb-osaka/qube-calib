@@ -2183,7 +2183,7 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
 # QUBE MANAGER
 #
 
-class Qube_Manager_Device(DeviceWrapper):
+class QuBE_Manager_Device(DeviceWrapper):
 
   @inlineCallbacks
   def connect(self, *args, **kw):                           # @inlineCallbacks
@@ -2191,9 +2191,9 @@ class Qube_Manager_Device(DeviceWrapper):
     print(QSMessage.CONNECTING_CHANNEL.format(name))
     self.name         = name
     self._role        = role
-    self.lsi_ctrl     = kw[  'lsi_ctrl' ]
-    self.sync_ctrl    = kw[ 'sync_ctrl' ]
-    self.channel_info = kw[ 'channels'  ]
+    self._lsi_ctrl    = kw[  'lsi_ctrl' ]
+    self._sync_ctrl   = kw[ 'sync_ctrl' ]                   # for future
+    self._channel_info= kw[ 'channels'  ]
     self._sync_addr   = kw[ 'sync_addr' ]
     self._sync_func   = kw[ 'sync_func' ]
     self._read_func   = kw[ 'read_func' ]
@@ -2202,24 +2202,24 @@ class Qube_Manager_Device(DeviceWrapper):
 
   @inlineCallbacks
   def initialize(self):                                     # @inlineCallbacks
-    yield self.lsi_ctrl.do_init(rf_type=self._role, message_out=self.verbose)
+    yield self._lsi_ctrl.do_init(rf_type=self._role, message_out=self.verbose)
     mixer_init = [ ( ch[QSConstants.CNL_MIXCH_TAG],
-                     ch[QSConstants.CNL_MIXSB_TAG] ) for ch in self.channel_info]
+                     ch[QSConstants.CNL_MIXSB_TAG] ) for ch in self._channel_info]
 
     for ch, usb_lsb in mixer_init:                          # Upper or lower sideband configuration
       if   usb_lsb == QSConstants.CNL_MXUSB_VAL:            #    in the active IQ mixer. The output
-        yield self.lsi_ctrl.adrf6780[ ch ].set_usb()        #    become small with a wrong sideband
+        yield self._lsi_ctrl.adrf6780[ ch ].set_usb()       #    become small with a wrong sideband
       elif usb_lsb == QSConstants.CNL_MXLSB_VAL:            #                               setting.
-        yield self.lsi_ctrl.adrf6780[ ch ].set_lsb()
+        yield self._lsi_ctrl.adrf6780[ ch ].set_lsb()
 
   @inlineCallbacks
   def set_microwave_switch(self,value):                     # @inlineCallbacks
-    g   = self.lsi_ctrl.gpio
+    g   = self._lsi_ctrl.gpio
     yield g.write_value(value & 0x3fff)
 
   @inlineCallbacks
   def read_microwave_switch(self):
-    g    = self.lsi_ctrl.gpio
+    g    = self._lsi_ctrl.gpio
     reps = yield g.read_value()
     returnValue(reps & 0x3fff)
 
@@ -2238,14 +2238,14 @@ class Qube_Manager_Device(DeviceWrapper):
 
     func, srv = self._read_func
     resp  = yield func(srv)
-    print('Qube_Manager_Deice.synchronize_with_master: read value = ',resp)
+    print('QuBE_Manager_Deice.synchronize_with_master: read value = ',resp)
 
 
-class Qube_Manager_Server(DeviceServer):
+class QuBE_Manager_Server(DeviceServer):
   name          = QSConstants.MNRNAME
   possibleLinks = list()
   adi_api_path  = None
-  deviceWrapper = Qube_Manager_Device
+  deviceWrapper = QuBE_Manager_Device
 
   @inlineCallbacks
   def initServer(self):                                     # @inlineCallbacks
@@ -2306,8 +2306,8 @@ class Qube_Manager_Server(DeviceServer):
     kw        = dict( lsi_ctrl  = lsi_ctrl,
                       sync_ctrl = sync_ctrl,
                       sync_addr = ipclk,
-                      sync_func = (Qube_Manager_Server._synchronize_with_master_clock,self),
-                      read_func = (Qube_Manager_Server._read_master_clock,self),
+                      sync_func = (QuBE_Manager_Server._synchronize_with_master_clock,self),
+                      read_func = (QuBE_Manager_Server._read_master_clock,self),
                       channels  = channel_info )
     returnValue( (name,args,kw) )
 
@@ -3089,9 +3089,9 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
 try:
   server_select = os.environ[ QSConstants.ENV_SRVSEL ]
   if server_select == QSConstants.MNRNAME:
-    __server__ = Qube_Manager_Server()
+    __server__ = QuBE_Manager_Server()
   elif server_select == QSConstants.SRVNAME:
-    __server__ = Qube_Server()
+    __server__ = QuBE_Server()
   else:
     server_select = None
 except KeyError as e:
