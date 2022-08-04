@@ -453,7 +453,7 @@ class QSMessage:
 #
 
 def pingger(host):
-  cmd = "ping -c 1 -W 2 %s" % host
+  cmd = "ping -c 1 -W 1 %s" % host
   with open(os.devnull,'w') as f:
     resp = subprocess.call(cmd.split(' '), stdout=f,stderr=subprocess.STDOUT )
   return resp
@@ -614,6 +614,7 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
 
   def stop_daq(self,awg_ids,timeout):
     self._awg_ctrl.wait_for_awgs_to_stop(timeout, *awg_ids)
+    self._awg_ctrl.clear_awg_stop_flags(*awg_ids)
 
   def static_DACify(self, waveform):
     return ((np.real(waveform) * QSConstants.DAC_BITS_POW_HALF).astype(int),
@@ -2727,6 +2728,7 @@ def basic_config():
      'qube004': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.22', QSConstants.SRV_IPLSI_TAG: '10.5.0.22', QSConstants.SRV_IPCLK_TAG: '10.2.0.22', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube005': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.23', QSConstants.SRV_IPLSI_TAG: '10.5.0.23', QSConstants.SRV_IPCLK_TAG: '10.2.0.23', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube006': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.24', QSConstants.SRV_IPLSI_TAG: '10.5.0.24', QSConstants.SRV_IPCLK_TAG: '10.2.0.24', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
+     'qube008': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.26', QSConstants.SRV_IPLSI_TAG: '10.5.0.26', QSConstants.SRV_IPCLK_TAG: '10.2.0.26', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube010': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.28', QSConstants.SRV_IPLSI_TAG: '10.5.0.28', QSConstants.SRV_IPCLK_TAG: '10.2.0.28', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube011': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.29', QSConstants.SRV_IPLSI_TAG: '10.5.0.29', QSConstants.SRV_IPCLK_TAG: '10.2.0.29', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube012': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.30', QSConstants.SRV_IPLSI_TAG: '10.5.0.30', QSConstants.SRV_IPCLK_TAG: '10.2.0.30', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
