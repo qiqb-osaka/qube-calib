@@ -2182,6 +2182,12 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
 #
 # QUBE MANAGER
 #
+# Tips:
+# When the master FPGA board halted (especially when you have tried to sync with a ghost QuBE unit),
+# re-configuration of the master board is useful. Try do it using the command below thru bash. 
+# 
+# > BITFILE=/home/qube/qube_master_20220721.bit vivado -mode batch -source /config_au200.tcl
+#
 
 class QuBE_Manager_Device(DeviceWrapper):
 
