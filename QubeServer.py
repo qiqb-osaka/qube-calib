@@ -640,34 +640,34 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
 
     self.__initialized = False
     try:
-      self.nco_ctrl   = kw[ 'nco_device' ]
-      self.lo_ctrl    = kw[  'lo_device' ]
-      self.mix_ctrl   = kw[ 'mix_device' ]
+      self._nco_ctrl    = kw[ 'nco_device' ]
+      self._lo_ctrl     = kw[  'lo_device' ]
+      self._mix_ctrl    = kw[ 'mix_device' ]
 
-      self.cnco_id    = kw[    'cnco_id' ]
-      self.fnco_ids   = kw[    'fnco_id' ]
-      self.fnco_chs   = len(self.fnco_ids)
-      self.mix_usb_lsb= kw[     'mix_sb' ]
+      self._cnco_id     = kw[    'cnco_id' ]
+      self._fnco_ids    = kw[    'fnco_id' ]
+      self._fnco_chs    = len(self._fnco_ids)
+      self._mix_usb_lsb = kw[     'mix_sb' ]
 
-      self.lo_frequency     = self.get_lo_frequency()       # print(self._name,'local',self.lo_frequency)
-      self.coarse_frequency = self.get_dac_coarse_frequency()
-                                                            # print(self._name,'nco',self.coarse_frequency)         # DEBUG
+      self._lo_frequency    = self.get_lo_frequency()       # DEBUG: for buffered operation, not used.
+      self._coarse_frequency = self.get_dac_coarse_frequency()
+                                                            # DEBUG: for buffered operation, partly used.
       self.__initialized     = True
     except Exception as e:
       print(sys._getframe().f_code.co_name,e)
 
     if self.__initialized:
-      self.fine_frequencies = [0     for i in range(self.fnco_chs)]
+      self._fine_frequencies = [0 for i in range(self._fnco_chs)]
     yield
 
   def get_lo_frequency(self):
-    return self.lo_ctrl.read_freq_100M()*100
+    return self._lo_ctrl.read_freq_100M()*100
 
   def set_lo_frequency(self,freq_in_mhz):
-    return self.lo_ctrl.write_freq_100M(int(freq_in_mhz//100))
+    return self._lo_ctrl.write_freq_100M(int(freq_in_mhz//100))
 
   def get_mix_sideband(self):
-    resp = self.mix_ctrl.read_mode() & 0x0400
+    resp = self._mix_ctrl.read_mode() & 0x0400
     if 0x400 == resp:
       return QSConstants.CNL_MXLSB_VAL
     else:
@@ -675,30 +675,30 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
 
   def set_mix_sideband(self,sideband : str):
     if   QSConstants.CNL_MXUSB_VAL == sideband:
-      self.mix_ctrl.set_usb()
+      self._mix_ctrl.set_usb()
     elif QSConstants.CNL_MXLSB_VAL == sideband:
-      self.mix_ctrl.set_lsb()
+      self._mix_ctrl.set_lsb()
     else:
       return
-    self.mix_usb_lsb = sideband
+    self._mix_usb_lsb = sideband
 
   def get_dac_coarse_frequency(self):
-    return self.static_get_dac_coarse_frequency(self.nco_ctrl,self.cnco_id)
+    return self.static_get_dac_coarse_frequency(self._nco_ctrl,self._cnco_id)
 
   def set_dac_coarse_frequency(self,freq_in_mhz):
-    self.nco_ctrl.set_nco(1e6*freq_in_mhz, self.cnco_id, \
+    self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._cnco_id, \
                                            adc_mode = False, fine_mode=False)
-    self.coarse_frequency = freq_in_mhz
+    self._coarse_frequency = freq_in_mhz
 
   def get_dac_fine_frequency(self,channel):
-    return self.fine_frequencies[channel]                   # - DEBUG better to obtain frequency
+    return self._fine_frequencies[channel]                  # - DEBUG better to obtain frequency
                                                             #   information from the deivices
   def set_dac_fine_frequency(self,channel,freq_in_mhz):
     if freq_in_mhz < 0:
       freq_in_mhz = QSConstants.NCO_SAMPLE_F + freq_in_mhz
-    self.nco_ctrl.set_nco(1e6*freq_in_mhz, self.fnco_ids[channel], \
+    self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._fnco_ids[channel], \
                                            adc_mode = False, fine_mode=True)
-    self.fine_frequencies[channel] = freq_in_mhz
+    self._fine_frequencies[channel] = freq_in_mhz
 
   def static_get_dac_coarse_frequency(self,nco_ctrl,ch):
     ftw = self.static_get_dac_coarse_ftw(nco_ctrl,ch)
@@ -978,12 +978,12 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
     self._cap_ctrl.enable_start_trigger(*enabled_capture_units)
 
   def set_adc_coarse_frequency(self,freq_in_mhz):
-    self.nco_ctrl.set_nco(1e6*freq_in_mhz, self._rxcnco_id, \
+    self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._rxcnco_id, \
                                            adc_mode = True, fine_mode=False)
     self._rx_coarse_frequency = freq_in_mhz # DEBUG seems not used right now
 
   def get_adc_coarse_frequency(self):
-    return self.static_get_adc_coarse_frequency(self.nco_ctrl,self._rxcnco_id)
+    return self.static_get_adc_coarse_frequency(self._nco_ctrl,self._rxcnco_id)
 
   def static_get_adc_coarse_frequency(self,nco_ctrl,ch):
     piw = self.static_get_adc_coarse_ftw(nco_ctrl,ch)
