@@ -2187,10 +2187,10 @@ class Qube_Manager_Device(DeviceWrapper):
 
   @inlineCallbacks
   def connect(self, *args, **kw):                           # @inlineCallbacks
-    name, qube_type = args
+    name, role = args
     print(QSMessage.CONNECTING_CHANNEL.format(name))
     self.name         = name
-                                                            # self.qube_type    = qube_type
+    self._role        = role
     self.lsi_ctrl     = kw[  'lsi_ctrl' ]
     self.sync_ctrl    = kw[ 'sync_ctrl' ]
     self.channel_info = kw[ 'channels'  ]
@@ -2202,7 +2202,7 @@ class Qube_Manager_Device(DeviceWrapper):
 
   @inlineCallbacks
   def initialize(self):                                     # @inlineCallbacks
-    yield self.lsi_ctrl.do_init(rf_type=self.qube_type, message_out=self.verbose)
+    yield self.lsi_ctrl.do_init(rf_type=self._role, message_out=self.verbose)
     mixer_init = [ ( ch[QSConstants.CNL_MIXCH_TAG],
                      ch[QSConstants.CNL_MIXSB_TAG] ) for ch in self.channel_info]
 
@@ -2299,10 +2299,10 @@ class Qube_Manager_Server(DeviceServer):
     returnValue(found)
 
   @inlineCallbacks
-  def instantiateQube(self, name, qube_type, iplsi, ipclk, channel_info):    # @inlineCallbacks
+  def instantiateQube(self, name, role, iplsi, ipclk, channel_info):    # @inlineCallbacks
     lsi_ctrl  = yield qubelsi.qube.Qube(iplsi, self.adi_api_path)
     sync_ctrl = yield QuBESequencerClient(ipclk)
-    args      = (name, qube_type)
+    args      = (name, role)
     kw        = dict( lsi_ctrl  = lsi_ctrl,
                       sync_ctrl = sync_ctrl,
                       sync_addr = ipclk,
