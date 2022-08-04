@@ -525,7 +525,7 @@ class QubeBase(qubelsi.qube.Qube):
             for o in ad9082s:
                 o.do_init(message_out=False)
                 print(dict(o.get_jesd_status())['0x55E'], end=' ', flush=True)
-            if self.are_ad9082s_connected_normally():
+            if self.are_ad9082s_connected_normally:
                 break
 
     @property
@@ -541,7 +541,7 @@ class QubeBase(qubelsi.qube.Qube):
         return p
         
 
-class QubeA(QubeBase):
+class QubeTypeA(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
         self._config['nports'] = 14
@@ -576,7 +576,7 @@ class QubeA(QubeBase):
         )
         
         self.port4: Final[Port] = Monitorout()
-
+        
         self.port5: Final[Port] = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2),(e7.AWG.U12, 3),(e7.AWG.U13, 4),]),
             lo = LMX2594(lsi = lo[2]),
@@ -602,7 +602,7 @@ class QubeA(QubeBase):
         )
         
         self.port9: Final[Port] = Monitorout()
-
+        
         self.port10: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
@@ -641,7 +641,7 @@ class QubeA(QubeBase):
         self.readout1: Final[Port] = self.port13
         
         
-class QubeB(QubeBase):
+class QubeTypeB(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
         self._config['nports'] = 14
@@ -660,9 +660,9 @@ class QubeB(QubeBase):
         )
         
         self.port1: Final[Port] = NotAvailable()
-
+        
         self.port2: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U14, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
@@ -673,7 +673,7 @@ class QubeB(QubeBase):
         )
         
         self.port4: Final[Port] = Monitorout()
-
+        
         self.port5: Final[Port] = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2), (e7.AWG.U12, 3), (e7.AWG.U13, 4),]),
             lo = LMX2594(lsi = lo[2]),
@@ -699,7 +699,7 @@ class QubeB(QubeBase):
         )
         
         self.port9: Final[Port] = Monitorout()
-
+        
         self.port10: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),

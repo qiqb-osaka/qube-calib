@@ -76,8 +76,9 @@ class Send(object):
             awg_ctrl.initialize(*awgs)
             for a, w in zip(awgs, wavs):
                 awg_ctrl.set_wave_sequence(a, w)
+            awg_ctrl.terminate_awgs(*awgs)
+            awg_ctrl.clear_awg_stop_flags(*awgs)
             awg_ctrl.start_awgs(*awgs)
-            awg_ctrl.wait_for_awgs_to_stop(timeout, *self.awgs)
 
     def terminate(self):
         with AwgCtrl(self.ipaddr) as awg_ctrl:
@@ -89,6 +90,8 @@ class Send(object):
             awg_ctrl.initialize(*awgs)
             for a, w in zip(awgs, wavs):
                 awg_ctrl.set_wave_sequence(a, w)
+            awg_ctrl.terminate_awgs(*awgs)
+            awg_ctrl.clear_awg_stop_flags(*awgs)
             print('wait for started by sequencer.')
             awg_ctrl.wait_for_awgs_to_stop(timeout, *self.awgs)
 
