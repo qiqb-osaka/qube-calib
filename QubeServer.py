@@ -1828,7 +1828,7 @@ class QuBE_Server(DeviceServer):
     elif dev.static_check_lo_frequency(frequency['MHz']):
       dev.set_lo_frequency(frequency['MHz'])
     else:
-      raise ValueError(QSMessage.ERR_FREQ_SETTING.format('LO',QSConstants.DAC_CNCO_RESOL))
+      raise ValueError(QSMessage.ERR_FREQ_SETTING.format('LO',QSConstants.DAC_LO_RESOL))
     return frequency
 
   @setting(401, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
