@@ -474,10 +474,10 @@ class Qube(object): # QubeInstanceFactory
         o = cls.load(config_file_name)
         
         if o['type'] == 'A':
-            return QubeA(o['iplsi'], PATH_TO_API, o)
+            return QubeTypeA(o['iplsi'], PATH_TO_API, o)
         
         if o['type'] == 'B':
-            return QubeB(o['iplsi'], PATH_TO_API, o)
+            return QubeTypeB(o['iplsi'], PATH_TO_API, o)
         
         
 class QubeBase(qubelsi.qube.Qube):
