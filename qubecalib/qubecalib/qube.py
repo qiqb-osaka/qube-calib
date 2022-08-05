@@ -9,6 +9,7 @@ import traceback
 import qubelsi.qube
 from e7awgsw import AWG, CaptureModule
 import e7awgsw
+from typing import Final
 
 class LSI(ABC):
     
