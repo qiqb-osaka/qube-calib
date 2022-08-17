@@ -13,14 +13,19 @@ class CaptureCtrl(e7awgsw.CaptureCtrl):
     def get_capture_data(self, *units):
         return CaptureData(super(), *units)
     
+    
 class CaptureData(object):
+            
     def __init__(self, cap_ctrl, *units):
         self.data = v = {}
         for u in units:
             n = cap_ctrl.num_captured_samples(u)
             c = np.array(cap_ctrl.get_capture_data(u, n))
             v[u] = c[:,0] + 1j * c[:,1]
-            
+        
+    def __getitem__(self, unit):
+        return self.data[unit]
+        
 class Recv(object):
     
     def __init__(self, ipaddr, modules):
@@ -67,7 +72,7 @@ class Send(object):
     
     def __init__(self, ipaddr, awgs, wave_seqs):
         self.ipaddr = ipaddr
-        self.awgs = awgs
+        self.awgs = [o if isinstance(o, AWG) else o.id for o in awgs]
         self.wave_seqs = wave_seqs
     
     def start(self):
@@ -98,19 +103,21 @@ class Send(object):
 class WaveChunkFactory(object):
     
     def get_timestamp(self):
-        period = 1 / AwgCtrl.SAMPLING_RATE
-        return np.arange(0, self.dulation, period)
+        samples = int(self._duration * AwgCtrl.SAMPLING_RATE)
+        return np.linspace(0, self._duration, samples)
     
-    def __init__(self, dulation=128e-9, amp=32767, blank=0, repeats=1):
-        # dulation の初期値は CW 出力を想定して設定した
-        # int(dulation * AwgCtrl.SAMPLING_RATE) が 64 の倍数だと切れ目のない波形が出力される．
+    def __init__(self, duration=128e-9, amp=32767, blank=0, repeats=1, init=0):
+        # duration の初期値は CW 出力を想定して設定した
+        # int(duration * AwgCtrl.SAMPLING_RATE) が 64 の倍数だと切れ目のない波形が出力される．
         # 波形チャンクの最小サイズが 128ns (500Msps の繰り返し周期は 2ns)
         
-        self.dulation = dulation
+        self._duration = duration
         self.amp = amp
-        self.iq = np.zeros(*self.get_timestamp().shape).astype(complex)
         self.blank = blank # [s]
         self.repeats = repeats # times
+        self.init = init # iq value
+        self.iq = np.zeros(*self.get_timestamp().shape).astype(complex)
+        self.iq[:] = init
         
     @property
     def chunk(self):
@@ -124,8 +131,57 @@ class WaveChunkFactory(object):
         n = WaveSequence.NUM_SAMPLES_IN_AWG_WORD
         
         return {'iq_samples': s, 'num_blank_words': b // n, 'num_repeats': self.repeats}
-      
+    
+    @property
+    def duration(self):
+        
+        return self._duration
+    
+    @duration.setter
+    def duration(self, v):
+        
+        self._duration = v
+        self.iq = np.zeros(*self.get_timestamp().shape).astype(complex)
+        self.iq[:] = self.init
 
+
+class WaveSequenceCW(e7awgsw.WaveSequence):
+    
+    def __init__(self, amp=32767):
+        
+        super().__init__(num_wait_words=0, num_repeats=0xFFFFFFFF)
+        wave_chunk = WaveChunkFactory(amp=amp, repeats=0xFFFFFFFF)
+        wave_chunk.iq[:] = 1
+        self.add_chunk(**wave_chunk.chunk)
+
+class WaveSequenceFactory(object):
+    
+    def __init__(self, num_wait_words=0, num_repeats=1):
+        
+        self.num_wait_words = num_wait_words
+        self.num_repeats = num_repeats
+        self.chunk = []
+        
+    def new_chunk(self, duration=128e-9, amp=32767, blank=0, repeats=1, init=0):
+        
+        self.chunk.append(WaveChunkFactory(duration=duration, amp=amp, blank=blank, repeats=repeats, init=init))
+        
+    @property
+    def sequence(self):
+        
+        w = WaveSequence(self.num_wait_words, self.num_repeats)
+        for c in self.chunk:
+            w.add_chunk(**c.chunk)
+        return w
+        
+# class WaveSequence(e7awgsw.WaveSequence):
+    
+#     def renew(self, **kw):
+        
+        
+#         w = WaveSequence(**kw)
+        
+        
 # class WaveSequence(e7awgsw.WaveSequence):
     
 #     def set_iq(self, iq, amp=32767):

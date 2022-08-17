@@ -1,4 +1,5 @@
 from . import alias
+from . import meas
 
 from abc import ABC, abstractmethod
 from enum import Enum, auto
@@ -208,8 +209,18 @@ class AWG(AD9082):
         return {
             'nco': self.nco.status,
         }
+    
+    def send(self, wave_seq):
         
+        o = meas.Send(self.ipfpga, [self], [wave_seq])
+        o.start()
         
+    def terminate(self):
+        
+        o = meas.Send(self.ipfpga, [self], [meas.WaveSequenceCW()])
+        o.terminate()
+
+    
 class CPT(AD9082):
     
     def __init__(self, lsi, cptm, ipfpga):
@@ -240,7 +251,7 @@ class DAC(AD9082):
             'nco': self.nco.status,
             'awgs': {k: v.status for k, v in self._awgs.items()},
         }
-
+    
     
 class ADC(AD9082):
     
@@ -490,6 +501,13 @@ class QubeBase(qubelsi.qube.Qube):
     def __init__(self, addr, path, config=None):
         
         super().__init__(addr, path)
+        self.bitfile: Final[str] = config['bitfile']
+        self.ipfpga: Final[str] = config['ipfpga']
+        self.iplsi: Final[str] = config['iplsi']
+        self.ipmulti: Final[str] = config['ipmulti']
+        self.macfpga: Final[str] = config['macfpga']
+        self.maclsi: Final[str] = config['maclsi']
+        self.type: Final[str] = config['type']
         self._config = config
         
     def __getitem__(self, v):
@@ -521,6 +539,8 @@ class QubeBase(qubelsi.qube.Qube):
 
     def restart_ad9082s(self):
         ad9082s = self.ad9082
+        for o in self.lmx2594_ad9082:
+            o.do_init(ad9082_mode=True, message_out=False)
         for i in range(100):
             print(i+1, end=' ', flush=True)
             for o in ad9082s:
@@ -545,7 +565,8 @@ class QubeBase(qubelsi.qube.Qube):
 class QubeTypeA(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self._config['nports'] = 14
+        self.nports: Final[int] = 14
+        self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
@@ -566,7 +587,7 @@ class QubeTypeA(QubeBase):
         )
 
         self.port2: Final[Port] = Pump(
-            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U4, 1),]),
+            dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U14, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
@@ -645,7 +666,8 @@ class QubeTypeA(QubeBase):
 class QubeTypeB(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self._config['nports'] = 14
+        self.nports: Final[int] = 14
+        self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
