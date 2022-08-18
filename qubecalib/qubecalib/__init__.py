@@ -5,5 +5,3 @@ __all__ =[
 ]
 
 from .qube import Qube
-from .pulse import __init__
-from .setup import __init__
