@@ -5,10 +5,10 @@ from typing import Final
 from concurrent.futures import ThreadPoolExecutor
 from .qube import Readout, Readin, Ctrl, SSB
 from .pulse import Read, Schedule, Blank, Rect, Arbit
-from .meas import Send, Recv, WaveSequenceFactory, CaptureParam, CaptureModule, CaptureCtrl
+from .meas import Send, Recv, WaveSequenceFactory, CaptureParam, CaptureModule, CaptureCtrl, AwgCtrl
 
 def words(t): # in ns
-    return int(t * 1e-9 * e7awgsw.CaptureCtrl.SAMPLING_RATE // e7awgsw.hwparam.NUM_SAMPLES_IN_AWG_WORD)
+    return int(t * 1e-9 * AwgCtrl.SAMPLING_RATE // e7awgsw.hwparam.NUM_SAMPLES_IN_AWG_WORD)
 
 def find_allports(schedule, klass):
     r = []
@@ -17,10 +17,17 @@ def find_allports(schedule, klass):
             r.append(v)
     return r
 
+def select_band(channel):
+    fc = channel.center_frequency
+    for b in channel.wire.band:
+        if b.range[0] < fc and fc <= b.range[1]:
+            return b
+    raise ValueError('Invalid center_frequency {}.'.format(fc))
+
 def calc_modulation_frequency(channel):
     lo_mhz = channel.wire.port.lo.mhz 
     cnco_mhz = channel.wire.cnco_mhz
-    fnco_mhz = channel.band.fnco_mhz
+    fnco_mhz = select_band(channel).fnco_mhz
     rf_usb = (lo_mhz + (cnco_mhz + fnco_mhz)) * 1e+6
     rf_lsb = (lo_mhz - (cnco_mhz + fnco_mhz)) * 1e+6
     if isinstance(channel.wire.port, Readin):
@@ -33,7 +40,7 @@ def calc_modulation_frequency(channel):
         else:
             raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
     return fc
-
+    
 def conv_wseq(channel, repeats, interval, fm, schedule):
     s = schedule
     c = channel.copy()
@@ -49,16 +56,22 @@ def conv_wseq(channel, repeats, interval, fm, schedule):
         if isinstance(ci, Arbit):
             w.new_chunk(duration=ci.duration*1e-9, amp=int(ci.amplitude * 32767), blank=0)
             t = channel.get_timestamp(ci) * 1e-9 - s.offset * 1e-9
-            for cx in fm[channel.wire]:
-                fc = calc_modulation_frequency(cx)
-                w.chunk[-1].iq[:] += ci.iq[:] * np.exp(1j * 2 * np.pi * fc * t)
+            fc = calc_modulation_frequency(fm[channel.wire][0])
+            w.chunk[-1].iq[:] = ci.iq[:] * np.exp(1j * 2 * np.pi * fc * t)
+            if len(fm[channel.wire]) > 1:
+                for cx in fm[channel.wire][1:]:
+                    fc = calc_modulation_frequency(cx)
+                    w.chunk[-1].iq[:] += ci.iq[:] * np.exp(1j * 2 * np.pi * fc * t)
             continue
         if isinstance(ci, Rect):
             w.new_chunk(duration=ci.duration*1e-9, amp=int(ci.amplitude * 32767), blank=0, init=1)
             t = channel.get_timestamp(ci) * 1e-9 - s.offset * 1e-9
-            for cx in fm[channel.wire]:
-                fc = calc_modulation_frequency(cx)
-                w.chunk[-1].iq[:] += w.chunk[-1].iq * np.exp(1j * 2 * np.pi * fc * t)
+            fc = calc_modulation_frequency(fm[channel.wire][0])
+            w.chunk[-1].iq[:] = w.chunk[-1].iq * np.exp(1j * 2 * np.pi * fc * t)
+            if len(fm[channel.wire]) > 1:
+                for cx in fm[channel.wire][1:]:
+                    fc = calc_modulation_frequency(cx)
+                    w.chunk[-1].iq[:] += w.chunk[-1].iq * np.exp(1j * 2 * np.pi * fc * t)
             continue
         if isinstance(ci, Blank):
             w.chunk[-1].blank += ci.duration * 1e-9
@@ -98,8 +111,6 @@ def conv_capt_param(channel, repeats, interval):
         p.sum_start_word_no = 0
         p.num_words_to_sum = e7awgsw.CaptureParam.MAX_SUM_SECTION_LEN
         p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
-    else:
-        p.add_sum_section(10 * 4096, blank_words + words(interval))
     p.capture_delay = delay_words
     
     return p
@@ -156,24 +167,45 @@ def run(schedule, repeats=1, interval=100000):
         c.iq = np.zeros(r.data[k].shape).astype(complex)
         c.iq[:] = r.data[k] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
     
-
-def maintenance_run(schedule, repeats=1, interval=100000, capture_delay = 0):
+    
+def maintenance_run(schedule, repeats=1, interval=100000, duration=5242880, capture_delay=0):
     s: Final[Schedule] = schedule
     
     # Search Ctrl
-    ctrl = [(c, conv_wseq(c, repeats, interval)) for c in find_allports(s, Ctrl)]
+    fm = {}
+    for c in find_allports(s, Ctrl):
+        if c.wire in fm:
+            fm[c.wire].append(c)
+        else:
+            fm[c.wire] = [c]
+    ctrl = [(c, conv_wseq(c, repeats, interval, fm, s)) for c in find_allports(s, Ctrl)]
     
     # Search Readout
-    readout = [(c, conv_wseq(c, repeats, interval)) for c in find_allports(s, Readout)]
+    fm = {}
+    for c in find_allports(s, Readout):
+        if c.wire in fm:
+            fm[c.wire].append(c)
+        else:
+            fm[c.wire] = [c]
+    readout = [(c, conv_wseq(c, repeats, interval, fm, s)) for c in find_allports(s, Readout)]
 
     # Search Readin
     readin = [(c, conv_capt_param(c, repeats, interval)) for c in find_allports(s, Readin)]
     for c, p in readin:
+        p.add_sum_section(words(duration), 1)
         p.capture_delay += words(capture_delay)
     
     # [Todo]: Read を複数使えるように拡張（複数の capt, 対応するトリガの設定）
-    o = Send(readout[0][0].wire.port.awg.ipfpga, [o[0].wire.port.awg for o in readout + ctrl], [o[1].sequence for o in readout + ctrl])
-    r = Recv(readin[0][0].wire.port.capt.ipfpga, [o[0].wire.port.capt for o in readin])
+    o = Send(
+        readout[0][0].wire.port.awg.ipfpga,
+        [o.wire.port.awg for o, w in readout + ctrl],
+        [w.sequence for o, w in readout + ctrl]
+    )
+    w = dict([(c.wire, p) for c, p in readin])
+    r = Recv(
+        readin[0][0].wire.port.capt.ipfpga,
+        [v.port.capt for v, p in w.items()]
+    )
     r.trigger = readout[0][0].wire.port.awg
     
     with ThreadPoolExecutor() as e:
@@ -187,10 +219,6 @@ def maintenance_run(schedule, repeats=1, interval=100000, capture_delay = 0):
     
     for c, p in readin:
         k = CaptureModule.get_units(c.wire.port.capt.id)[0]
-        dt = 1 / CaptureCtrl.SAMPLING_RATE
-        t = np.linspace(0, dt * r.data[k].shape[0], r.data[k].shape[0], endpoint=False)
-        t += c.get_offset(c.findall(Read)[0]) * 1e-9 - s.offset * 1e-9
-        c.timestamp = t
         c.iq = np.zeros(r.data[k].shape).astype(complex)
+        c.timestamp = t = (np.arange(0, r.data[k].shape[0] / AwgCtrl.SAMPLING_RATE, 1 / AwgCtrl.SAMPLING_RATE) - s.offset * 1e-9)
         c.iq[:] = r.data[k] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
-        

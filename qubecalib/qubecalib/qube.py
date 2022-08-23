@@ -11,6 +11,8 @@ import qubelsi.qube
 from e7awgsw import AWG, CaptureModule
 import e7awgsw
 from typing import Final
+import os
+import subprocess
 
 class LSI(ABC):
     
@@ -229,6 +231,13 @@ class CPT(AD9082):
         self.ipfpga = ipfpga
         
     def _status(self):
+        
+        return None
+        
+    def recv(self, capt_param, timeout=5):
+        
+        o = meas.Recv(self.ipfpga, self, capt_param)
+        o.start(timeout=timeout)
         
         return None
         
@@ -516,7 +525,7 @@ class QubeBase(qubelsi.qube.Qube):
         
     def config_fpga(self, bitfile=None):
         
-        if bitfile is None and not 'bitfile' in self:
+        if bitfile is None and not 'bitfile' in self._config:
             raise ValueError('Specify bitfile.')
         
         if bitfile is None:

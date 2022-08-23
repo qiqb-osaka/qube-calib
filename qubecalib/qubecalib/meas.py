@@ -1,7 +1,10 @@
-from e7awgsw import CaptureModule, CaptureCtrl, CaptureParam, DspUnit, AWG
-from e7awgsw import AwgCtrl, IqWave, WaveSequence
+from e7awgsw import CaptureModule, CaptureParam, DspUnit, AWG
+from e7awgsw import IqWave, WaveSequence
 import e7awgsw
 import numpy as np
+
+class AwgCtrl(e7awgsw.AwgCtrl):
+    pass
 
 class CaptureCtrl(e7awgsw.CaptureCtrl):
     
@@ -29,14 +32,25 @@ class CaptureData(object):
         
 class Recv(object):
     
-    def __init__(self, ipaddr, modules):
+    def __init__(self, ipaddr, module, param=None):
         self._trigger = None
         self.ipaddr = ipaddr
-        self.captms = [o if isinstance(o, CaptureModule) else o.id for o in modules]
+        if isinstance(module, list):
+            self.captms = [o if isinstance(o, CaptureModule) else o.id for o in module]
+        else:
+            m = module
+            self.captms = []
+            self.captm = m if isinstance(m, CaptureModule) else m.id
+        self.param = param
         self.data = None
         
-    def start(self, param, timeout=5):
-        units = CaptureModule.get_units(*self.captms)
+    def start(self, param=None, timeout=5):
+        if param is None:
+            param = self.param
+        if self.captms:
+            units = CaptureModule.get_units(*self.captms)
+        else:
+            units = CaptureModule.get_units(self.captm)
         with CaptureCtrl(self.ipaddr) as cap_ctrl:
             cap_ctrl.initialize(*units)
             for i in units:
@@ -46,8 +60,11 @@ class Recv(object):
             cap_ctrl.check_err(*units)
             self.data = cap_ctrl.get_capture_data(*units)
             
-    def wait(self, param, timeout=5):
-        units = CaptureModule.get_units(*self.captms)
+    def wait(self, param=None, timeout=5):
+        if self.captms:
+            units = CaptureModule.get_units(*self.captms)
+        else:
+            units = CaptureModule.get_units(self.captm)
         with CaptureCtrl(self.ipaddr) as cap_ctrl:
             cap_ctrl.initialize(*units)
             if self._trigger is not None:
