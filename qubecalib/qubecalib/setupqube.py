@@ -36,7 +36,7 @@ def calc_modulation_frequency(channel):
         if channel.wire.port.mix.ssb == SSB.USB:
             fc = channel.center_frequency - rf_usb
         elif channel.wire.port.mix.ssb == SSB.LSB:
-            fc = channel.center_frequency - rf_lsb
+            fc = rf_lsb - channel.center_frequency
         else:
             raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
     return fc
