@@ -208,13 +208,13 @@ timeout = 20
 2625:def basic_config():
 2822:def load_config(cxn,config):
 2842:def usage():
-2997:def test_control_ch(device_name):
-3026:def test_control_ch_bandwidth(device_name):
-3069:def test_readout_ch_bandwidth_and_spurious(device_name):
-3076:  def spectrum_analyzer_get():
-3116:  def experiment_nco_sweep( vault, fnco, file_idx ):
-3186:if server_select is None:
-3189:if __name__ == '__main__':
+2998:def test_control_ch(device_name):
+3027:def test_control_ch_bandwidth(device_name):
+3070:def test_readout_ch_bandwidth_and_spurious(device_name):
+3077:  def spectrum_analyzer_get():
+3117:  def experiment_nco_sweep( vault, fnco, file_idx ):
+3187:if server_select is None:
+3190:if __name__ == '__main__':
 
 325:class QSConstants:
 443:class QSMessage:
@@ -2836,7 +2836,7 @@ def load_config(cxn,config):
 # USAGE and for my debugging
 #
 #  > import QubeServer
-#  >  QubeServer.usage()
+#  > QubeServer.usage()
 #
 
 def usage():
@@ -2859,9 +2859,9 @@ def usage():
   freq      =-189/1.024                                     # MHz, baseband signal frequency
   qs.daq_timeout              (T.Value(20,'s'))
   qs.daq_synchronization_delay(T.Value(0.3,'s'))
-  [(qs.select_device(i),qs.shots          (       10* 25600)) for i in devices]
-  [(qs.select_device(i),qs.daq_length     (  Twaveform*us))  for i in devices]
-  [(qs.select_device(i),qs.repetition_time(4*Twaveform*us))  for i in devices]
+  [(qs.select_device(i),qs.shots          (             1)) for i in devices]
+  [(qs.select_device(i),qs.daq_length     (  Twaveform*us))  for i in devices] 
+  [(qs.select_device(i),qs.repetition_time(2*Twaveform*us))  for i in devices]
   data=np.exp(1j*2*np.pi*(freq/QSConstants.DACBB_SAMPLE_R)*np.arange(nsample))*(1-1e-3)
                                                             # This set spositive frequency shift
                                                             # of {freq} MHz for upper sideband modu-
@@ -2884,10 +2884,9 @@ def usage():
   dac_chan = 0
   qs.upload_waveform      ([data],dac_chan)
   qs.upload_parameters    ([dac_chan])
-  qs.frequency_local      (          T.Value(8500,'MHz'))   # 8.5+1.5=10.2GHz
-  qs.frequency_tx_nco     (   T.Value(1599.609375,'MHz'))   # ~ 1.6GHz.
-  qs.frequency_rx_nco     (          T.Value(1500,'MHz'))   # better to be the same as tx_nco
-                                                            #   but this time is not. = 1.5 GHz = 1536/1.024
+  qs.frequency_local      (   T.Value(8500,'MHz'))          # 8.5+1.5=10.2GHz
+  qs.frequency_tx_nco     (   T.Value(1500.,'MHz'))         # 1.5GHz.
+  qs.frequency_rx_nco     (   T.Value(1500,'MHz'))          # better to be the same as tx_nco
   qs.frequency_tx_fine_nco( dac_chan,T.Value(   0,'MHz'))   # better not to use it.
   """
     MUX Window setting
@@ -2895,12 +2894,12 @@ def usage():
   """
   mux_channels   = list()
   mux_chan       = 0
-  readout_window = [(1024*ns,(1024+1024)*ns),               # two sections of 1 us
+  readout_window = [(640*ns,(640+1024)*ns),               # two sections of 1 us
                     (2224*ns,(2224+1024)*ns)]
   qs.acquisition_window(mux_chan, readout_window)
   qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq,'MHz'))
   qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq,'MHz'))
-  qs.acquisition_mode(mux_chan, 'A' )
+  qs.acquisition_mode(mux_chan, '2' )
   mux_channels.append(mux_chan)
 
   mux_chan       = 1
@@ -2915,13 +2914,13 @@ def usage():
   #  readout_window.append(( (6*i+1)*dT, (6*i+3)*dT))
   #  readout_window.append(( (6*i+4)*dT, (6*i+6)*dT))
   qs.acquisition_window(mux_chan, readout_window)
-  qs.acquisition_mode(mux_chan, 'A' )
-  qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq+102/1.024,'MHz')) # offset, DEBUG
-  qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq+102/1.024,'MHz')) # offset, DEBUG
-  #mux_channels.append(mux_chan)
+  qs.acquisition_mode(mux_chan, '2' )
+  qs.debug_auto_acquisition_fir_coefficients   (mux_chan,T.Value(freq,'MHz'))
+  qs.debug_auto_acquisition_window_coefficients(mux_chan,T.Value(freq,'MHz'))
+  #mux_channels.append(mux_chan)                            # DEBUG: Intensionally off
   qs.upload_readout_parameters(mux_channels)
 
-  add_control = True
+  add_control = False
   if add_control:
     for device in devices[1:]:
       qs.select_device(device)                              # control settings
@@ -2954,6 +2953,7 @@ def usage():
   #qs.debug_awg_reg(0,0x18,0,16)
 
   qs.select_device(devices[0])
+  mux_chan = 0
   dat=qs.download_waveform([mux_chan])
   cxn.disconnect()
 
@@ -2993,6 +2993,7 @@ def usage():
 
     fig = go.Figure( graph_data )
     fig.write_html("1.html")
+  return dat
 
 def test_control_ch(device_name):
   from labrad.units           import ns,us
