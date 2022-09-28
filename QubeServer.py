@@ -3204,6 +3204,57 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
       pickle.dump(np.array(dat), f)
     qs.daq_stop()
 
+def test_timing_calib(cxn, device_name):
+  import labrad.types as T
+
+  class TCConstants:
+    QUBE_SRV_TAG = 'qube_server'
+    CALIB_SHOT   = 1
+    CALIB_TOUT   = T.Value(         30,  's')
+    CALIB_BURST  = T.Value(10.24-0.128, 'us')
+    CALIB_REPT   = T.Value(10.24      , 'us')
+    CALIB_FREQ   = T.Value(       10.0, 'GHz')
+    CALIB_FCNCO  = T.Value(        1.5, 'GHz')
+    CALIB_FFNCO  = T.Value(          0, 'GHz')
+
+  class TCMessages:
+    INVALID_DEVICE = 'Invalid device pair: {}.'
+
+  class TimingSyncCalibrator:
+    
+    def __init__(self, cxn, device_name):
+      if isinstance(device_name,tuple):
+        resp = self.check_chassis_name(device_name)
+      if resp:
+        self._device_pair  = device_name
+        self._cxn          = cxn
+        self._ql           = cxn [TCConstants.QUBE_SRV_TAG]
+        self.__initialized = True
+      else:
+        print(TCMessages.INVALID_DEVICE.format(device_name))
+
+    def check_chassis_name(self,device_name):
+      chassisA, chassisB = tuple([_device.split('-')[0] for _device in device_name])
+      if chassisA == chassisB:
+        return False
+      return True
+
+    def set_basic_config(self):
+      for _device in self._device_pair:
+        self._ql.shots          (TCConstants.CALIB_SHOT )
+        self._ql.daq_timeout    (TCConstants.CALIB_TOUT )
+        self._ql.daq_length     (TCConstants.CALIB_BURST)
+        self._ql.repetition_time(TCConstants.CALIB_REPT )
+      
+        self._ql.frequency_local      (TCConstants.CALIB_FREQ - TCConstants.CALIB_FCNCO \
+                                                              - TCConstants.CALIB_FFNCO )
+        self._ql.frequency_tx_nco     (    TCConstants.FCNCO   )
+        self._ql.frequency_tx_fine_nco( 0, TCConstants.FFNCO   )
+        
+  tc = TimingSyncCalibrator(cxn, device_name)
+  
+  
+
 
 ############################################################
 #
