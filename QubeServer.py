@@ -2809,11 +2809,16 @@ def basic_config():
 
   servers = \
    {
+     'qube001': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.19', QSConstants.SRV_IPLSI_TAG: '10.5.0.19', QSConstants.SRV_IPCLK_TAG: '10.2.0.19', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
+     'qube002': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.06', QSConstants.SRV_IPLSI_TAG: '10.5.0.06', QSConstants.SRV_IPCLK_TAG: '10.2.0.06', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
+     'qube003': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.21', QSConstants.SRV_IPLSI_TAG: '10.5.0.21', QSConstants.SRV_IPCLK_TAG: '10.2.0.21', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
      'qube004': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.22', QSConstants.SRV_IPLSI_TAG: '10.5.0.22', QSConstants.SRV_IPCLK_TAG: '10.2.0.22', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube005': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.23', QSConstants.SRV_IPLSI_TAG: '10.5.0.23', QSConstants.SRV_IPCLK_TAG: '10.2.0.23', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube006': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.24', QSConstants.SRV_IPLSI_TAG: '10.5.0.24', QSConstants.SRV_IPCLK_TAG: '10.2.0.24', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
-     'qube008': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.26', QSConstants.SRV_IPLSI_TAG: '10.5.0.26', QSConstants.SRV_IPCLK_TAG: '10.2.0.26', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
-     'qube010': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.28', QSConstants.SRV_IPLSI_TAG: '10.5.0.28', QSConstants.SRV_IPCLK_TAG: '10.2.0.28', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
+     'qube007': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.01', QSConstants.SRV_IPLSI_TAG: '10.5.0.01', QSConstants.SRV_IPCLK_TAG: '10.2.0.01', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
+     'qube008': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.09', QSConstants.SRV_IPLSI_TAG: '10.5.0.09', QSConstants.SRV_IPCLK_TAG: '10.2.0.09', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
+     'qube009': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.27', QSConstants.SRV_IPLSI_TAG: '10.5.0.27', QSConstants.SRV_IPCLK_TAG: '10.2.0.27', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
+     'qube010': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.15', QSConstants.SRV_IPLSI_TAG: '10.5.0.15', QSConstants.SRV_IPCLK_TAG: '10.2.0.15', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube011': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.29', QSConstants.SRV_IPLSI_TAG: '10.5.0.29', QSConstants.SRV_IPCLK_TAG: '10.2.0.29', QSConstants.SRV_QUBETY_TAG: 'A', QSConstants.SRV_CHANNEL_TAG : readout_control_qube  },
      'qube012': { QSConstants.SRV_IPFPGA_TAG: '10.1.0.30', QSConstants.SRV_IPLSI_TAG: '10.5.0.30', QSConstants.SRV_IPCLK_TAG: '10.2.0.30', QSConstants.SRV_QUBETY_TAG: 'B', QSConstants.SRV_CHANNEL_TAG : control_qube_500_1500 },
    }
