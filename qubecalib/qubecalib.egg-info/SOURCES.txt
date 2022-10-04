@@ -1,8 +1,13 @@
 setup.py
 qubecalib/__init__.py
 qubecalib/alias.py
+qubecalib/env.py
 qubecalib/meas.py
+qubecalib/meas_classifier.py
+qubecalib/pulse.py
 qubecalib/qube.py
+qubecalib/setup.py
+qubecalib/setupqube.py
 qubecalib/ui.py
 qubecalib/utils.py
 qubecalib/visa.py
