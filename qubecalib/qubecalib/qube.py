@@ -1,4 +1,4 @@
-from . import alias
+from . import env
 from . import meas
 
 from abc import ABC, abstractmethod
@@ -13,6 +13,12 @@ import e7awgsw
 from typing import Final
 import os
 import subprocess
+
+PATH_TO_BITFILE = env.PATH_TO_BITFILE
+PATH_TO_QUBECALIB_PACKAGE = env.PATH_TO_QUBECALIB_PACKAGE
+
+PATH_TO_CONFIG: str = '{}/qube-calib/.config'.format(PATH_TO_QUBECALIB_PACKAGE)
+PATH_TO_API: str = "{}/qube-calib/adi_api_mod".format(PATH_TO_QUBECALIB_PACKAGE)
 
 class LSI(ABC):
     
@@ -454,11 +460,6 @@ class Monitorin(Input):
     def __init__(self, adc, lo):
         super().__init__(adc, lo)
     
-
-PATH_TO_CONFIG = './.config'
-PATH_TO_BITFILE: str = "/home/qube/bin"
-PATH_TO_API: str = "./adi_api_mod"
-
 
 class ConfigFPGA(object):
     
