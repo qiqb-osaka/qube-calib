@@ -14,6 +14,17 @@ from typing import Final
 import os
 import subprocess
 
+if 'QUBECALIB_PATH_TO_ROOT' in os.environ:
+    PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT']
+else:
+    PATH_TO_ROOT: Final[str] = '.'
+PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
+PATH_TO_API: str = "{}/adi_api_mod".format(PATH_TO_ROOT)
+if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
+    PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
+else:
+    PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
+
 class LSI(ABC):
     
     def __init__(self, lsi):
@@ -453,12 +464,6 @@ class Monitorin(Input):
     
     def __init__(self, adc, lo):
         super().__init__(adc, lo)
-    
-
-PATH_TO_CONFIG = './.config'
-PATH_TO_BITFILE: str = "/home/qube/bin"
-PATH_TO_API: str = "./adi_api_mod"
-
 
 class ConfigFPGA(object):
     
