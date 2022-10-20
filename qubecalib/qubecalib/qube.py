@@ -1,4 +1,3 @@
-from . import env
 from . import meas
 
 from abc import ABC, abstractmethod
@@ -596,7 +595,7 @@ class QubeTypeA(QubeBase):
         )
         
         self.port1: Final[Port] = Readin(
-            adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [CaptureModule.U1,]),
+            adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[0]),
         )
 
@@ -640,7 +639,7 @@ class QubeTypeA(QubeBase):
         self.port9: Final[Port] = Monitorout()
         
         self.port10: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
         
@@ -651,7 +650,7 @@ class QubeTypeA(QubeBase):
         )
         
         self.port12: Final[Port] = Readin(
-            adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[7]),
         )
         
@@ -705,7 +704,7 @@ class QubeTypeB(QubeBase):
         )
         
         self.port3: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [CaptureModule.U1,]),
+            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
         
@@ -738,7 +737,7 @@ class QubeTypeB(QubeBase):
         self.port9: Final[Port] = Monitorout()
         
         self.port10: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
         
