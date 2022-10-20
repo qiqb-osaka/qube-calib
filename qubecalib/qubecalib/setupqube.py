@@ -288,116 +288,32 @@ def conv_channel_for_e7awgsw(channels, offset_time):
         quantized_channel.append(Blank(duration=0))
     return quantized_channel
     
-def conv_wseq(channel, repeats, interval, fm, offset):
-    
-    c = conv_channel_for_e7awgsw([channel], offset)
-    
-    # 先頭の Blank を wait に変換する
-    # c = channel.renew()
-    # for s in channel:
-    #     c.append(s)
-    if isinstance(c[0], Blank):
-        wait = c[0].duration
-        c.pop(0)
-    else:
-        wait = 0
-    # print(c)
-    # print(calc_modulation_frequency(c))
-        
-    w = WaveSequenceFactory(num_wait_words=words(wait), num_repeats=1)
-    
-    for ci in c:
-        if isinstance(ci, Arbit):
-            w.new_chunk(duration=ci.duration*1e-9, amp=int(ci.amplitude * 32767), blank=0)
-            t = c.get_timestamp(ci) * 1e-9 - offset * 1e-9
-            fc = calc_modulation_frequency(fm[c.wire][0])
-            w.chunk[-1].iq[:] = ci.iq[:]# * np.exp(1j * 2 * np.pi * fc * t)
-            if len(fm[c.wire]) > 1:
-                for cx in fm[c.wire][1:]:
-                    fc = calc_modulation_frequency(cx)
-                    w.chunk[-1].iq[:] += ci.iq[:] * np.exp(1j * 2 * np.pi * fc * t)
-            continue
-        if isinstance(ci, Rect):
-            w.new_chunk(duration=ci.duration*1e-9, amp=int(ci.amplitude * 32767), blank=0, init=1)
-            t = c.get_timestamp(ci) * 1e-9 - offset * 1e-9
-            fc = calc_modulation_frequency(fm[c.wire][0])
-            w.chunk[-1].iq[:] = w.chunk[-1].iq# * np.exp(1j * 2 * np.pi * fc * t)
-            if len(fm[c.wire]) > 1:
-                for cx in fm[c.wire][1:]:
-                    fc = calc_modulation_frequency(cx)
-                    w.chunk[-1].iq[:] += w.chunk[-1].iq * np.exp(1j * 2 * np.pi * fc * t)
-            continue
-        if isinstance(ci, Blank):
-            w.chunk[-1].blank += ci.duration * 1e-9
-            continue
-        raise ValueError('Invalid LWC.')
-        
-    w.chunk[-1].repeats = repeats
-    w.chunk[-1].blank += wait * 1e-9
-    w.chunk[-1].blank += interval * 1e-9
-    
-    return w
-    
-def conv_capt_param(channel, repeats, interval):
-    delay_words = words(channel.wire.delay)
-    blank_words = 0
-    c = channel.copy()
-    
-    if isinstance(c[0], Blank):
-        w = words(c[0].duration)
-        delay_words += w
-        blank_words += w
-        c.pop(0)
-        
-    for ci in c:
-        if isinstance(ci, Read):
-            capture_words = words(ci.duration)
-            continue
-        if isinstance(ci, Blank):
-            blank_words += words(ci.duration)
-            continue
-        raise ValueError('Invalid LWC.')
-    
-    p = CaptureParam()
-    p.num_integ_sections = repeats
-    if not (repeats == 1):
-        p.add_sum_section(capture_words, blank_words + words(interval))
-        p.sum_start_word_no = 0
-        p.num_words_to_sum = e7awgsw.CaptureParam.MAX_SUM_SECTION_LEN
-        p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
-    p.capture_delay = delay_words
-    
-    return p
-    
-    
-def collect_channels(schedule, klass):
-    """
-    同じ Wire に割り当てられたチャネルのリストを返す
-    """
-    rslt = {}
-    for c in find_allports(schedule, klass):
-        if c.wire in rslt:
-            rslt[c.wire].append(c) # すでに Wire が登録されていれば追加
-        else:
-            rslt[c.wire] = [c] # 新しく登録する Wire ならリストを生成
-    return rslt
-    
-    
+
 def run(schedule, repeats=1, interval=100000):
     """
-    単体 Qube でのスケジュール実行
+    同一筐体 Qube でのスケジュール実行
     """
     s: Final[Schedule] = schedule
     
-    ipfpga = [c.wire.port.capt.ipfpga for k, c in schedule.items() if isinstance(c.wire.port, Readin)][0]
-    trigger_awg = [c.wire.port.awg0 for k, c in schedule.items() if not isinstance(c.wire.port, Readin)][0]
+    def collect_channel():
+        """
+        同じ Wire に割り当てられたチャネルのリストを返す
+        """
+        channels = {}
+        for k, c in schedule.items():
+            if not len(c):
+                continue
+            if c.wire in channels:
+                channels[c.wire].append(c) # すでに Wire が登録されていれば追加
+            else:
+                channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
+        return channels
+    channels = collect_channel()
     
-    channels = {}
-    for k, c in schedule.items():
-        if c.wire in channels:
-            channels[c.wire].append(c) # すでに Wire が登録されていれば追加
-        else:
-            channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
+    # どの ipfpga の qube が使われているかリストする
+    qube_ipfpgas = list(set([k.port.capt.ipfpga if isinstance(k.port, Readin) else k.port.awg0.ipfpga for k, v in channels.items()]))
+    # このバージョンでは単一筐体を仮定しているので第一要素を ipfpga とする
+    ipfpga = qube_ipfpgas[0]
     
     w2c = dict([(k, conv_channel_for_e7awgsw(v, schedule.offset)) for k, v in channels.items()])
     # すべてのチャネルの全長を揃える
@@ -414,18 +330,54 @@ def run(schedule, repeats=1, interval=100000):
         return w
     conv = conv_channel_to_e7awgsw_wave_sequence
     send = [(k, conv(v)) for k, v in w2c.items() if not isinstance(k.port, Readin)]
-    
-    # Search Readin
-    readin = [(c, conv_capt_param(c, repeats, interval)) for c in find_allports(s, Readin)]
-    
     o = Send(ipfpga, [o.port.awg for o, w in send], [w.sequence for o, w in send])
-    w = dict([(c.wire, p) for c, p in readin])
-    # [Todo]: Read を複数使えるように拡張（複数の capt, 対応するトリガの設定）
-    r = Recv(ipfpga, [v.port.capt for v, p in w.items()])
-    r.trigger = trigger_awg
+    
+    def conv_channel_to_e7awgsw_capture_param(channel):
+        delay_words = words(channel.wire.delay)
+        blank_words = 0
+        c = channel.copy()
+
+        if isinstance(c[0], Blank):
+            w = words(c[0].duration)
+            delay_words += w
+            blank_words += w
+            c.pop(0)
+        
+        # 複数の総和区間に対応させる！ 10/21
+        # fnco の値を変える
+        # モニタ対応
+        
+        for ci in c:
+            if isinstance(ci, Read) or isinstance(ci, Arbitrary):
+                capture_words = words(ci.duration)
+                continue
+            if isinstance(ci, Blank):
+                blank_words += words(ci.duration)
+                continue
+            raise ValueError('Invalid LWC.')
+
+        p = CaptureParam()
+        p.num_integ_sections = repeats
+        if not (repeats == 1):
+            p.add_sum_section(capture_words, blank_words + words(interval))
+            p.sum_start_word_no = 0
+            p.num_words_to_sum = e7awgsw.CaptureParam.MAX_SUM_SECTION_LEN
+            p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
+        p.capture_delay = delay_words
+
+        return p
+    conv = conv_channel_to_e7awgsw_capture_param
+    recv = [(w, conv(c)) for w, c in w2c.items() if isinstance(w.port, Readin)]
+    
+    w = {w: p for w, p in recv}
+    r = Recv(ipfpga, [v.port.capt for v, p in w.items()], [p for v, p in w.items()])
+    # トリガを設定する
+    # Readout_send の Wire のリストを得る
+    readout_sends = list(set([k for k, v in channels.items() if isinstance(k.port, Readout)]))
+    r.trigger = readout_sends[0].port.awg0
     
     with ThreadPoolExecutor() as e:
-        rslt = e.submit(lambda: r.wait(readin[0][1], timeout=5))
+        rslt = e.submit(lambda: r.wait(timeout=5))
         time.sleep(0.1)
         o.terminate()
         o.start()
@@ -433,10 +385,14 @@ def run(schedule, repeats=1, interval=100000):
         
     o.terminate()
     
-    for c, p in readin:
+    for c in [c for k, c in schedule.items() if isinstance(c.wire.port, Readin)]:
         k = CaptureModule.get_units(c.wire.port.capt.id)[0]
-        c.timestamp = t = (c.get_timestamp(c.findall(Read)[0]) - s.offset) * 1e-9
+        if [s for s in c if isinstance(s, Read)]:
+            c.timestamp = t = (c.get_timestamp(c.findall(Read)[0]) - s.offset) * 1e-9
+        else:
+            c.timestamp = t = (c.get_timestamp(c.findall(Arbit)[0]) - s.offset) * 1e-9
         c.iq = np.zeros(r.data[k].shape).astype(complex)
+        # 復調したデータを格納する
         c.iq[:] = r.data[k] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
     
     

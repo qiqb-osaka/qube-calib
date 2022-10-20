@@ -35,7 +35,7 @@ class Recv(object):
     def __init__(self, ipaddr, module, param=None):
         self._trigger = None
         self.ipaddr = ipaddr
-        if isinstance(module, list):
+        if isinstance(module, list) or isinstance(module, tuple):
             self.captms = [o if isinstance(o, CaptureModule) else o.id for o in module]
         else:
             m = module
@@ -53,14 +53,20 @@ class Recv(object):
             units = CaptureModule.get_units(self.captm)
         with CaptureCtrl(self.ipaddr) as cap_ctrl:
             cap_ctrl.initialize(*units)
-            for i in units:
-                cap_ctrl.set_capture_params(i, param)
+            if isinstance(param, list) or isinstance(param, tuple):
+                for u, p in zip(units, param):
+                    cap_ctrl.set_capture_params(u, p)
+            else:
+                for i in units:
+                    cap_ctrl.set_capture_params(i, param)
             cap_ctrl.start_capture_units(*units)
             cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
             cap_ctrl.check_err(*units)
             self.data = cap_ctrl.get_capture_data(*units)
             
     def wait(self, param=None, timeout=5):
+        if param is None:
+            param = self.param
         if self.captms:
             units = CaptureModule.get_units(*self.captms)
         else:
@@ -71,8 +77,12 @@ class Recv(object):
                 for i in self.captms:
                     cap_ctrl.select_trigger_awg(i, self._trigger)
                     cap_ctrl.enable_start_trigger(*CaptureModule.get_units(i))
-            for i in units:
-                cap_ctrl.set_capture_params(i, param)
+            if isinstance(param, list) or isinstance(param, tuple):
+                for u, p in zip(units, param):
+                    cap_ctrl.set_capture_params(u, p)
+            else:
+                for i in units:
+                    cap_ctrl.set_capture_params(i, param)
             cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
             cap_ctrl.check_err(*units)
             self.data = cap_ctrl.get_capture_data(*units)
