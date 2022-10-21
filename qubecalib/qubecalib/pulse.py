@@ -56,6 +56,8 @@ class RxBlank(Slot):
 class Read(Slot):
     def __init__(self, duration, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=0, sampling_rate=sampling_rate)
+        self.global_timestamp = None
+        self.iq = None
         
     def combine(self, v):
         if isinstance(v, Read):

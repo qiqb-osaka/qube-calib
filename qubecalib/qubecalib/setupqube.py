@@ -107,8 +107,10 @@ Padding = namedtuple('Padding', ('duration'))
 Shortage = namedtuple('Shortage', ('duration'))
 
 def quantize_blank(channel):
-    r = []
-    for i in range(len(channel)):
+    i, r = 0, []
+    while True:
+        if i >= len(channel):
+            break
         slot = channel[i]
         if isinstance(slot, Blank):
             # もしひとつ前がはみ出していたら短くする
@@ -118,6 +120,12 @@ def quantize_blank(channel):
                     shortage_duration = channel[i - 1].duration
             shorten_duration = slot.duration - shortage_duration
             if i > 0 and shorten_duration < 1:
+                if shorten_duration == 0:
+                    # Blank を削除して前後の Arbitrary を結合する
+                    r[-1].duration = r[-1].duration + channel[i+1].duration
+                    r[-1].iq = np.concatenate([r[-1].iq, channel[i+1].iq])
+                    i += 2
+                    continue
                 # Blank が食われてしまう処理は少し面倒なので後回しに
                 raise ValueError('Too close pulse in same wire. Not Implemented yet.')
             div, mod = divmod(shorten_duration, 8) # Blank は 8ns の整数倍にしなければいけない
@@ -137,6 +145,7 @@ def quantize_blank(channel):
             pass
         else:
             raise ValueError('Critical Bug...')
+        i += 1
     return r
 
 def quantize_wave(channel):
@@ -399,22 +408,52 @@ def run(schedule, repeats=1, interval=100000):
         
     o.terminate()
     
+    # 各 Channel には Read スロットが単一であると仮定
     # 各 readout_recv Wire の合成チャネルの時間軸とデータを生成する
-    # 各 Readin チャネルの読み出しスロットの時間軸から合成チャネルのインデックスを計算する
+    for w, c in w2c.items():
+        if not isinstance(w.port, Readin):
+            continue
+        # 合成チャネルの時間軸とデータ容器を用意する
+        d = c.duration
+        m = max([s.sampling_rate for s in c])
+        c.timestamp = t_ns = np.linspace(0, d, int(d * m * 1e-9), endpoint=False).astype(int) - s.offset
+        c.iq = np.zeros(len(t_ns)).astype(complex)
+        
+        # 合成チャネルのデータを埋める
+        k = CaptureModule.get_units(w.port.capt.id)[0]
+        for v in c:
+            if not isinstance(v, Arbitrary):
+                continue
+            t0_ns = c.timestamp
+            t_ns = c.get_timestamp(v) - s.offset
+            c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = r.data[k]
+
     # 各 Readin チャネルの読み出しスロットに復調したデータを格納する
-    # 複数の総和区間への対応すること
-    print([(w, [(s, s.duration) for s in c]) for w, c in w2c.items() if isinstance(w.port, Readin)])
+    for k, c in schedule.items():
+        if not isinstance(c.wire.port, Readin):
+            continue
+        for v in c:
+            # 各 Readin チャネルの読み出しスロットの時間軸から合成チャネルのインデックスを計算する
+            t0_ns = w2c[c.wire].timestamp
+            t_ns = c.get_timestamp(v) - s.offset
+            idx = (t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])
+            v.global_timestamp = t = t_ns * 1e-9
+            v.iq = np.zeros(len(t_ns)).astype(complex)
+            v.iq[:] = w2c[c.wire].iq[idx] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
     
-    for c in [c for k, c in schedule.items() if isinstance(c.wire.port, Readin)]:
-        print(c)
-        k = CaptureModule.get_units(c.wire.port.capt.id)[0]
-        if [s for s in c if isinstance(s, Read)]:
-            c.timestamp = t = (c.get_timestamp(c.findall(Read)[0]) - s.offset) * 1e-9
-        else:
-            c.timestamp = t = (c.get_timestamp(c.findall(Arbit)[0]) - s.offset) * 1e-9
-        c.iq = np.zeros(r.data[k].shape).astype(complex)
-        # 復調したデータを格納する
-        c.iq[:] = r.data[k] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
+    # 複数の総和区間への対応すること
+    
+#     for c in [c for k, c in schedule.items() if isinstance(c.wire.port, Readin)]:
+#         print(c)
+#         k = CaptureModule.get_units(c.wire.port.capt.id)[0]
+#         if [s for s in c if isinstance(s, Read)]: # もし Read があるなら
+#             # ここ勝手に属性新設してる!汗! schedule で RxChannel にしておくべきでないか？
+#             c.timestamp = t = (c.get_timestamp(c.findall(Read)[0]) - s.offset) * 1e-9
+#         else:
+#             c.timestamp = t = (c.get_timestamp(c.findall(Arbit)[0]) - s.offset) * 1e-9
+#         c.iq = np.zeros(r.data[k].shape).astype(complex)
+#         # 復調したデータを格納する
+#         c.iq[:] = r.data[k] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
     
     
 def maintenance_run(schedule, repeats=1, interval=100000, duration=5242880, capture_delay=0):
