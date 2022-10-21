@@ -322,11 +322,14 @@ def run(schedule, repeats=1, interval=100000):
         v[-1].duration += m - v.duration
     
     def conv_channel_to_e7awgsw_wave_sequence(c):
-        w = WaveSequenceFactory(num_wait_words=words(c[0].duration), num_repeats=repeats)
+        wait = c[0].duration
+        w = WaveSequenceFactory(num_wait_words=words(wait), num_repeats=repeats)
         for i in range(1, len(c), 2):
             w.new_chunk(duration=c[i].duration * 1e-9, amp=int(c[i].amplitude * 32767), blank=0)
             w.chunk[-1].iq[:] = c[i].iq[:]
             w.chunk[-1].blank = c[i+1].duration * 1e-9
+        w.chunk[-1].blank += interval * 1e-9
+        w.chunk[-1].blank += wait * 1e-9
         return w
     conv = conv_channel_to_e7awgsw_wave_sequence
     send = [(k, conv(v)) for k, v in w2c.items() if not isinstance(k.port, Readin)]
@@ -347,15 +350,26 @@ def run(schedule, repeats=1, interval=100000):
         # fnco の値を変える
         # モニタ対応
         
+        SumSection = namedtuple('SumSection', 'capture_words blank_words')
+        sum_sections = []
         for ci in c:
             if isinstance(ci, Read) or isinstance(ci, Arbitrary):
                 capture_words = words(ci.duration)
-                continue
-            if isinstance(ci, Blank):
-                blank_words += words(ci.duration)
-                continue
-            raise ValueError('Invalid LWC.')
-
+            elif isinstance(ci, Blank):
+                blank_words = words(ci.duration)
+            else:
+                raise ValueError('Invalid type of Slot.')
+            sum_sections.append(SumSection(capture_words, blank_words))
+        s = sum_sections[-1]
+        sum_sections[-1] = SumSection(s.capture_words, s.blank_words + words(interval))
+        
+        # p = CaptureParam()
+        # p.capture_delay = delay_words
+        # p.num_integ_sections = repeats
+        # for s in sum_sections:
+        #     p.add_sum_section(*s)
+        #     p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
+        
         p = CaptureParam()
         p.num_integ_sections = repeats
         if not (repeats == 1):
@@ -364,7 +378,7 @@ def run(schedule, repeats=1, interval=100000):
             p.num_words_to_sum = e7awgsw.CaptureParam.MAX_SUM_SECTION_LEN
             p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
         p.capture_delay = delay_words
-
+        
         return p
     conv = conv_channel_to_e7awgsw_capture_param
     recv = [(w, conv(c)) for w, c in w2c.items() if isinstance(w.port, Readin)]
@@ -385,7 +399,14 @@ def run(schedule, repeats=1, interval=100000):
         
     o.terminate()
     
+    # 各 readout_recv Wire の合成チャネルの時間軸とデータを生成する
+    # 各 Readin チャネルの読み出しスロットの時間軸から合成チャネルのインデックスを計算する
+    # 各 Readin チャネルの読み出しスロットに復調したデータを格納する
+    # 複数の総和区間への対応すること
+    print([(w, [(s, s.duration) for s in c]) for w, c in w2c.items() if isinstance(w.port, Readin)])
+    
     for c in [c for k, c in schedule.items() if isinstance(c.wire.port, Readin)]:
+        print(c)
         k = CaptureModule.get_units(c.wire.port.capt.id)[0]
         if [s for s in c if isinstance(s, Read)]:
             c.timestamp = t = (c.get_timestamp(c.findall(Read)[0]) - s.offset) * 1e-9
