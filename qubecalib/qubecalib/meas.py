@@ -233,14 +233,14 @@ def send_recv_single(ipfpga, awg_to_wave_sequence, capt_module_to_capt_param, tr
     return send, recv
     
     
-def send_recv(ipfpga_to_frame):
+def send_recv(ipfpga_to_e7awgsw):
     """
     Send と Recv を同期動作させる．現在は Qube 単体での動作にしか対応していないが，同じ Interface で
     複数台同期に対応させる予定
     """
     
     result = {}
-    d = ipfpga_to_frame
+    d = ipfpga_to_e7awgsw
     if len(d) == 1:
         ipfpga = list(d.keys())[0]
         e = d[ipfpga]

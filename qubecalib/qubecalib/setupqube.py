@@ -301,26 +301,29 @@ def conv_channel_for_e7awgsw(channels, offset_time):
     return quantized_channel
     
 
+def collect_channel(schedule):
+    """
+    同じ Wire に割り当てられたチャネルのリストを返す
+    """
+    channels = {}
+    for k, c in schedule.items():
+        if not len(c):
+            continue
+        if c.wire in channels:
+            channels[c.wire].append(c) # すでに Wire が登録されていれば追加
+        else:
+            channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
+    return channels
+
+
+    
 def conv_to_waveseq_and_captparam(schedule, repeats=1, interval=100000):
     """
     同一筐体 Qube でのスケジュール実行
     """
     s: Final[Schedule] = schedule
     
-    def collect_channel():
-        """
-        同じ Wire に割り当てられたチャネルのリストを返す
-        """
-        channels = {}
-        for k, c in schedule.items():
-            if not len(c):
-                continue
-            if c.wire in channels:
-                channels[c.wire].append(c) # すでに Wire が登録されていれば追加
-            else:
-                channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
-        return channels
-    channels = collect_channel()
+    channels = collect_channel(s)
     
     # どの ipfpga の qube が使われているかリストする
     qube_ipfpgas = list(set([k.port.capt.ipfpga if isInputPort(k.port) else k.port.awg0.ipfpga for k, v in channels.items()]))
@@ -387,41 +390,41 @@ def conv_to_waveseq_and_captparam(schedule, repeats=1, interval=100000):
     
     w = {w: p for w, p in recv}
     
-    
-def run(schedule, repeats=1, interval=100000):
-    """
-    同一筐体 Qube でのスケジュール実行
-    """
+
+def conv_to_e7awgsw(schedule, repeats=1, interval=100000, trigger_awg=None):
     s: Final[Schedule] = schedule
     
-    def collect_channel():
-        """
-        同じ Wire に割り当てられたチャネルのリストを返す
-        """
-        channels = {}
-        for k, c in schedule.items():
-            if not len(c):
-                continue
-            if c.wire in channels:
-                channels[c.wire].append(c) # すでに Wire が登録されていれば追加
-            else:
-                channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
-        return channels
-    channels = collect_channel()
+    # def collect_channel():
+    #     """
+    #     同じ Wire に割り当てられたチャネルのリストを返す
+    #     """
+    #     channels = {}
+    #     for k, c in schedule.items():
+    #         if not len(c):
+    #             continue
+    #         if c.wire in channels:
+    #             channels[c.wire].append(c) # すでに Wire が登録されていれば追加
+    #         else:
+    #             channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
+    #     return channels
+    channels = collect_channel(schedule)
     
     # どの ipfpga の qube が使われているかリストする
     qube_ipfpgas = list(set([k.port.capt.ipfpga if isInputPort(k.port) else k.port.awg0.ipfpga for k, v in channels.items()]))
     # このバージョンでは単一筐体を仮定しているので第一要素を ipfpga とする
     ipfpga = qube_ipfpgas[0]
-    ipfpga_to_frame = {
+    # 
+    ipfpga_to_e7awgsw = {
         ipfpga: {
             'awg_to_wave_sequence': {},
             'capt_module_to_capt_param': {},
             'trigger_awg': {},
+            'wire_to_merged_channel': {},
         }
     }
     
     w2c = dict([(k, conv_channel_for_e7awgsw(v, schedule.offset)) for k, v in channels.items()])
+    ipfpga_to_e7awgsw[ipfpga]['wire_to_merged_channel'] = w2c
     # すべてのチャネルの全長を揃える
     m = max([v.duration for k, v in w2c.items()])
     for k, v in w2c.items():
@@ -478,9 +481,8 @@ def run(schedule, repeats=1, interval=100000):
     conv = conv_channel_to_e7awgsw_capture_param
     recv = [(w, conv(c)) for w, c in w2c.items() if isInputPort(w.port)]
     
-    w = {w: p for w, p in recv}
-    ipfpga_to_frame[ipfpga]['awg_to_wave_sequence'] = {f.port.awg0: s for f, s in send}
-    ipfpga_to_frame[ipfpga]['capt_module_to_capt_param'] = {f.port.capt: s for f, s in recv}
+    ipfpga_to_e7awgsw[ipfpga]['awg_to_wave_sequence'] = {f.port.awg0: s for f, s in send}
+    ipfpga_to_e7awgsw[ipfpga]['capt_module_to_capt_param'] = {f.port.capt: s for f, s in recv}
     # トリガを設定する
     # Readout_send の Wire のリストを得る
     readout_sends = list(set([k for k, v in channels.items() if isinstance(k.port, Readout)]))
@@ -489,31 +491,125 @@ def run(schedule, repeats=1, interval=100000):
     else:
         # モニタ経路を使う場合必ずしも Readout がある訳ではない
         trigger = [w.port.awg0 for w, c in w2c.items() if not isInputPort(w.port)][0]
-    ipfpga_to_frame[ipfpga]['trigger_awg'] = trigger
+    ipfpga_to_e7awgsw[ipfpga]['trigger_awg'] = trigger
     
-    # o = Send(ipfpga, [o.port.awg for o, w in send], [w.sequence for o, w in send])
-    # r = Recv(ipfpga, [v.port.capt for v, p in w.items()], [p for v, p in w.items()])
-    # トリガを設定する
-    # Readout_send の Wire のリストを得る
-    # readout_sends = list(set([k for k, v in channels.items() if isinstance(k.port, Readout)]))
-    # if readout_sends:
-    #     r.trigger = readout_sends[0].port.awg0
-    # else:
-    #     # モニタ経路を使う場合必ずしも Readout がある訳ではない
-    #     r.trigger = [w.port.awg0 for w, c in w2c.items() if not isInputPort(w.port)][0]
+    return ipfpga_to_e7awgsw
     
-#     with ThreadPoolExecutor() as e:
-#         rslt = e.submit(lambda: r.wait(timeout=5))
-#         time.sleep(0.1)
-#         o.terminate()
-#         o.start()
-#         rslt.result()
+    
+def run(schedule, repeats=1, interval=100000):
+    """
+    同一筐体 Qube でのスケジュール実行
+    """
+#     s: Final[Schedule] = schedule
+    
+#     # def collect_channel():
+#     #     """
+#     #     同じ Wire に割り当てられたチャネルのリストを返す
+#     #     """
+#     #     channels = {}
+#     #     for k, c in schedule.items():
+#     #         if not len(c):
+#     #             continue
+#     #         if c.wire in channels:
+#     #             channels[c.wire].append(c) # すでに Wire が登録されていれば追加
+#     #         else:
+#     #             channels[c.wire] = [c] # 新しく登録する Wire ならリストを生成
+#     #     return channels
+#     channels = collect_channel(schedule)
+    
+#     # どの ipfpga の qube が使われているかリストする
+#     qube_ipfpgas = list(set([k.port.capt.ipfpga if isInputPort(k.port) else k.port.awg0.ipfpga for k, v in channels.items()]))
+#     # このバージョンでは単一筐体を仮定しているので第一要素を ipfpga とする
+#     ipfpga = qube_ipfpgas[0]
+#     # 
+#     ipfpga_to_e7awgsw = {
+#         ipfpga: {
+#             'awg_to_wave_sequence': {},
+#             'capt_module_to_capt_param': {},
+#             'trigger_awg': {},
+#             'wire_to_merged_channel': {},
+#         }
+#     }
+    
+#     w2c = dict([(k, conv_channel_for_e7awgsw(v, schedule.offset)) for k, v in channels.items()])
+#     ipfpga_to_e7awgsw[ipfpga]['wire_to_merged_channel'] = w2c
+#     # すべてのチャネルの全長を揃える
+#     m = max([v.duration for k, v in w2c.items()])
+#     for k, v in w2c.items():
+#         v[-1].duration += m - v.duration
+    
+#     def conv_channel_to_e7awgsw_wave_sequence(c):
+#         wait = c[0].duration
+#         w = WaveSequenceFactory(num_wait_words=words(wait), num_repeats=repeats)
+#         for i in range(1, len(c), 2):
+#             w.new_chunk(duration=c[i].duration * 1e-9, amp=int(c[i].amplitude * 32767), blank=0)
+#             w.chunk[-1].iq[:] = c[i].iq[:]
+#             w.chunk[-1].blank = c[i+1].duration * 1e-9
+#         w.chunk[-1].blank += interval * 1e-9
+#         w.chunk[-1].blank += wait * 1e-9
+#         return w
+#     conv = conv_channel_to_e7awgsw_wave_sequence
+#     send = [(k, conv(v)) for k, v in w2c.items() if not isInputPort(k.port)]
+    
+#     def conv_channel_to_e7awgsw_capture_param(channel):
+#         delay_words = words(channel.wire.delay)
+#         blank_words = 0
+#         c = channel.copy()
+
+#         if isinstance(c[0], Blank):
+#             w = words(c[0].duration)
+#             delay_words += w
+#             blank_words += w
+#             c.pop(0)
         
-#     o.terminate()
+#         # 複数の総和区間に対応させる！ 10/21
+#         # fnco の値を変える
+#         # モニタ対応
+        
+#         SumSection = namedtuple('SumSection', 'capture_words blank_words')
+#         sum_sections = []
+#         for i in range(0, len(c), 2):
+#             if (isinstance(c[i], Read) or isinstance(c[i], Arbitrary)) and isinstance(c[i+1], Blank):
+#                 capture_words = words(c[i].duration)
+#                 blank_words = words(c[i+1].duration)
+#             else:
+#                 raise ValueError('Invalid type of Slot.')
+#             sum_sections.append(SumSection(capture_words, blank_words))
+#         s = sum_sections[-1]
+#         sum_sections[-1] = SumSection(s.capture_words, s.blank_words + words(interval))
+       
+#         p = CaptureParam()
+#         p.capture_delay = delay_words
+#         p.num_integ_sections = repeats
+#         for s in sum_sections:
+#             p.add_sum_section(*s)
+#             p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
+        
+#         return p
+#     conv = conv_channel_to_e7awgsw_capture_param
+#     recv = [(w, conv(c)) for w, c in w2c.items() if isInputPort(w.port)]
     
-    result = send_recv(ipfpga_to_frame)
-    o = result[ipfpga]['send']
-    r = result[ipfpga]['recv']
+#     ipfpga_to_e7awgsw[ipfpga]['awg_to_wave_sequence'] = {f.port.awg0: s for f, s in send}
+#     ipfpga_to_e7awgsw[ipfpga]['capt_module_to_capt_param'] = {f.port.capt: s for f, s in recv}
+#     # トリガを設定する
+#     # Readout_send の Wire のリストを得る
+#     readout_sends = list(set([k for k, v in channels.items() if isinstance(k.port, Readout)]))
+#     if readout_sends:
+#         trigger = readout_sends[0].port.awg0
+#     else:
+#         # モニタ経路を使う場合必ずしも Readout がある訳ではない
+#         trigger = [w.port.awg0 for w, c in w2c.items() if not isInputPort(w.port)][0]
+#     ipfpga_to_e7awgsw[ipfpga]['trigger_awg'] = trigger
+    
+    ipfpga_to_e7awgsw = conv_to_e7awgsw(schedule, repeats, interval)
+    result = send_recv(ipfpga_to_e7awgsw)
+    ipfpga = list(ipfpga_to_e7awgsw.keys())[0]
+    demodulate(schedule, ipfpga_to_e7awgsw[ipfpga], result[ipfpga]['recv'])
+    
+def demodulate(schedule, e7awgsw_setup, recv):
+    
+    w2c = e7awgsw_setup['wire_to_merged_channel']
+    s = schedule
     
     # 各 Channel には Read スロットが単一であると仮定
     # 各 readout_recv Wire の合成チャネルの時間軸とデータを生成する
@@ -533,9 +629,9 @@ def run(schedule, repeats=1, interval=100000):
                 continue
             t0_ns = c.timestamp
             t_ns = c.get_timestamp(v) - s.offset
-            c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = r.data[k]
+            c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = recv.data[k]
 
-    # 各 Readin チャネルの読み出しスロットに復調したデータを格納する
+    # # 各 Readin チャネルの読み出しスロットに復調したデータを格納する
     for k, c in schedule.items():
         if not isInputPort(c.wire.port):
             continue
@@ -547,6 +643,7 @@ def run(schedule, repeats=1, interval=100000):
             v.global_timestamp = t = t_ns * 1e-9
             v.iq = np.zeros(len(t_ns)).astype(complex)
             v.iq[:] = w2c[c.wire].iq[idx] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
+
     
     # 複数の総和区間への対応すること
     
