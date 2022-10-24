@@ -2,6 +2,9 @@ from e7awgsw import CaptureModule, CaptureParam, DspUnit, AWG
 from e7awgsw import IqWave, WaveSequence
 import e7awgsw
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+import time
+from collections import namedtuple
 
 class AwgCtrl(e7awgsw.AwgCtrl):
     pass
@@ -206,6 +209,57 @@ class WaveSequenceFactory(object):
             w.add_chunk(**c.chunk)
         return w
     
+    
+def send_recv_single(ipfpga, awg_to_wave_sequence, capt_module_to_capt_param, trigger_awg, sleep = 0.1, timeout=5):
+    """
+    単体 Qube にて Send と Recv を同期動作させる．
+    """
+    
+    a, c = awg_to_wave_sequence, capt_module_to_capt_param
+    send = Send(ipfpga, [k for k, v in a.items()], [v.sequence for k, v in a.items()])
+    recv = Recv(ipfpga, [k for k, v in c.items()], [v for k, v in c.items()])
+    # send = Send(ipfpga, [o.port.awg for o, w in send], [w.sequence for o, w in send])
+    # recv = Recv(ipfpga, [v.port.capt for v, p in w.items()], [p for v, p in w.items()])
+    recv.trigger = trigger_awg
+    
+    with ThreadPoolExecutor() as e:
+        thread = e.submit(lambda: recv.wait(timeout=timeout))
+        time.sleep(sleep)
+        send.terminate()
+        send.start()
+        thread.result()
+    send.terminate()
+    
+    return send, recv
+    
+    
+def send_recv(ipfpga_to_frame):
+    """
+    Send と Recv を同期動作させる．現在は Qube 単体での動作にしか対応していないが，同じ Interface で
+    複数台同期に対応させる予定
+    """
+    
+    result = {}
+    d = ipfpga_to_frame
+    if len(d) == 1:
+        ipfpga = list(d.keys())[0]
+        e = d[ipfpga]
+        awg_to_wave_sequence = e['awg_to_wave_sequence']
+        capt_module_to_capt_param = e['capt_module_to_capt_param']
+        trigger_awg = e['trigger_awg']
+        s, r = send_recv_single(
+            ipfpga,
+            awg_to_wave_sequence,
+            capt_module_to_capt_param,
+            trigger_awg
+        )
+        result[ipfpga] = {}
+        result[ipfpga]['send'] = s
+        result[ipfpga]['recv'] = r
+    else:
+        raise ValueError('Multi Qube Sync is not implemented yet in meas.send_recv function.')
+    
+    return result
     
 # ------------------- will be obolete ---
     
