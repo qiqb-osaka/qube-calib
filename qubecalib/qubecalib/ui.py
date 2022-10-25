@@ -13,6 +13,41 @@ MATPLOTLIB_PYPLOT = None
 def get_port_id(p, q):
     return int(list(filter(lambda x: x is not None, [k if v == p else None for k,v in q.ports.items()]))[0].replace('port',''))        
 
+import sys
+import argparse
+import socket
+import struct
+import time
+
+class QuBEMonitor(object):
+    BUFSIZE = 16384
+    TIMEOUT = 25
+    
+    def __init__(self, ip_addr, port):
+        self.__dest_addr = (ip_addr, port)
+        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.__sock.settimeout(self.TIMEOUT)
+        self.__sock.bind(('', 0))
+        print('open: {}:{}'.format(ip_addr, port))
+        
+    def send_recv(self, data):
+        try:
+            self.__sock.sendto(data, self.__dest_addr)
+            return self.__sock.recvfrom(self.BUFSIZE)
+        except socket.timeout as e:
+            print('{}, Dest {}'.format(e, self.__dest_addr))
+            raise
+        except Exeption as e:
+            print(e)
+            raise
+        
+    def kick_softreset(self):
+        data = struct.pack('BBBB', 0xE0, 0x00, 0x00, 0x00)
+        ret, addr = self.send_recv(data)
+        print(ret)
+
+
+
 class QubeControl(object):
     
     def __init__(self, config_file_name, qube=None):
@@ -157,8 +192,10 @@ class QubeControl(object):
                 with c['wout']:
                     print('configure FPGA ...')
                 # c['qube'].config_fpga()
-                os.environ['BITFILE'] = '{}/{}'.format(qubecalib.qube.PATH_TO_BITFILE, c['qube'].bitfile)
-                commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(qubecalib.qube.PATH_TO_API)]
+                os.environ['BITFILE'] = '{}/{}'.format(lib_qube.PATH_TO_BITFILE, c['qube'].bitfile)
+                with c['wout']:
+                    print('BITFILE: {}'.format(os.environ['BITFILE']))
+                commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(lib_qube.PATH_TO_API)]
                 ret = subprocess.run(commands , stdout=subprocess.PIPE, check=True).stdout
                 with c['wout']:
                     print(ret)
@@ -186,7 +223,23 @@ class QubeControl(object):
                     print("Port Status:")
                     for k, v in c['qube'].ports.items():
                         print(k,v.status)
-                    
+                        
+        class KickSoftReset(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Kick soft reset'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                qube, wout = c['qube'], c['wout']
+                wout.clear_output()
+                with wout:
+                    q = QuBEMonitor(qube.ipmulti, 16384)
+                    q.kick_softreset()
+                    print("GPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+                        
         self.widgets = ipw.VBox([
             ipw.HBox([
                 c['fname'],
@@ -205,6 +258,7 @@ class QubeControl(object):
             ipw.HBox([
                 ShowPortsButton(),
                 ShowPortStatusButton(),
+                KickSoftReset(),
             ]),
             ipw.HBox([
                 c['wout'],
