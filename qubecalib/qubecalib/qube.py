@@ -514,6 +514,20 @@ class QubeBase(qubelsi.qube.Qube):
     def __init__(self, addr, path, config=None):
         
         super().__init__(addr, path)
+        if config is None:
+            self.iplsi = addr
+            buf = addr.split('.')
+            buf[1] = '1'
+            self.ipfpga = '.'.join(buf)
+            buf = addr.split('.')
+            buf[1] = '2'
+            self.ipmulti = '.'.join(buf)
+            self._config = {
+                'iplsi': self.iplsi,
+                'ipfpga': self.ipfpga,
+                'ipmulti': self.ipmulti,
+            }
+            return
         self.bitfile: Final[str] = config['bitfile']
         self.ipfpga: Final[str] = config['ipfpga']
         self.iplsi: Final[str] = config['iplsi']
@@ -578,8 +592,9 @@ class QubeBase(qubelsi.qube.Qube):
 class QubeTypeA(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self.nports: Final[int] = 14
-        self._config['nports'] = self.nports
+        if config is not None:
+            self.nports: Final[int] = 14
+            self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
@@ -679,8 +694,9 @@ class QubeTypeA(QubeBase):
 class QubeTypeB(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self.nports: Final[int] = 14
-        self._config['nports'] = self.nports
+        if config is not None:
+            self.nports: Final[int] = 14
+            self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
