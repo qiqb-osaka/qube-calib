@@ -539,3 +539,18 @@ def demodulate(schedule, e7awgsw_setup, recv):
             v.iq = np.zeros(len(t_ns)).astype(complex)
             v.iq[:] = w2c[c.wire].iq[idx] * np.exp(-1j * 2 * np.pi * calc_modulation_frequency(c) * t)
             
+    for k, c in schedule.items():
+        if not isInputPort(c.wire.port):
+            continue
+        d = c.duration
+        m = max([s.sampling_rate for s in c])
+        c.timestamp = t_ns = np.linspace(0, d, int(d * m * 1e-9), endpoint=False).astype(int) - s.offset
+        c.iq = np.zeros(len(t_ns)).astype(complex)
+        # 合成チャネルのデータを埋める
+        k = CaptureModule.get_units(w.port.capt.id)[0]
+        for v in c:
+            if not isinstance(v, Read):
+                continue
+            t0_ns = c.timestamp
+            t_ns = c.get_timestamp(v) - s.offset
+            c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = v.iq
