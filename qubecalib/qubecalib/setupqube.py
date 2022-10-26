@@ -547,7 +547,7 @@ def demodulate(schedule, e7awgsw_setup, recv):
         c.timestamp = t_ns = np.linspace(0, d, int(d * m * 1e-9), endpoint=False).astype(int) - s.offset
         c.iq = np.zeros(len(t_ns)).astype(complex)
         # 合成チャネルのデータを埋める
-        k = CaptureModule.get_units(w.port.capt.id)[0]
+        # k = CaptureModule.get_units(c.wire.port.capt.id)[0]
         for v in c:
             if not isinstance(v, Read):
                 continue
