@@ -208,10 +208,15 @@ def calc_modulation_frequency(channel):
     rf_usb = (lo_mhz + (cnco_mhz + fnco_mhz)) * 1e+6
     rf_lsb = (lo_mhz - (cnco_mhz + fnco_mhz)) * 1e+6
     if isInputPort(channel.wire.port):
-        fc = channel.center_frequency - rf_usb
+        if channel.wire.ssb == SSB.USB:
+            fc = - (rf_usb - channel.center_frequency)
+        elif channel.wire.ssb == SSB.LSB:
+            fc = rf_lsb - channel.center_frequency
+        else:
+            raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
     else:
         if channel.wire.port.mix.ssb == SSB.USB:
-            fc = channel.center_frequency - rf_usb
+            fc = - (rf_usb - channel.center_frequency)
         elif channel.wire.port.mix.ssb == SSB.LSB:
             fc = rf_lsb - channel.center_frequency
         else:
