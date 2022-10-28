@@ -20,6 +20,8 @@ class Slot(object):
         raise NotImplementedError('{}.combine method shuld be implemented.'.format(type(self)))
         return None
     
+        
+    
     
 class SlotWithIQ(Slot):
     def combine(self, v):
@@ -33,7 +35,11 @@ class SlotWithIQ(Slot):
         else:
             raise ValueError('{}: Invalid combine object.'.format(self))
 
-    
+    def renew(self):
+        s = SlotWithIQ(self.duration, self.amplitude, self.sampling_rate)
+        s.iq = np.zeros(s.iq.shape)
+        return s
+        
 class Blank(Slot):
     def __init__(self, duration, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=0, sampling_rate=sampling_rate)

@@ -202,8 +202,8 @@ def quantize_channel(channel):
     return rslt
     
 def calc_modulation_frequency(channel):
-    lo_mhz = channel.wire.port.lo.mhz 
-    cnco_mhz = channel.wire.port.nco.mhz
+    lo_mhz = channel.wire.port.lo.mhz
+    cnco_mhz = channel.wire.cnco_mhz #channel.wire.port.nco.mhz
     fnco_mhz = select_band(channel).fnco_mhz
     rf_usb = (lo_mhz + (cnco_mhz + fnco_mhz)) * 1e+6
     rf_lsb = (lo_mhz - (cnco_mhz + fnco_mhz)) * 1e+6
@@ -225,6 +225,7 @@ def modulation(channel, offset_time=0):
     for slot in channel:
         new = copy.copy(slot)
         if isinstance(slot, SlotWithIQ):
+            new.iq = np.zeros(new.iq.shape).astype(complex)
             local_offset = channel.get_offset(slot) # <-- get_offset_time
             t = (slot.timestamp + local_offset - offset_time) * 1e-9 # [s]
             new.iq[:] = slot.iq * np.exp(1j * 2 * np.pi * hz * t)
@@ -354,7 +355,7 @@ def conv_to_waveseq_and_captparam(schedule, repeats=1, interval=100000):
         delay_words = words(channel.wire.delay)
         blank_words = 0
         c = channel.copy()
-
+        
         if isinstance(c[0], Blank):
             w = words(c[0].duration)
             delay_words += w
@@ -437,13 +438,15 @@ def conv_to_e7awgsw(schedule, repeats=1, interval=100000, trigger_awg=None):
     
     def conv_channel_to_e7awgsw_capture_param(channel):
         delay_words = words(channel.wire.delay)
-        blank_words = 0
+        final_blank_words = 0
         c = channel.copy()
 
         if isinstance(c[0], Blank):
             w = words(c[0].duration)
+            # print(delay_words, c[0].duration, w)
             delay_words += w
-            blank_words += w
+            final_blank_words += w
+            # print(delay_words, blank_words)
             c.pop(0)
         
         # 複数の総和区間に対応させる！ 10/21
@@ -460,8 +463,8 @@ def conv_to_e7awgsw(schedule, repeats=1, interval=100000, trigger_awg=None):
                 raise ValueError('Invalid type of Slot.')
             sum_sections.append(SumSection(capture_words, blank_words))
         s = sum_sections[-1]
-        sum_sections[-1] = SumSection(s.capture_words, s.blank_words + words(interval))
-       
+        sum_sections[-1] = SumSection(s.capture_words, s.blank_words + words(interval) + final_blank_words)
+        
         p = CaptureParam()
         p.capture_delay = delay_words
         p.num_integ_sections = repeats
@@ -554,3 +557,4 @@ def demodulate(schedule, e7awgsw_setup, recv):
             t0_ns = c.timestamp
             t_ns = c.get_timestamp(v) - s.offset
             c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = v.iq
+            c.timestamp = c.timestamp * 1e-9
