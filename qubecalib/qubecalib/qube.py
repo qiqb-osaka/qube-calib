@@ -628,25 +628,25 @@ class QubeTypeA(QubeBase):
         self.port4: Final[Port] = Monitorout()
         
         self.port5: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2),(e7.AWG.U12, 3),(e7.AWG.U13, 4),]),
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4),(e7.AWG.U12, 3),(e7.AWG.U13, 2),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         
         self.port6: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7),(e7.AWG.U9, 6),(e7.AWG.U10, 5),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         
         self.port7: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0),(e7.AWG.U6, 1),(e7.AWG.U7, 2),]),
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 2),(e7.AWG.U6, 1),(e7.AWG.U7, 0),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         
         self.port8: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3),(e7.AWG.U3, 4),(e7.AWG.U4, 5),]),
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 5),(e7.AWG.U3, 4),(e7.AWG.U4, 3),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
@@ -727,25 +727,25 @@ class QubeTypeB(QubeBase):
         self.port4: Final[Port] = Monitorout()
         
         self.port5: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2), (e7.AWG.U12, 3), (e7.AWG.U13, 4),]),
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4), (e7.AWG.U12, 3), (e7.AWG.U13, 2),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         
         self.port6: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7), (e7.AWG.U9, 6), (e7.AWG.U10, 5),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         
         self.port7: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0), (e7.AWG.U6, 1), (e7.AWG.U7, 2),]),
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 2), (e7.AWG.U6, 1), (e7.AWG.U7, 0),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         
         self.port8: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3), (e7.AWG.U3, 4), (e7.AWG.U4, 5),]),
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 5), (e7.AWG.U3, 4), (e7.AWG.U4, 3),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
