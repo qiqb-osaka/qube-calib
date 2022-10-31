@@ -94,6 +94,16 @@ class QubeControl(object):
                 self.description = 'Restart AD9082'
                 self.on_click(self._on_click)
             def _on_click(self, e):
+                
+                def ad9082_do_init():
+                    for o in c['qube'].ad9082:
+                        if c['mon'].value:
+                            os.environ['TARGET_ADDR'] = o.addr
+                            os.environ['AD9082_CHIP'] = o.chip
+                            ret = subprocess.check_output('{}/v1.0.6/src/hello_monitor'.format(o.path), encoding='utf-8')
+                        else:
+                            o.do_init(message_out=False)
+                        
                 qube, wout, mon = c['qube'], c['wout'], c['mon']
                 c['wout'].clear_output()
                 with c['wout']:
@@ -102,18 +112,13 @@ class QubeControl(object):
                         for p in c['qube'].lmx2594_ad9082:
                             p.do_init(ad9082_mode=True, message_out=False)
                         time.sleep(1)
+                        ad9082_do_init()
+                        ad9082_do_init()
                         for o in c['qube'].ad9082:
-                            if c['mon'].value:
-                                os.environ['TARGET_ADDR'] = o.addr
-                                os.environ['AD9082_CHIP'] = o.chip
-                                ret = subprocess.check_output('{}/v1.0.6/src/hello_monitor'.format(o.path), encoding='utf-8')
-                            else:
-                                o.do_init(message_out=False)
                             print(dict(o.get_jesd_status())['0x55E'], end=' ', flush=True)
-                        if [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)] == [True, True]:
+                        s = [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)]
+                        if s == [True, True]:
                             break
-                        # if [dict(qube.ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(1)] == [True, ]:
-                        #     break
                     if mon.value:
                         qube.gpio.write_value(0xFFFF)
                     else:
