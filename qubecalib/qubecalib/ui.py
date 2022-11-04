@@ -19,6 +19,55 @@ import socket
 import struct
 import time
 
+from telnetlib import Telnet
+import time
+
+class PDU(object):
+
+    def _connect(self, tn):
+        # tn.set_debuglevel(1)
+        tn.read_until(b'Login: ')
+        tn.write(b'teladmin\n')
+        tn.write(b'qubeqube\n')
+        tn.read_until(b'Password: *')
+        tn.write(b'\n')
+        tn.read_until(b'> ')
+        try:
+            tn.read_until(b'> ')
+        except EOFError:
+            tn.read_until(b'')
+            return False
+        return True
+    
+    def __enter__(self):
+        while True:
+            tn = Telnet('10.250.0.100', 23)
+            if self._connect(tn):
+                self.telnet = tn
+                break
+            print('retrying...')
+            time.sleep(0.1)
+        return self
+    
+    def __exit__(self, type, value, traceback):
+        self.telnet.write(b'quit\n')
+        
+    def status(self, id):
+        self.telnet.write(bytes('read status o0{}\n'.format(id), 'ascii'))
+        return str(self.telnet.read_until(b'> '))
+        
+    def on(self, id):
+        self.telnet.write(bytes('sw o0{} on\n'.format(id), 'ascii'))
+        self.telnet.read_until(b'> ')
+        return str(self.telnet.read_until(b'> '))
+
+    def off(self, id):
+        self.telnet.write(bytes('sw o0{} off\n'.format(id), 'ascii'))
+        self.telnet.read_until(b'> ')
+        return str(self.telnet.read_until(b'> '))
+
+
+
 def lmx2594_ad9082_do_init(self, ad9082_mode=True, readout_mode=False):
     
     if ad9082_mode:
