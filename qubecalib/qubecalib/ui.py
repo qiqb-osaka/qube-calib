@@ -347,9 +347,9 @@ class QubeControl(object):
                 p.add_sum_section(num_words=1024, num_post_blank_words=1)
                 p.capture_delay = 100
                 
-                if qube.gpio.read_value() == 0x3fff:
-                    p1 = qube.port3
-                    p12 = qube.port10
+                if c['mon'].value:
+                    p1 = qube.port4
+                    p12 = qube.port9
                 else:
                     p1 = qube.port1
                     p12 = qube.port12

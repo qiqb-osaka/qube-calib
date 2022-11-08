@@ -620,12 +620,12 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         
-        self.port3: Final[Port] = Monitorin(
+        self.port3: Final[Port] = Monitorout()
+        
+        self.port4: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        
-        self.port4: Final[Port] = Monitorout()
         
         self.port5: Final[Port] = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4),(e7.AWG.U12, 3),(e7.AWG.U13, 2),]),
@@ -651,12 +651,12 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         
-        self.port9: Final[Port] = Monitorout()
-        
-        self.port10: Final[Port] = Monitorin(
+        self.port9: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
+        
+        self.port10: Final[Port] = Monitorout()
         
         self.port11: Final[Port] = Pump(
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
@@ -678,14 +678,14 @@ class QubeTypeA(QubeBase):
         self.readout0: Final[Port] = self.port0
         self.readin0: Final[Port] = self.port1
         self.pump0: Final[Port] = self.port2
-        self.auxin0: Final[Port] = self.port3
-        self.auxout0: Final[Port] = self.port4
+        self.auxout0: Final[Port] = self.port3
+        self.auxin0: Final[Port] = self.port4
         self.ctrl0: Final[Port] = self.port5
         self.ctrl1: Final[Port] = self.port6
         self.ctrl2: Final[Port]= self.port7
         self.ctrl3: Final[Port] = self.port8
-        self.auxout1: Final[Port] = self.port9
-        self.auxin1: Final[Port] = self.port10
+        self.auxin1: Final[Port] = self.port9
+        self.auxout1: Final[Port] = self.port10
         self.pump1: Final[Port] = self.port11
         self.readin1: Final[Port] = self.port12
         self.readout1: Final[Port] = self.port13
@@ -719,13 +719,13 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         
-        self.port3: Final[Port] = Monitorin(
+        self.port3: Final[Port] = Monitorout()
+
+        self.port4: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        
-        self.port4: Final[Port] = Monitorout()
-        
+
         self.port5: Final[Port] = Ctrl(
             dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4), (e7.AWG.U12, 3), (e7.AWG.U13, 2),]),
             lo = LMX2594(lsi = lo[2]),
@@ -750,12 +750,12 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         
-        self.port9: Final[Port] = Monitorout()
-        
-        self.port10: Final[Port] = Monitorin(
+        self.port9: Final[Port] = Monitorin(
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
+        
+        self.port10: Final[Port] = Monitorout()
         
         self.port11: Final[Port] = Ctrl(
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
@@ -773,13 +773,13 @@ class QubeTypeB(QubeBase):
         
         self.ctrl4: Final[Port] = self.port0
         self.ctrl5: Final[Port] = self.port2
-        self.auxin0: Final[Port] = self.port3
-        self.auxout0: Final[Port] = self.port4
+        self.auxout0: Final[Port] = self.port3
+        self.auxin0: Final[Port] = self.port4
         self.ctrl0: Final[Port] = self.port5
         self.ctrl1: Final[Port] = self.port6
         self.ctrl2: Final[Port] = self.port7
         self.ctrl3: Final[Port] = self.port8
-        self.auxout1: Final[Port] = self.port9
-        self.auxin1: Final[Port] = self.port10
+        self.auxin1: Final[Port] = self.port9
+        self.auxout1: Final[Port] = self.port10
         self.ctrl6: Final[Port] = self.port11
         self.ctrl7: Final[Port] = self.port13
