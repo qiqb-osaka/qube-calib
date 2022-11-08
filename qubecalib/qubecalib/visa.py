@@ -14,6 +14,14 @@ class MS2038_SPA(object):
         return self.instrument.query(v)
     def write(self, v):
         return self.instrument.write(v)
+    def wait(self):
+        while True:
+            try:
+                self.query(':STAT:OPER?')
+            except pyvisa.VisaIOError:
+                pass
+            else:
+                break
     def initiate(self):
         o = self.instrument
         o.write(':INIT')
@@ -36,6 +44,12 @@ class MS2038_SPA(object):
         return MS2038_SPA.Contents(
             trace = self.get_trace(),
             preamble =  self.get_preamble(),
+        )
+    @classmethod
+    def convert_dict_to_contents(cls, dct):
+        return MS2038_SPA.Contents(
+            trace = dct['trace'],
+            preamble = dct['']
         )
     @classmethod
     def convert_trace_to_array(cls, trace):
