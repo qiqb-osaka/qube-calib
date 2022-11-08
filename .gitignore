@@ -8,4 +8,4 @@ log
 *.SOURCES.txt
 *.pickle
 qubecalib/qubecalib.egg-info
-qubecalib/build
+qubecalib/build/*
