@@ -250,7 +250,9 @@ class QubeControl(object):
         # c['wout'] = ipw.Output(layout={'border': '1px solid black'})
         c['wout'] = ipw.Output()
         c['fname'] = ipw.Text(description='', value=config_file_name, disabled=True)
-        c['mon'] = ipw.Checkbox(value=False, description='Monitor', disabled=False)
+        c['mon'] = ipw.Checkbox(value=False, description='Enable Monitor4', disabled=False)
+        c['mon2'] = ipw.Checkbox(value=False, description='Enable Monitor9', disabled=False)
+        c['loopback'] = ipw.Checkbox(value=False, description='Switch Loopback', disabled=False)
         
         class ShowStatusButton(ipw.Button):
             def __init__(self, *args, **kw):
@@ -285,8 +287,8 @@ class QubeControl(object):
             def _on_click(self, e):
                 
                 def ad9082_do_init():
-                    for o in c['qube'].ad9082:
-                        if c['mon'].value:
+                    for o, k in zip(c['qube'].ad9082, ['mon', 'mon2']):
+                        if c[k].value:
                             os.environ['TARGET_ADDR'] = o.addr
                             os.environ['AD9082_CHIP'] = o.chip
                             ret = subprocess.check_output('{}/v1.0.6/src/hello_monitor'.format(o.path), encoding='utf-8')
@@ -309,7 +311,7 @@ class QubeControl(object):
                         s = [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)]
                         if s == [True, True]:
                             break
-                    if mon.value:
+                    if c['loopback'].value:
                         qube.gpio.write_value(0xFFFF)
                     else:
                         qube.gpio.write_value(0x0000)
@@ -347,12 +349,8 @@ class QubeControl(object):
                 p.add_sum_section(num_words=1024, num_post_blank_words=1)
                 p.capture_delay = 100
                 
-                if c['mon'].value:
-                    p1 = qube.port4
-                    p12 = qube.port9
-                else:
-                    p1 = qube.port1
-                    p12 = qube.port12
+                p1 = qube.port4 if c['mon'].value else qube.port1
+                p12 = qube.port9 if c['mon2'].value else qube.port12
                 r1 = meas.Recv(qube.ipfpga, p1.capt, p)
                 r12 = meas.Recv(qube.ipfpga, p12.capt, p)
                 r1.start(timeout=0.5)
@@ -440,20 +438,20 @@ class QubeControl(object):
                 c['fname'],
                 # CreateQubeInstanceButton(description='Create instance'),
                 DoInitButton(),
+                KickSoftReset(),
                 ipw.Text(description='', value=c['qube'].bitfile, disabled=True),
                 ConfigFPGAButton(),
+            ]),
+            ipw.HBox([
+                ShowPortsButton(),
+                ShowPortStatusButton(),
             ]),
             ipw.HBox([
                 ShowStatusButton(),
                 ShowConfigButton(),
                 ShowRecvButton(),
-                c['mon'],
                 RestartAD9082Button(),
-            ]),
-            ipw.HBox([
-                ShowPortsButton(),
-                ShowPortStatusButton(),
-                KickSoftReset(),
+                ipw.VBox([c['mon'],c['mon2'],c['loopback']]),
             ]),
             ipw.HBox([
                 c['wout'],
