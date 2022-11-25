@@ -368,7 +368,7 @@ class QubeControl(object):
                 ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
                 
                 c['wout'].clear_output()
-                import matplotlib
+                # import matplotlib
                 with c['wout']:
                     plt.show(fig)
                 plt.close()
