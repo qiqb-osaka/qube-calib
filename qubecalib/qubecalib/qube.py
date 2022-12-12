@@ -421,9 +421,9 @@ class Monitorout(Port):
         
         return None
         
-class NotAvailable(Port, qube):
+class NotAvailable(Port):
     
-    def __init__(self):
+    def __init__(self, qube):
         super().__init__(qube)
         self._rf = RF(self._calc_rf)
         
