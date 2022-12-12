@@ -302,11 +302,17 @@ def conv_channel_for_e7awgsw(channels, offset_time):
     """
     Blank で始まり Blank で終わる
     """
+    # 周波数領域にチャネルを配置する
     modulated_channels = [modulation(channel, offset_time) for channel in channels]
+    # 時間領域でチャネルを結合する
     merged_channel = merge_channels(modulated_channels)
+    # e7awgswの制約に合わせてスロットを再配置する
     quantized_channel = quantize_channel(merged_channel)
+    # [Delay, [Waveform, Blank], [Waveform, Blank], ...] の形式なので
+    # Blankでスタートすることを保証する
     if not isinstance(quantized_channel[0], Blank):
         quantized_channel.insert(0, Blank(duration=0))
+    # Blankで終了することを保証する
     if not isinstance(quantized_channel[-1], Blank):
         quantized_channel.append(Blank(duration=0))
     return quantized_channel
@@ -426,6 +432,7 @@ def conv_to_e7awgsw(schedule, repeats=1, interval=100000, trigger_awg=None):
         }
     }
     
+    # Wire に紐づけられている Channels を e7awgsw の制約のもとに変換する <- AWG の単位に変更する予定
     w2c = dict([(k, conv_channel_for_e7awgsw(v, schedule.offset)) for k, v in channels.items()])
     ipfpga_to_e7awgsw[ipfpga]['wire_to_merged_channel'] = w2c
     # すべてのチャネルの全長を揃える
