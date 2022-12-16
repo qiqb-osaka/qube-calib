@@ -233,8 +233,23 @@ class AWG(AD9082):
         
         o = meas.Send(self.ipfpga, [self], [meas.WaveSequenceCW()])
         o.terminate()
+        
+    def modulation_frequency(self, mhz):
+        
+        port = self.port()
+        lo_mhz = port.lo.mhz
+        cnco_mhz = port.nco.mhz
+        fnco_mhz = self.nco.mhz
+        usb_mhz = lo_mhz + (cnco_mhz + fnco_mhz)
+        lsb_mhz = lo_mhz - (cnco_mhz + fnco_mhz)
+        if port.mix.ssb == SSB.USB:
+            df_mhz = mhz - usb_mhz # mhz = usb_mhz + df
+        elif port.mix.ssb == SSB.LSB:
+            df_mhz = lsb_mhz - mhz # mhz = lsb_mhz - df
+        else:
+            raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
+        return df_mhz
 
-    
 class CPT(AD9082):
     
     def __init__(self, lsi, cptm, ipfpga):
@@ -242,6 +257,7 @@ class CPT(AD9082):
         self.id = cptm
         self.ipfpga = ipfpga
         self.port = None
+        self.ssb = SSB.USB
         
     def _status(self):
         
@@ -254,6 +270,20 @@ class CPT(AD9082):
         
         return None
         
+    def modulation_frequency(self, mhz):
+        
+        port = self.port()
+        lo_mhz = port.lo.mhz
+        cnco_mhz = port.nco.mhz
+        usb_mhz = lo_mhz + cnco_mhz
+        lsb_mhz = lo_mhz - cnco_mhz
+        if self.ssb == SSB.USB:
+            df_mhz = mhz - usb_mhz
+        elif self.ssb == SSB.LSB:
+            df_mhz = lsb_mhz - mhz
+        else:
+            raise ValueError('A port.captX.ssb shuld be instance of SSB(Enum).')
+        return df_mhz
         
 class DAC(AD9082):
     
@@ -762,7 +792,7 @@ class QubeTypeB(QubeBase):
         for p in self.port2.awgs.values():
             p.port = weakref.ref(self.port2)
         
-        self.port3: Final[Port] = Monitorout()
+        self.port3: Final[Port] = Monitorout(qube = self)
 
         self.port4: Final[Port] = Monitorin(
             qube = self,
