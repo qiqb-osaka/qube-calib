@@ -250,8 +250,10 @@ class QubeControl(object):
         # c['wout'] = ipw.Output(layout={'border': '1px solid black'})
         c['wout'] = ipw.Output()
         c['fname'] = ipw.Text(description='', value=config_file_name, disabled=True)
-        c['mon'] = ipw.Checkbox(value=False, description='Enable Monitor4', disabled=False)
-        c['mon2'] = ipw.Checkbox(value=False, description='Enable Monitor9', disabled=False)
+        # c['mon'] = ipw.Checkbox(value=False, description='Enable Monitor4', disabled=False)
+        # c['mon2'] = ipw.Checkbox(value=False, description='Enable Monitor9', disabled=False)
+        c['mon'] = ipw.ToggleButtons(description='ADC0', options=['Readin1', 'Monitor4'], disabled=False)
+        c['mon2'] = ipw.ToggleButtons(description='ADC1', options=['Readin12', 'Monitor9'], disabled=False)
         c['loopback'] = ipw.Checkbox(value=False, description='Switch Loopback', disabled=False)
         
         class ShowStatusButton(ipw.Button):
@@ -288,16 +290,42 @@ class QubeControl(object):
                 
                 def ad9082_do_init():
                     for o, k in zip(c['qube'].ad9082, ['mon', 'mon2']):
-                        if c[k].value:
+                        if c[k].value.startswith('Monitor'):
                             os.environ['TARGET_ADDR'] = o.addr
                             os.environ['AD9082_CHIP'] = o.chip
                             ret = subprocess.check_output('{}/v1.0.6/src/hello_monitor'.format(o.path), encoding='utf-8')
                         else:
                             o.do_init(message_out=False)
                         
+                def check_recv(prx1, prx2):
+                    qube = c['qube']
+                    p = meas.CaptureParam()
+                    p.num_integ_sections = 1
+                    p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                    p.capture_delay = 0
+                    
+                    r = meas.Recv(qube.ipfpga, [prx1.capt, prx2.capt], 2*[p])
+                    try:
+                        r.start(timeout=0.5)
+                    except meas.e7awgsw.CaptureUnitTimeoutError:
+                        print('Capture unit stop timeout. Retry restart.')
+                        return False
+                    
+                    w = [r.data.data[meas.CaptureModule.get_units(prx.capt.id)[0]] for prx in [prx1, prx2]]
+                    
+                    sgm2 = [(np.abs(v - v.mean())**2).mean() for v in w]
+                    print('Variance: ', sgm2)
+                    if [s < 1e+8 for s in sgm2] == [True, True]:
+                        return True
+                    else:
+                        print('An anomalous variance has been detected. Trying the restart process again...')
+                        return False
+                    
+                    return True
+                
                 qube, wout, mon = c['qube'], c['wout'], c['mon']
-                c['wout'].clear_output()
-                with c['wout']:
+                wout.clear_output()
+                with wout:
                     for i in range(100):
                         print(i+1, end=' ', flush=True)
                         for p in c['qube'].lmx2594_ad9082:
@@ -309,8 +337,14 @@ class QubeControl(object):
                         for o in c['qube'].ad9082:
                             print(dict(o.get_jesd_status())['0x55E'], end=' ', flush=True)
                         s = [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)]
-                        if s == [True, True]:
+                        if s != [True, True]:
+                            print()
+                            continue
+                        prx1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                        prx2 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                        if check_recv(prx1, prx2):
                             break
+                    
                     if c['loopback'].value:
                         qube.gpio.write_value(0xFFFF)
                     else:
@@ -345,26 +379,26 @@ class QubeControl(object):
                 
                 qube = c['qube']
                 p = meas.CaptureParam()
-                p.num_integ_sections = 1
-                p.add_sum_section(num_words=1024, num_post_blank_words=1)
                 p.capture_delay = 100
+                p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                p.num_integ_sections = 1
+                # p.num_integ_sections = 10000
+                # p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
                 
-                p1 = qube.port4 if c['mon'].value else qube.port1
-                p12 = qube.port9 if c['mon2'].value else qube.port12
-                r1 = meas.Recv(qube.ipfpga, p1.capt, p)
-                r12 = meas.Recv(qube.ipfpga, p12.capt, p)
-                r1.start(timeout=0.5)
-                r12.start(timeout=0.5)
+                p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
+                r.start(timeout=0.5)
                 
                 plt = MATPLOTLIB_PYPLOT
                 fig = plt.figure()
                 ax = fig.add_subplot(211)
-                ax.plot(np.real(r1.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
-                ax.plot(np.imag(r1.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
                 ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
                 ax = fig.add_subplot(212)
-                ax.plot(np.real(r12.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
-                ax.plot(np.imag(r12.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
                 ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
                 
                 c['wout'].clear_output()
@@ -451,8 +485,9 @@ class QubeControl(object):
                 ShowConfigButton(),
                 ShowRecvButton(),
                 RestartAD9082Button(),
-                ipw.VBox([c['mon'],c['mon2'],c['loopback']]),
+                c['loopback'],
             ]),
+            ipw.HBox([ipw.VBox([c['mon'],c['mon2'],]),]),
             ipw.HBox([
                 c['wout'],
             ]),

@@ -509,14 +509,18 @@ def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, tri
             sum_sections.append(SumSection(capture_words, blank_words))
         s = sum_sections[-1]
         sum_sections[-1] = SumSection(s.capture_words, s.blank_words + words(interval) + final_blank_words)
+        # print(sum_sections)
         
         p = CaptureParam()
         p.capture_delay = delay_words
         p.num_integ_sections = repeats
         for s in sum_sections:
             p.add_sum_section(*s)
+        if repeats > 1:
             p.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
-        
+            
+        # print(p.sum_section_list)
+            
         return p
     conv = conv_channel_to_e7awgsw_capture_param
     recv = [(w, conv(c, w.port().delay)) for w, c in w2c.items() if isinstance(w, CPT)]
@@ -653,7 +657,7 @@ def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=No
         demodulate(schedule, ipfpga_to_e7awgsw[ipfpga], result[ipfpga]['recv'])
     else:
         qube_to_trigger = {o.port().qube(): o for o in triggers}
-        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels)
+        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
         result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
         # c2c = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel']
         for qube in qube_to_trigger:
@@ -682,8 +686,10 @@ def retrieve_data_into_mergedchannel(capt_to_mergedchannel, recv, offset=0):
         for v in c:
             if not isinstance(v, Arbitrary):
                 continue
+            # print(v.duration)
             t0_ns = c.timestamp
             t_ns = c.get_timestamp(v) - offset
+            # print(t0_ns.shape, t_ns.shape, recv.data[k].shape)
             c.iq[(t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])] = recv.data[k]
 
 def _demodulate(schedule, capt_to_mergedchannel, recv, adda_to_channels, offset=0):
@@ -718,6 +724,7 @@ def _demodulate(schedule, capt_to_mergedchannel, recv, adda_to_channels, offset=
             idx = (t_ns[0] <= t0_ns) & (t0_ns <= t_ns[-1])
             v.global_timestamp = t = t_ns * 1e-9
             v.iq = np.zeros(len(t_ns)).astype(complex)
+            sgn = 1 if cpt.ssb == SSB.USB else -1
             v.iq[:] = mc.iq[idx] * np.exp(-1j * 2 * np.pi * hz * t)
             
     for k, c in schedule.items():

@@ -219,6 +219,7 @@ def send_recv_single(ipfpga, awg_to_wave_sequence, capt_to_capt_param, trigger_a
     recv = Recv(ipfpga, [k for k, v in c.items()], [v for k, v in c.items()])
     # send = Send(ipfpga, [o.port.awg for o, w in send], [w.sequence for o, w in send])
     # recv = Recv(ipfpga, [v.port.capt for v, p in w.items()], [p for v, p in w.items()])
+    # print([v.sum_section_list for k, v in c.items()])
     recv.trigger = trigger_awg
     
     with ThreadPoolExecutor() as e:
