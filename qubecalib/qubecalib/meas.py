@@ -209,7 +209,7 @@ class WaveSequenceFactory(object):
             w.add_chunk(**c.chunk)
         return w
     
-def send_recv_single(ipfpga, awg_to_wave_sequence, capt_to_capt_param, trigger_awg, sleep = 0.1, timeout=5):
+def send_recv_single(ipfpga, awg_to_wave_sequence, capt_to_capt_param, trigger_awg, sleep = 0.5, timeout=20):
     """
     単体 Qube にて Send と Recv を同期動作させる．
     """
