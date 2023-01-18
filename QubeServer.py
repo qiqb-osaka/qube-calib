@@ -1371,7 +1371,9 @@ class QuBE_Server(DeviceServer):
     clock = self._master_ctrl.read_clock() + delay
     for chassis_name in c[QSConstants.DAC_CNXT_TAG].keys():
       dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-      self._sync_ctrl[chassis_name].add_sequencer(clock,list(enabled_awgs))
+      resp = self._sync_ctrl[chassis_name].add_sequencer(clock,list(enabled_awgs))
+      print(chassis_name, 'kick at ', clock, enabled_awgs)
+      print(resp)
 
     return True
 
@@ -2561,6 +2563,7 @@ class QuBE_Manager_Server(DeviceServer):
     resp = False
     try:
       ret = yield self._master_ctrl.kick_clock_synch([target_addr])
+      print('sync',ret)
       resp = True
     except Exception as e:
       print(sys._getframe().f_code.co_name,e)
