@@ -653,8 +653,9 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
       self._awg_ctrl.set_wave_sequence(self._awg_ch_ids[_channel], wave_seq )
     return True
 
-  def start_daq(self,awg_ids):
-    self._awg_ctrl.start_awgs(*awg_ids)
+  def start_daq(self,awg_ids):                              # OBSOLETED. For multi-chassis
+    self._awg_ctrl.start_awgs(*awg_ids)                     # operation, synchronization has
+                                                            # to be made using SequencerClinet.
 
   def stop_daq(self,awg_ids,timeout):
     self._awg_ctrl.wait_for_awgs_to_stop(timeout, *awg_ids)
