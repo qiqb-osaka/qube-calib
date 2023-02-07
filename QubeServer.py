@@ -372,17 +372,21 @@ class QSConstants:
   DAQ_LO_RESOL       = 100                                  # - The minimum frequency resolution of
                                                             #   the analog local oscillators in MHz.
   DAC_CNCO_RESOL     = 12000/2**13                          # - The frequency resolution of the
-                                                            #   coarse NCOs in upconversion paths.
+  DAC_CNCO_RESOL_BITS= 13                                   #   coarse NCOs in upconversion paths.
                                                             #   unit in MHz; DAC_SAMPLE_R/2**13
+                                                            #   ..._BITS is the effective bits
   DAC_FNCO_RESOL     = 2000/2**12                           # - The frequency resolution of the fine
-                                                            #   NCOs in digital upconversion paths.
+  DAC_FNCO_RESOL_BITS= 12                                   #   NCOs in digital upconversion paths.
                                                             #   unit in MHz; DAC_SAMPLE_R/M=6/2**12
+                                                            #   ..._BITS is the effective bits
   ADC_CNCO_RESOL     = 6000/2**13                           # - The frequency resolution of coarse
-                                                            #   NCOs in demodulation path
+  ADC_CNCO_RESOL_BITS= 13                                   #   NCOs in demodulation path
                                                             #   unit in MHz; ADC_SAMPLE_R/2**13
+                                                            #   ..._BITS is the effective bits
   ADC_FNCO_RESOL     = 1000/2**11                           # - The frequency resolution of fine
-                                                            #   NCOs in demodulation path.
+  ADC_FNCO_RESOL_BITS= 13                                   #   NCOs in demodulation path.
                                                             #   unit in MHz; ADC_SAMPLE_R/M=6/2**11
+                                                            #   ..._BITS is the effective bits
   DAQ_REPT_RESOL     = 10240                                # - The mininum time resolution of a
                                                             #   repetition time in nanoseconds.
   DAQ_SEQL_RESOL     = 128                                  # - The mininum time resolution of a
@@ -736,8 +740,11 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
     return self.static_get_dac_coarse_frequency(self._nco_ctrl,self._cnco_id)
 
   def set_dac_coarse_frequency(self,freq_in_mhz):
-    self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._cnco_id, \
-                                           adc_mode = False, fine_mode=False)
+                                                            #self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._cnco_id, \
+                                                            #                                       adc_mode = False, fine_mode=False)
+    self.static_set_dac_coarse_frequency \
+                (self._nco_ctrl,self._cnco_id,freq_in_mhz)  # frequency is directly loaded
+                                                            # thru the frequency tuning word
     self._coarse_frequency = freq_in_mhz
 
   def get_dac_fine_frequency(self,channel):
@@ -762,6 +769,35 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
       res = nco_ctrl.read_value(0x1d0-i)
       ftw = (ftw << 8 | res)
     return ftw
+
+  def static_set_dac_coarse_frequency(self,nco_ctrl,ch,freq_in_mhz):
+
+    nco_resolution = QSConstants.DAC_CNCO_RESOL
+    effective_ftw  = int((freq_in_mhz + 0.5*nco_resolution)/nco_resolution)
+
+    self.static_set_dac_coarse_ftw(nco_ctrl,ch,
+      effective_ftw << (QSConstants.DAQ_CNCO_BITS - QSConstants.DAC_CNCO_RESOL_BITS))
+
+  def static_set_dac_coarse_ftw(self,nco_ctrl,ch,ftw):
+
+    # REGISTER MAP
+    #  1d0  |  1cf  |  1ce   |  1cd   | 1cc  | 1cb | 1ca
+    #  ftw  |  ftw  |  ftw   |  ftw   | ftw  | ftw |   0 - transition 0->1 triggers the update
+    # 47:40 | 39:32 |  31:24 |  23:16 | 15:8 | 7:0 | 7:1 - reserved
+
+    page         = nco_ctrl.read_value(0x1b) & 0xff         # dac mainpath page select
+    nco_ctrl.write_value(0x1b, page & 0xf0 | (1 << ch) & 0x0f)
+    stat         = nco_ctrl.read_value(0x1ca) & 0xff
+    nco_ctrl.write_value(0x1ca, stat & 0xfe)                # clear update
+
+    for i in range(6):
+      write_bits = ftw & 0xff
+      ftw        = (ftw & 0xffffffffff00) >> 8
+      nco_ctrl.write_value(0x1cb+i, write_bits)
+
+    stat         = nco_ctrl.read_value(0x1ca) & 0xff
+    nco_ctrl.write_value(0x1ca, stat | 0x01)                # clear update
+
 
   def static_check_lo_frequency(self,freq_in_mhz):
     resolution = QSConstants.DAQ_LO_RESOL
@@ -1031,9 +1067,12 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
     self._cap_ctrl.enable_start_trigger(*enabled_capture_units)
 
   def set_adc_coarse_frequency(self,freq_in_mhz):
-    self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._rxcnco_id, \
-                                           adc_mode = True, fine_mode=False)
-    self._rx_coarse_frequency = freq_in_mhz # DEBUG seems not used right now
+                                                            #self._nco_ctrl.set_nco(1e6*freq_in_mhz, self._rxcnco_id, \
+                                                            #                                       adc_mode = True, fine_mode=False)
+    self.static_set_adc_coarse_frequency(self._nco_ctrl, \
+                              self._rxcnco_id,freq_in_mhz)  # frequency is directly loaded thru
+                                                            # the phase incremental word
+    self._rx_coarse_frequency = freq_in_mhz                 # DEBUG seems not used right now
 
   def get_adc_coarse_frequency(self):
     return self.static_get_adc_coarse_frequency(self._nco_ctrl,self._rxcnco_id)
@@ -1050,6 +1089,28 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
       res = nco_ctrl.read_value(0xa0a-i)
       piw = (piw << 8 | res)
     return piw
+
+  def static_set_adc_coarse_frequency(self,nco_ctrl,ch,freq_in_mhz):
+
+    nco_resolution = QSConstants.ADC_CNCO_RESOL
+    effective_piw  = int((freq_in_mhz + 0.5*nco_resolution)/nco_resolution)
+
+    self.static_set_adc_coarse_ftw(nco_ctrl,ch,
+      effective_piw << (QSConstants.DAQ_CNCO_BITS - QSConstants.ADC_CNCO_RESOL_BITS))
+
+  def static_set_adc_coarse_ftw(self,nco_ctrl,ch,piw):
+
+    # REGISTER MAP [COARSE_DDC_PHASE_INC]                   # piw = phase incremental word
+    #  a0a  |  a09  |  a08   |  a07   | a06  | a05 |
+    #  piw  |  piw  |  piw   |  piw   | piw  | piw |
+    # 47:40 | 39:32 |  31:24 |  23:16 | 15:8 | 7:0 |
+
+    page         = nco_ctrl.read_value(0x18) & 0xff         # dac mainpath page select
+    nco_ctrl.write_value(0x1b, page & 0xf0 | (1 << ch) & 0x0f)
+    for i in range(6):
+      write_bits = piw & 0xff
+      piw        = (piw & 0xffffffffff00) >> 8
+      nco_ctrl.write_value(0xa05+i, write_bits)
 
   def static_check_adc_coarse_frequency(self,freq_in_mhz):
     resolution = QSConstants.ADC_CNCO_RESOL
