@@ -427,6 +427,7 @@ class QSConstants:
   DAQ_INITSHOTS      = 1                                    # one shot
   DAQ_INITTOUT       = 5                                    # seconds
   DAQ_INITSDLY       = 1                                    # seconds; synchronization delay
+  DAQ_DONEWAIT       = 0.1                                  # seconds; wait delay
   ACQ_INITMODE       = '3'
   ACQ_INITWINDOW     = [(0,2048)]                           # initial demodulation windows
   ACQ_INITFIRCOEF    = np.array([1]*8).astype(complex)      # initial complex FIR filter coeffs
@@ -485,6 +486,7 @@ class QSMessage:
                      + '(5) The absolute value of complex data is less than 1. '         \
                      + 'The problem is {}. '
   ERR_NOARMED_DAC    = 'No ready dac channels. '
+  ERR_TIMEOUT_DAC    = 'DAC stop timeout.'
 
   def __init__(self):
     pass
@@ -657,9 +659,22 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
     self._awg_ctrl.start_awgs(*awg_ids)                     # operation, synchronization has
                                                             # to be made using SequencerClinet.
 
-  def stop_daq(self,awg_ids,timeout):
-    self._awg_ctrl.wait_for_awgs_to_stop(timeout, *awg_ids)
-    self._awg_ctrl.clear_awg_stop_flags(*awg_ids)
+  @inlineCallbacks
+  def stop_daq(self,awg_ids,timeout):                       # @inlineCallbacks
+
+    start = time.time()
+    while True:
+      resp = self._awg_ctrl.query_for_awgs_done(*awg_ids)
+      if resp:
+        break
+
+      elapsed_time = time.time() - start
+      if elapsed_time > timeout:
+         raise Exception(QSMessage.ERR_TIMEOUT_DAC)         # Previously we use the following imple-
+      yield                                                 # mentation, but this prohibits multi-
+      time.sleep(QSConstants.DAQ_DONEWAIT)                  # user operation.
+                                                            # self._awg_ctrl.wait_for_awgs_to_stop(timeout, *awg_ids)
+    yield self._awg_ctrl.clear_awg_stop_flags(*awg_ids)
 
   def terminate_daq(self,awg_ids):
     self._awg_ctrl.terminate_awgs(*awg_ids)
@@ -1199,7 +1214,7 @@ class QuBE_Server(DeviceServer):
       return list()
 
     try:
-      awg_ctrl = AwgCtrl    (ipfpga)                        # AWG CONTROL (e7awgsw)
+      awg_ctrl = QuBEAwgCtrl    (ipfpga)                    # AWG CONTROL (e7awgsw)
       cap_ctrl = QuBECaptureCtrl(ipfpga)                    # CAP CONTROL (inherited from e7awgsw)
       awg_ctrl.initialize(*AWG.all())
       cap_ctrl.initialize(*CaptureModule.all())
@@ -1429,14 +1444,14 @@ class QuBE_Server(DeviceServer):
 
     """
     if 1 > len(c[QSConstants.DAC_CNXT_TAG].keys()):
-      return False                                          # Nothing to stop
+      returnValue(False)                                    # Nothing to stop
 
     for chassis_name in c[QSConstants.DAC_CNXT_TAG].keys():
 
       dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-      dev.stop_daq(list(enabled_awgs),c[QSConstants.DAQ_TOUT_TAG])
+      yield dev.stop_daq(list(enabled_awgs),c[QSConstants.DAQ_TOUT_TAG])
 
-    return True
+    returnValue(True)
 
   @setting(112, 'DAQ Clear', returns = ['b'])
   def daq_clear(self,c):
@@ -2772,6 +2787,21 @@ class QuBESequencerClient(SequencerClient):
 # e7awgsw wrappers
 #
 from e7awgsw.memorymap      import CaptureMasterCtrlRegs
+from e7awgsw.memorymap      import AwgCtrlRegs
+
+class QuBEAwgCtrl(AwgCtrl):
+
+  def query_for_awgs_done(self, *awg_id_list):
+
+    all_stopped = True
+    for awg_id in awg_id_list:
+      val = self._AwgCtrl__reg_access.read_bits(
+        AwgCtrlRegs.Addr.awg(awg_id), AwgCtrlRegs.Offset.STATUS, AwgCtrlRegs.Bit.STATUS_DONE, 1)
+      if val == 0:
+        all_stopped = False
+        break
+    return True if all_stopped else                         \
+           False
 
 class QuBECaptureCtrl(CaptureCtrl):
 
