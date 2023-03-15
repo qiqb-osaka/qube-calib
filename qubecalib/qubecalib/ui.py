@@ -1,268 +1,525 @@
-# import ipywidgets as ipw
-# from collections import namedtuple
-# import IPython.display
-# import qubecalib
-# from traitlets import HasTraits, Unicode, observe, link
+from . import qube as lib_qube
+from . import meas
 
-# BITFILE_LOCATION = '/home/qube/bin/'
+import ipywidgets as ipw
+import numpy as np
+import os
+import subprocess
+import time
+from typing import Final
 
-# def display(*args, **kwargs):
-#     IPython.display.display(*args, **kwargs)
+MATPLOTLIB_PYPLOT = None
 
-# class Qube(HasTraits): # todo: 多重継承の正しいやり方を知りたい qubecalib.Qube も継承させたい
-#     config_file_name = Unicode()
-#     iplsi = Unicode()
-#     rftype = Unicode()
-#     def __init__(self, addr=None, path=None, *args, **kwargs):
-#         super().__init__()
-#         self.qube = q = qubecalib.Qube(addr, path, *args, **kwargs)
-#         if q.config_file_name != None:
-#             self.config_file_name = q.config_file_name
-#         self._ports = None
-#     def _config_file_name_changed(self, change):
-#         self.qube.config_file_name = getattr(self, change)
-#     def load(self):
-#         self.qube.load()
-#         self.iplsi = self.qube.config['iplsi']
-#         self.rftype = self.qube.config['type']
-#     def do_init(self, rf_type='A', bitfile=None, message_out=False):
-#         self.qube.do_init(rf_type, bitfile, message_out)
-#     def config_fpga(self, bitfile, message_out=False):
-#         self.qube.config_fpga(bitfile, message_out=False)
-#     def restart_ad9082(self, message_out=True):
-#         for o in self.qube.ad9082:
-#             o.do_init(message_out=message_out)
-#     @property
-#     def config(self):
-#         return self.qube.config
-#     @property
-#     def path(self):
-#         return self.qube.path
-#     @path.setter
-#     def path(self, v):
-#         self.qube.path = v
-#     @property
-#     def ad9082(self):
-#         return self.qube.ad9082
-#     @ad9082.setter
-#     def ad9082(self, v):
-#         self.qube.ad9082 = v
-#     @property
-#     def lmx2594(self):
-#         return self.qube.lmx2594
-#     @lmx2594.setter
-#     def lmx2594(self, v):
-#         self.qube.lmx2594 = v
-#     @property
-#     def lmx2594_ad9082(self):
-#         return self.qube.lmx2594_ad9082
-#     @lmx2594_ad9082.setter
-#     def lmx2594_ad9082(self, v):
-#         self.qube.lmx2594_ad9082 = v
-#     @property
-#     def adrf6780(self):
-#         return self.qube.adrf6780
-#     @adrf6780.setter
-#     def adrf6780(self, v):
-#         self.qube.adrf6780 = v
-#     @property
-#     def ad5328(self):
-#         return self.qube.ad5328
-#     @ad5328.setter
-#     def ad5328(self, v):
-#         self.qube.ad5328 = v
-#     @property
-#     def gpio(self):
-#         return self.qube.gpio
-#     @gpio.setter
-#     def gpio(self, v):
-#         self.qube.gpio = v
-#     @property
-#     def bitfile(self):
-#         return self.qube.bitfile
-#     @bitfile.setter
-#     def bitfile(self, v):
-#         self.qube.bitfile = v
-#     @property
-#     def rf_type(self):
-#         return self.qube.rf_type
-#     @rf_type.setter
-#     def rf_type(self, v):
-#         self.qube.rf_type = v
+def get_port_id(p, q):
+    return int(list(filter(lambda x: x is not None, [k if v == p else None for k,v in q.ports.items()]))[0].replace('port',''))        
 
-# class LoadConfigPanel(ipw.HBox):
-#     def __init__(self, qube, *args, **kwargs):
-#         self.qube = qube
-#         self.links = []
-#         self.tb_fname = t = ipw.Text(description='Config')
-#         if qube.config_file_name == '':
-#             qube.config_file_name = 'qube_riken_1-01.yml'
-#         self.links.append(link((qube, 'config_file_name'), (t, 'value')))
-#         self.tb_iplsi = t = ipw.Text(description='IP (LSI)', disabled=True)
-#         self.links.append(link((qube, 'iplsi'), (t, 'value')))
-#         self.tb_rftype = t = ipw.Text(description='RF Type', disabled=True)
-#         self.links.append(link((qube, 'rftype'), (t, 'value')))
-#         self.btn_load = b = ipw.Button(description='Load'); b.on_click(lambda e: self.qube.load())
-#         ipw.HBox.__init__(self, [self.tb_fname, b, self.tb_iplsi, self.tb_rftype], *args, **kwargs)
-#     def unlink(self):
-#         for o in self.links:
-#             o.unlink()
-            
-# class HBox(ipw.HBox):
-#     pass
-        
-# class VBox(ipw.VBox):
-#     pass
+import sys
+import argparse
+import socket
+import struct
+import time
+
+from telnetlib import Telnet
+import time
+
+class PDU(object):
+
+    def _connect(self, tn):
+        # tn.set_debuglevel(1)
+        tn.read_until(b'Login: ')
+        tn.write(b'teladmin\n')
+        tn.write(b'qubeqube\n')
+        tn.read_until(b'Password: *')
+        tn.write(b'\n')
+        tn.read_until(b'> ')
+        try:
+            tn.read_until(b'> ')
+        except EOFError:
+            tn.read_until(b'')
+            return False
+        return True
     
-# # class LoadConfigPanel(ipw.HBox):
-# #     def __init__(self, qube, label='Config', *args, **kwargs):
-# #         self.qube = qube
-# #         try:
-# #             fname = qube.config_file_name
-# #         except AttributeError:
-# #             fname = ''
-# #         self.tb_fname = t = ipw.Text(description=label, value=fname)
-# #         self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
-# #         super().__init__([t, b])
-# #     def load(self, e):
-# #         self.qube.load(self.tb_fname.value)
-# #         self.qube.event.invoke('loaded')
-
-# # class FPGAConfigPanel(ipw.VBox):
-# #     def __init__(self, qube, *args, **kwargs):
-# #         self.qube = qube
-# #         self.tb_bitfile = t = ipw.Text(value='')
-# #         self.btn_config = b = ipw.Button(description='Config'); b.on_click(self.config)
-# #         self.super().__init__([ipw.HBox([t, b]),], *args, **kwargs)
-# #         self.qube.event.bind('loaded', self.loaded)
-# #     def config(self, e):
-# #         self.qube.load(self.tb_fname.value)
-# #     def loaded(self, e):
-# #         self.tb_bitfile.value = self.qube.config['bitfile']
+    def __enter__(self):
+        while True:
+            tn = Telnet('10.250.0.100', 23)
+            if self._connect(tn):
+                self.telnet = tn
+                break
+            print('retrying...')
+            time.sleep(0.1)
+        return self
+    
+    def __exit__(self, type, value, traceback):
+        self.telnet.write(b'quit\n')
         
-# # class QubeLoadConfigPanel(ipw.VBox):
-# #     def __init__(self, qube, *args, **kwargs):
-# #         self.qube = qube
-# #         self.tb_fname = t = ipw.Text(description='Config', value='qube_riken_1-01.yml')
-# #         self.btn_load = b = ipw.Button(description='Load'); b.on_click(self.load)
-# #         ipw.VBox.__init__(self, [ipw.HBox([t, b]),], *args, **kwargs)
-# #         # self.qube.event.bind('loaded', self.loaded)
+    def status(self, id):
+        self.telnet.write(bytes('read status o0{}\n'.format(id), 'ascii'))
+        return str(self.telnet.read_until(b'> '))
+        
+    def on(self, id):
+        self.telnet.write(bytes('sw o0{} on\n'.format(id), 'ascii'))
+        self.telnet.read_until(b'> ')
+        return str(self.telnet.read_until(b'> '))
 
-# class QubeSetupPanel(ipw.VBox):
-#     def __init__(self, qube, *args, **kwargs):
-#         self.qube = qube
-#         self.tb_ip4lsi = tb_ip4lsi = ipw.Text(description='IP Address (LSI)', style={'description_width': 'initial'}, disabled=True)
-#         self.tb_path2api = tb_path2api = ipw.Text(description='Path to API', style={'description_width': 'initial'}, layout=ipw.Layout(width='50%'), disabled=True)
-#         self.cb_config_fpga = cb = ipw.Checkbox(value=False, description='Config FPGA', disabled=False, indent=False)
-#         self.tb_path_bitfile = bitfile = ipw.Text(
-#             description='Path to bitfile',
-#             value='',
-#             style={'description_width': 'initial'},
-#             disabled=False)
-#         kw = {'layout': {'width': '50%', 'height': '80px'}, 'disabled': True}
-#         self.btn_do_init = b = ipw.Button(description='Do init', **kw); b.on_click(self.do_init)
-#         self.btn_ad9082 = b = ipw.Button(description='Restart AD9082', **kw); b.on_click(self.do_init_ad9082)
-#         self.qube.event.bind('loaded', self.loaded)
-#         ipw.VBox.__init__(
-#             self,
-#             [
-#                 tb_ip4lsi, tb_path2api,
-#                 ipw.HBox([cb, bitfile], layout={'width': '50%'}),
-#                 self.btn_do_init, self.btn_ad9082,
-#             ],
-#             *args,
-#             **kwargs
-#         )
-#     def loaded(self, e):
-#         o = self.qube
-#         self.tb_ip4lsi.value = o.qube.gpio.handle.addr
-#         self.tb_path2api.value = o.qube.path
-#         self.tb_path_bitfile.value = o.config['bitfile']
-#         self.btn_do_init.disabled = False
-#         self.btn_ad9082.disabled = False
-#     def do_init(self, e):
-#         o = self.qube
-#         if self.cb_config_fpga.value:
-#             o.do_init(config_fpga=True, message_out=True)
-#         else:
-#             o.do_init(message_out=True)
-#     def do_init_ad9082(self, e):
-#         self.qube.restart_ad9082(message_out=True)
+    def off(self, id):
+        self.telnet.write(bytes('sw o0{} off\n'.format(id), 'ascii'))
+        self.telnet.read_until(b'> ')
+        return str(self.telnet.read_until(b'> '))
 
-# class QubeLoControlPanel(ipw.VBox): pass
 
-# class QubeNcoControlPanel(ipw.VBox): pass
 
-# class QubeLongSendControlPanel(ipw.VBox): pass
+def lmx2594_ad9082_do_init(self, ad9082_mode=True, readout_mode=False):
+    
+    if ad9082_mode:
+        self.write_value(0x00, 0x6612) # R6 [14]VCO_PHASE_SYNC=0
+        self.write_value(0x00, 0x6610)
+    else:
+        self.write_value(0x00, 0x2612) # R6 [14]VCO_PHASE_SYNC=0, [9]OUT_MUTE=1
+        self.write_value(0x00, 0x2610)
+    self.read_value(0x00)
 
-# # class AwgPanel(object):
-# #     class MultipleText(list):
-# #         def __init__(self, *args):
-# #             self.textbox = [ipw.Text(value=v) for v in args]
-# #     def __init__(self, qube):
-# #         self.qube = qube
-# #         self.txt_freqs = tf = {
-# #             'port5': AwgPanel.MultipleText('2.5', '2.5', '2.5'),
-# #             'port6': AwgPanel.MultipleText('2.5', '2.5', '2.5'),
-# #             'port7': AwgPanel.MultipleText('2.5', '2.5', '2.5'),
-# #             'port8': AwgPanel.MultipleText('2.5', '2.5', '2.5'),
-# #         }
-# #         self.txt_atts = ta = {
-# #             'port5': AwgPanel.MultipleText('0', '0', '0'),
-# #             'port6': AwgPanel.MultipleText('0', '0', '0'),
-# #             'port7': AwgPanel.MultipleText('0', '0', '0'),
-# #             'port8': AwgPanel.MultipleText('0', '0', '0'),
-# #         }
-# #         for i in range(5,9):
-# #             tf['port{}'.format(i)].textbox[0].description = 'Freq{} [MHz]:'.format(i)
-# #         for i in range(5,9):
-# #             ta['port{}'.format(i)].textbox[0].description = 'Att{} [dB]:'.format(i)
-# #         btn = ipw.Button(description='Long Send')#, layout={'width': '50%'})
-# #         btn.on_click(self.do_longsend)
-# #         self.panel = ipw.VBox([
-# #             ipw.HBox(tf['port5'].textbox),
-# #             ipw.HBox(tf['port6'].textbox),
-# #             ipw.HBox(tf['port7'].textbox),
-# #             ipw.HBox(tf['port8'].textbox),
-# #             ipw.HBox(ta['port5'].textbox),
-# #             ipw.HBox(ta['port6'].textbox),
-# #             ipw.HBox(ta['port7'].textbox),
-# #             ipw.HBox(ta['port8'].textbox),
-# #             btn,
-# #         ])
-# #     def display(self):
-# #         display(self.panel)
-# #     def get_attenuation_list(self):
-# #         r = [float(self.txt_atts['port8'].textbox[0].value), 0, 0] +\
-# #         [float(o.value) for o in self.txt_atts['port8'].textbox[1:]] +\
-# #         [float(o.value) for o in self.txt_atts['port7'].textbox] +\
-# #         [float(o.value) for o in self.txt_atts['port6'].textbox] +\
-# #         [float(o.value) for o in self.txt_atts['port5'].textbox] +\
-# #         [0, 0]
-# #         return r
-# #     def get_frequency_list(self):
-# #         r = [float(self.txt_freqs['port8'].textbox[0].value), 0, 0] +\
-# #         [float(o.value) for o in self.txt_freqs['port8'].textbox[1:]] +\
-# #         [float(o.value) for o in self.txt_freqs['port7'].textbox] +\
-# #         [float(o.value) for o in self.txt_freqs['port6'].textbox] +\
-# #         [float(o.value) for o in self.txt_freqs['port5'].textbox] +\
-# #         [0, 0]
-# #         return r
-# #     def get_amplitude_list(self):
-# #         a = [
-# #             10922, 32766, 32766,
-# #             10922, 10922,
-# #             10922, 10922,
-# #             10922, 10922,
-# #             10922, 10922,
-# #             32766,
-# #             32766,
-# #             ]
-# #         r = self.get_attenuation_list()
-# #         return [b * 10**(-s/20)  for b, s in zip(a,r)]
-# #     def do_longsend(self, e):
-# #         ip = self.qube.gpio.handle.addr
-# #         a = self.get_amplitude_list()
-# #         f = self.get_frequency_list()
-# #         long_send.stop(ipaddr='10.1.0.5')
-# #         long_send.start(a, f, ipaddr='10.1.0.5')
+    self.write_value(0x4E, 0x0001)
+    self.write_value(0x4D, 0x0000)
+    self.write_value(0x4C, 0x000C)
+    self.write_value(0x4B, 0x0840)
+    self.write_value(0x4A, 0x0000) # R74 [15:2] SYSREF_PULSE_COUNT=0
+    self.write_value(0x49, 0x003F)
+
+    if ad9082_mode:
+        self.write_value(0x48, 0x001F) # R72 [10:0] SYSREF_DIV
+        self.write_value(0x47, 0x008D) # R71 [7:5]SYSREF_DIV_PRE=4='Divided by 4', [3]SYSREF_EN=1, [2]SYSREF_REPEAT=1
+    else:
+        self.write_value(0x48, 0x0000) # R72 [10:0] SYSREF_DIV
+        self.write_value(0x47, 0x0081) # R71 [7:5]SYSREF_DIV_PRE=4='Divided by 4', [3]SYSREF_EN=0, [2]SYSREF_REPEAT=0
+
+    self.write_value(0x46, 0xC350)
+    self.write_value(0x45, 0x0000)
+    self.write_value(0x44, 0x03E8)
+    self.write_value(0x43, 0x0000)
+    self.write_value(0x42, 0x01F4)
+    self.write_value(0x41, 0x0000)
+    self.write_value(0x40, 0x1388)
+    self.write_value(0x3F, 0x0000)
+    self.write_value(0x3E, 0x0322)
+    self.write_value(0x3D, 0x00A8)
+    self.write_value(0x3C, 0x03E8)
+    self.write_value(0x3B, 0x0001)
+
+    if ad9082_mode:
+        self.write_value(0x3A, 0x0401) # R58 [15]IGNORE=0, [14]HYST=0, [13:12]INPIN_LVL=0=V
+    else:
+        self.write_value(0x3A, 0x8001) # R58 [15]IGNORE=0, [14]HYST=0, [13:12]INPIN_LVL=0=V
+
+    self.write_value(0x39, 0x0020)
+    self.write_value(0x38, 0x0000)
+    self.write_value(0x37, 0x0000)
+    self.write_value(0x36, 0x0000)
+    self.write_value(0x35, 0x0000)
+    self.write_value(0x34, 0x0820)
+    self.write_value(0x33, 0x0080)
+    self.write_value(0x32, 0x0000)
+    self.write_value(0x31, 0x4180)
+    self.write_value(0x30, 0x0300)
+    self.write_value(0x2F, 0x0300)
+
+    if ad9082_mode:
+        self.write_value(0x2E, 0x07FE) # R46 [1:0] OUTB_MUX=2
+    else:
+        self.write_value(0x2E, 0x07FD) # R46 [1:0] OUTB_MUX=1(=VCO)
+
+    if readout_mode:
+        self.write_value(0x2D, 0xC8FF) # R45 [5:0] OUTB_PWR=1F
+    else: # ctrl_mode
+        self.write_value(0x2D, 0xC8DF) # R45
+
+    if ad9082_mode:
+        self.write_value(0x2C, 0x3220) # R44  3220
+    elif readout_mode:
+        self.write_value(0x2C, 0x3220) # R44  3220
+    else: # ctrl_mode
+        self.write_value(0x2C, 0x32A0) # R44
+
+    self.write_value(0x2B, 0x0000)
+    self.write_value(0x2A, 0x0000)
+    self.write_value(0x29, 0x0000)
+    self.write_value(0x28, 0x0000)
+    self.write_value(0x27, 0x0001)
+    self.write_value(0x26, 0x0000)
+    self.write_value(0x25, 0x0204)
+
+    if ad9082_mode:
+        self.write_value(0x24, 0x001e)
+    else:
+        self.write_value(0x24, 0x0078)
+
+    self.write_value(0x23, 0x0004)
+    self.write_value(0x22, 0x0000)
+    self.write_value(0x21, 0x1E21)
+    self.write_value(0x20, 0x0393)
+    self.write_value(0x1F, 0x43EC)
+    self.write_value(0x1E, 0x318C)
+    self.write_value(0x1D, 0x318C)
+    self.write_value(0x1C, 0x0488)
+    self.write_value(0x1B, 0x0002)
+    self.write_value(0x1A, 0x0DB0)
+    self.write_value(0x19, 0x0C2B)
+    self.write_value(0x18, 0x071A)
+    self.write_value(0x17, 0x007C)
+    self.write_value(0x16, 0x0001)
+    self.write_value(0x15, 0x0401)
+    self.write_value(0x14, 0xC848)
+    self.write_value(0x13, 0x27B7)
+    self.write_value(0x12, 0x0064)
+    self.write_value(0x11, 0x00FA)
+    self.write_value(0x10, 0x0080)
+    self.write_value(0x0F, 0x064F)
+    self.write_value(0x0E, 0x1E10)
+    self.write_value(0x0D, 0x4000)
+    self.write_value(0x0C, 0x5001)
+    self.write_value(0x0B, 0x0018)
+    self.write_value(0x0A, 0x10D8)
+    self.write_value(0x09, 0x0604)
+    self.write_value(0x08, 0x2000)
+    self.write_value(0x07, 0x00B2)
+    self.write_value(0x06, 0xC802)
+    self.write_value(0x05, 0x00C8)
+    self.write_value(0x04, 0x1B43)
+    self.write_value(0x03, 0x0642)
+    self.write_value(0x02, 0x0500)
+    self.write_value(0x01, 0x080B)
+
+    if ad9082_mode:
+        self.write_value(0x00, 0x6618)
+        self.write_value(0x22, 0x0000)
+        self.write_value(0x24, 0x001e)
+        self.write_value(0x26, 0x0000)
+        self.write_value(0x27, 0x0064)
+        self.write_value(0x2A, 0x0000)
+        self.write_value(0x2B, 0x0000)
+        self.write_value(0x00, 0x6618)
+    else:
+        self.write_value(0x00, 0x2618)
+
+    return self.read_value(0x00)
+
+
+
+
+class QuBEMonitor(object):
+    BUFSIZE = 16384
+    TIMEOUT = 25
+    
+    def __init__(self, ip_addr, port):
+        self.__dest_addr = (ip_addr, port)
+        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.__sock.settimeout(self.TIMEOUT)
+        self.__sock.bind(('', 0))
+        print('open: {}:{}'.format(ip_addr, port))
+        
+    def send_recv(self, data):
+        try:
+            self.__sock.sendto(data, self.__dest_addr)
+            return self.__sock.recvfrom(self.BUFSIZE)
+        except socket.timeout as e:
+            print('{}, Dest {}'.format(e, self.__dest_addr))
+            raise
+        except Exeption as e:
+            print(e)
+            raise
+        
+    def kick_softreset(self):
+        data = struct.pack('BBBB', 0xE0, 0x00, 0x00, 0x00)
+        ret, addr = self.send_recv(data)
+        print(ret)
+
+
+
+    
+        
+        
+class QubeControl(object):
+    
+    def __init__(self, config_file_name, qube=None):
+        
+        self._container = {}
+        c: Final[dict] = self._container
+        if qube is None:
+            c['qube'] = lib_qube.Qube.create(config_file_name)
+        else:
+            c['qube'] = qube
+        # c['wout'] = ipw.Output(layout={'border': '1px solid black'})
+        c['wout'] = ipw.Output()
+        c['fname'] = ipw.Text(description='', value=config_file_name, disabled=True)
+        # c['mon'] = ipw.Checkbox(value=False, description='Enable Monitor4', disabled=False)
+        # c['mon2'] = ipw.Checkbox(value=False, description='Enable Monitor9', disabled=False)
+        c['mon'] = ipw.ToggleButtons(description='ADC0', options=['Readin1', 'Monitor4'], disabled=False)
+        c['mon2'] = ipw.ToggleButtons(description='ADC1', options=['Readin12', 'Monitor9'], disabled=False)
+        c['loopback'] = ipw.Checkbox(value=False, description='Switch Loopback', disabled=False)
+        
+        class ShowStatusButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Show status'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                qube, wout = c['qube'], c['wout']
+                wout.clear_output()
+                with wout:
+                    print("GPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+        
+        class ShowConfigButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Show config'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                c['wout'].clear_output()
+                with c['wout']:
+                    print("Config:")
+                    print(c['qube'].config)
+
+        class RestartAD9082Button(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Restart AD9082'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                
+                def ad9082_do_init():
+                    for o, k in zip(c['qube'].ad9082, ['mon', 'mon2']):
+                        if c[k].value.startswith('Monitor'):
+                            os.environ['TARGET_ADDR'] = o.addr
+                            os.environ['AD9082_CHIP'] = o.chip
+                            ret = subprocess.check_output('{}/v1.0.6/src/hello_monitor'.format(o.path), encoding='utf-8')
+                        else:
+                            o.do_init(message_out=False)
+                        
+                def check_recv(prx1, prx2):
+                    qube = c['qube']
+                    p = meas.CaptureParam()
+                    p.num_integ_sections = 1
+                    p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                    p.capture_delay = 0
+                    
+                    r = meas.Recv(qube.ipfpga, [prx1.capt, prx2.capt], 2*[p])
+                    try:
+                        r.start(timeout=0.5)
+                    except meas.e7awgsw.CaptureUnitTimeoutError:
+                        print('Capture unit stop timeout. Retry restart.')
+                        return False
+                    
+                    w = [r.data.data[meas.CaptureModule.get_units(prx.capt.id)[0]] for prx in [prx1, prx2]]
+                    
+                    sgm2 = [(np.abs(v - v.mean())**2).mean() for v in w]
+                    print('Variance: ', sgm2)
+                    if [s < 1e+8 for s in sgm2] == [True, True]:
+                        return True
+                    else:
+                        print('An anomalous variance has been detected. Trying the restart process again...')
+                        return False
+                    
+                    return True
+                
+                qube, wout, mon = c['qube'], c['wout'], c['mon']
+                wout.clear_output()
+                with wout:
+                    for i in range(100):
+                        print(i+1, end=' ', flush=True)
+                        for p in c['qube'].lmx2594_ad9082:
+                            # p.do_init(ad9082_mode=True, message_out=False)
+                            lmx2594_ad9082_do_init(p)
+                        time.sleep(0.1)
+                        ad9082_do_init()
+                        ad9082_do_init()
+                        for o in c['qube'].ad9082:
+                            print(dict(o.get_jesd_status())['0x55E'], end=' ', flush=True)
+                        s = [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)]
+                        if s != [True, True]:
+                            print()
+                            continue
+                        prx1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                        prx2 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                        if check_recv(prx1, prx2):
+                            break
+                    
+                    if c['loopback'].value:
+                        qube.gpio.write_value(0xFFFF)
+                    else:
+                        qube.gpio.write_value(0x0000)
+                    print("\nGPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+                        
+        class DoInitButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'do_init'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                qube, wout = c['qube'], c['wout']
+                wout.clear_output()
+                with wout:
+                    qube.do_init(message_out=True)
+                    print("\nGPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+        
+        class ShowRecvButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Recv'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                assert [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)] == [True, True], 'Link status is unusual.'
+                
+                qube = c['qube']
+                p = meas.CaptureParam()
+                p.capture_delay = 100
+                p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                p.num_integ_sections = 1
+                # p.num_integ_sections = 10000
+                # p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
+                
+                p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
+                r.start(timeout=0.5)
+                
+                plt = MATPLOTLIB_PYPLOT
+                fig = plt.figure()
+                ax = fig.add_subplot(211)
+                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
+                ax = fig.add_subplot(212)
+                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
+                
+                c['wout'].clear_output()
+                # import matplotlib
+                with c['wout']:
+                    plt.show(fig)
+                plt.close()
+                
+        class ConfigFPGAButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'ConfigFPGA'
+                self.on_click(self._on_click)
+                # self.bitfile = '{}/{}'.format(qubecalib.qube.PATH_TO_BITFILE, c['qube'].bitfile)
+            def _on_click(self, e):
+                # print(c['qube'], c['qube']['bitfile'])
+                c['wout'].clear_output()
+                with c['wout']:
+                    print('configure FPGA ...')
+                # c['qube'].config_fpga()
+                os.environ['BITFILE'] = '{}/{}'.format(lib_qube.PATH_TO_BITFILE, c['qube'].bitfile)
+                with c['wout']:
+                    print('BITFILE: {}'.format(os.environ['BITFILE']))
+                commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(lib_qube.PATH_TO_API)]
+                ret = subprocess.run(commands , stdout=subprocess.PIPE, check=True).stdout
+                with c['wout']:
+                    print(ret)
+                
+        class ShowPortsButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Show port config'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                c['wout'].clear_output()
+                with c['wout']:
+                    print("Port:")
+                    for k, v in c['qube'].ports.items():
+                        print(k, v)
+                    
+        class ShowPortStatusButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Show port status'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                c['wout'].clear_output()
+                with c['wout']:
+                    print("Port Status:")
+                    for k, v in c['qube'].ports.items():
+                        print(k,v.status)
+                        
+        class KickSoftReset(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Kick soft reset'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                qube, wout = c['qube'], c['wout']
+                wout.clear_output()
+                with wout:
+                    q = QuBEMonitor(qube.ipmulti, 16384)
+                    q.kick_softreset()
+                    print("GPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+                        
+        self.widgets = ipw.VBox([
+            ipw.HBox([
+                c['fname'],
+                # CreateQubeInstanceButton(description='Create instance'),
+                DoInitButton(),
+                KickSoftReset(),
+                ipw.Text(description='', value=c['qube'].bitfile, disabled=True),
+                ConfigFPGAButton(),
+            ]),
+            ipw.HBox([
+                ShowPortsButton(),
+                ShowPortStatusButton(),
+            ]),
+            ipw.HBox([
+                ShowStatusButton(),
+                ShowConfigButton(),
+                ShowRecvButton(),
+                RestartAD9082Button(),
+                c['loopback'],
+            ]),
+            ipw.HBox([ipw.VBox([c['mon'],c['mon2'],]),]),
+            ipw.HBox([
+                c['wout'],
+            ]),
+        ])
+        display(self.widgets)
+        
+    @property
+    def qube(self):
+        if self._container['qube'] == None:
+            raise ValueError('An instance of qube must be created before it can be referenced.')
+        return self._container['qube']
+    
+    @property
+    def recv(self):
+        return self._container['recv']
+
+
+# class CWControl(object):
+    
+#     def __init__(self, label, port):
+#         self._container = {}
+#         c: Final[dict] = self._container
+#         c['port'] = port
+#         c['wout'] = ipw.Output()
+        
+#         class LOFrequency(ipw.Text):
+#             def __init__(self, *args, **kw):
+#                 super().__init__(*args, **kw)
+#                 self.description=''
+#                 self.value = c['port'].lo.mhz
+#             def refresh(self):
+#                 self.value = c['port'].lo.mhz
+#             def update(self):
+#                 c['port'].lo.mhz = int(self.value)
+        

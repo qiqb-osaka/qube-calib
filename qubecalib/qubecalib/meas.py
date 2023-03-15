@@ -2,6 +2,9 @@ from e7awgsw import CaptureModule, CaptureParam, DspUnit, AWG
 from e7awgsw import IqWave, WaveSequence
 import e7awgsw
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+import time
+from collections import namedtuple
 
 class AwgCtrl(e7awgsw.AwgCtrl):
     pass
@@ -35,7 +38,7 @@ class Recv(object):
     def __init__(self, ipaddr, module, param=None):
         self._trigger = None
         self.ipaddr = ipaddr
-        if isinstance(module, list):
+        if isinstance(module, list) or isinstance(module, tuple):
             self.captms = [o if isinstance(o, CaptureModule) else o.id for o in module]
         else:
             m = module
@@ -53,14 +56,20 @@ class Recv(object):
             units = CaptureModule.get_units(self.captm)
         with CaptureCtrl(self.ipaddr) as cap_ctrl:
             cap_ctrl.initialize(*units)
-            for i in units:
-                cap_ctrl.set_capture_params(i, param)
+            if isinstance(param, list) or isinstance(param, tuple):
+                for u, p in zip(units, param):
+                    cap_ctrl.set_capture_params(u, p)
+            else:
+                for i in units:
+                    cap_ctrl.set_capture_params(i, param)
             cap_ctrl.start_capture_units(*units)
             cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
             cap_ctrl.check_err(*units)
             self.data = cap_ctrl.get_capture_data(*units)
             
     def wait(self, param=None, timeout=5):
+        if param is None:
+            param = self.param
         if self.captms:
             units = CaptureModule.get_units(*self.captms)
         else:
@@ -71,8 +80,12 @@ class Recv(object):
                 for i in self.captms:
                     cap_ctrl.select_trigger_awg(i, self._trigger)
                     cap_ctrl.enable_start_trigger(*CaptureModule.get_units(i))
-            for i in units:
-                cap_ctrl.set_capture_params(i, param)
+            if isinstance(param, list) or isinstance(param, tuple):
+                for u, p in zip(units, param):
+                    cap_ctrl.set_capture_params(u, p)
+            else:
+                for i in units:
+                    cap_ctrl.set_capture_params(i, param)
             cap_ctrl.wait_for_capture_units_to_stop(timeout, *units)
             cap_ctrl.check_err(*units)
             self.data = cap_ctrl.get_capture_data(*units)
@@ -196,176 +209,247 @@ class WaveSequenceFactory(object):
             w.add_chunk(**c.chunk)
         return w
     
+def send_recv_single(ipfpga, awg_to_wave_sequence, capt_to_capt_param, trigger_awg, sleep = 0.5, timeout=20):
+    """
+    単体 Qube にて Send と Recv を同期動作させる．
+    """
+    
+    a, c = awg_to_wave_sequence, capt_to_capt_param
+    send = Send(ipfpga, [k for k, v in a.items()], [v.sequence for k, v in a.items()])
+    recv = Recv(ipfpga, [k for k, v in c.items()], [v for k, v in c.items()])
+    # send = Send(ipfpga, [o.port.awg for o, w in send], [w.sequence for o, w in send])
+    # recv = Recv(ipfpga, [v.port.capt for v, p in w.items()], [p for v, p in w.items()])
+    # print([v.sum_section_list for k, v in c.items()])
+    recv.trigger = trigger_awg
+    
+    with ThreadPoolExecutor() as e:
+        thread = e.submit(lambda: recv.wait(timeout=timeout))
+        time.sleep(sleep)
+        send.terminate()
+        send.start()
+        thread.result()
+    send.terminate()
+    
+    return send, recv
+    
+def _send_recv(qube_to_e7awgsw, trigger_awg):
+    result = {}
+    d = qube_to_e7awgsw
+    if len(d) == 1:
+        qube = list(d.keys())[0]
+        e = d[qube]
+        awg_to_wave_sequence = e['awg_to_wavesequence']
+        capt_to_capt_param = e['capt_to_captparam']
+        s, r = send_recv_single(
+            qube.ipfpga,
+            awg_to_wave_sequence,
+            capt_to_capt_param,
+            trigger_awg[qube],
+        )
+        result[qube] = {}
+        result[qube]['send'] = s
+        result[qube]['recv'] = r
+    else:
+        raise ValueError('Multi Qube Sync is not implemented yet in meas.send_recv function.')
+    return result
+    
+def send_recv(ipfpga_to_e7awgsw):
+    """
+    Send と Recv を同期動作させる．現在は Qube 単体での動作にしか対応していないが，同じ Interface で
+    複数台同期に対応させる予定
+    """
+    
+    result = {}
+    d = ipfpga_to_e7awgsw
+    if len(d) == 1:
+        ipfpga = list(d.keys())[0]
+        e = d[ipfpga]
+        awg_to_wave_sequence = e['awg_to_wave_sequence']
+        capt_module_to_capt_param = e['capt_module_to_capt_param']
+        trigger_awg = e['trigger_awg']
+        s, r = send_recv_single(
+            ipfpga,
+            awg_to_wave_sequence,
+            capt_module_to_capt_param,
+            trigger_awg
+        )
+        result[ipfpga] = {}
+        result[ipfpga]['send'] = s
+        result[ipfpga]['recv'] = r
+    else:
+        raise ValueError('Multi Qube Sync is not implemented yet in meas.send_recv function.')
+    
+    return result
     
 # ------------------- will be obolete ---
     
-    
-class SendRecvAwgCtrl(AwgCtrl):
-    
-    def check_err(self, *awgs):
-        
-        e = super().check_err(*awgs)
-        if any(e):
-            raise IOError('AwgCtrl error.')
 
-    def start_wait(self, timeout, *awgs):
+# class SendRecvAwgCtrl(AwgCtrl):
+    
+#     def check_err(self, *awgs):
         
-        self.start_awgs(*awgs)
-        self.wait_for_awgs_to_stop(timeout, *awgs)
+#         e = super().check_err(*awgs)
+#         if any(e):
+#             raise IOError('AwgCtrl error.')
+
+#     def start_wait(self, timeout, *awgs):
+        
+#         self.start_awgs(*awgs)
+#         self.wait_for_awgs_to_stop(timeout, *awgs)
         
 
-class SendRecvCaptureCtrl(CaptureCtrl):
+# class SendRecvCaptureCtrl(CaptureCtrl):
     
-    def check_err(self, *capu):
+#     def check_err(self, *capu):
         
-        e = super().check_err(*capu)
-        if any(e):
-            raise IOError('CaptureCtrl error.')
+#         e = super().check_err(*capu)
+#         if any(e):
+#             raise IOError('CaptureCtrl error.')
             
-    def wait(self, timeout, *capu):
+#     def wait(self, timeout, *capu):
         
-        self.wait_for_capture_units_to_stop(timeout, *capu)
+#         self.wait_for_capture_units_to_stop(timeout, *capu)
         
-    def get_capture_data(self, *capu):
+#     def get_capture_data(self, *capu):
         
-        return CaptureData(super(), *capu)
+#         return CaptureData(super(), *capu)
         
-    def param(self, wave_seq):
+#     def param(self, wave_seq):
         
-        cl = additional_capture_length = 1e-6 # [s]
-        d = capture_delay = 0
-        ro_chunk = c = wave_seq.chunk(0)
+#         cl = additional_capture_length = 1e-6 # [s]
+#         d = capture_delay = 0
+#         ro_chunk = c = wave_seq.chunk(0)
         
-        capture_param = p = CaptureParam()
-        p.num_integ_sections = c.num_repeats # 積算区間数
+#         capture_param = p = CaptureParam()
+#         p.num_integ_sections = c.num_repeats # 積算区間数
         
-        # readout 波形の長さから, 追加で 1us キャプチャするためのキャプチャワード数を計算
-        sampling_rate = r = CaptureCtrl.SAMPLING_RATE
-        nw = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        cw = int(cl * r) // nw
-        cw = min(cw, c.num_blank_words - 1)
+#         # readout 波形の長さから, 追加で 1us キャプチャするためのキャプチャワード数を計算
+#         sampling_rate = r = CaptureCtrl.SAMPLING_RATE
+#         nw = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
+#         cw = int(cl * r) // nw
+#         cw = min(cw, c.num_blank_words - 1)
         
-        sum_section_len = s = c.num_words - c.num_blank_words + cw
-        num_blank_words = b = c.num_words - s
+#         sum_section_len = s = c.num_words - c.num_blank_words + cw
+#         num_blank_words = b = c.num_words - s
         
-        p.add_sum_section(s, b)
-        p.sum_start_word_no = 0
-        p.num_words_to_sum = CaptureParam.MAX_SUM_SECTION_LEN
-        p.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
-        p.capture_delay = int(d * r) // nw
+#         p.add_sum_section(s, b)
+#         p.sum_start_word_no = 0
+#         p.num_words_to_sum = CaptureParam.MAX_SUM_SECTION_LEN
+#         p.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
+#         p.capture_delay = int(d * r) // nw
         
-        # readout 波形のサンプル数とキャプチャするサンプル数が一致することを確認
-        # assert w.num_all_samples == p.num_samples_to_process
-        return p
+#         # readout 波形のサンプル数とキャプチャするサンプル数が一致することを確認
+#         # assert w.num_all_samples == p.num_samples_to_process
+#         return p
         
-    def set_trigger_awg(self, capm, awg):
+#     def set_trigger_awg(self, capm, awg):
         
-        self.select_trigger_awg(capm, awg)
-        self.enable_start_trigger(*CaptureModule.get_units(capm))
+#         self.select_trigger_awg(capm, awg)
+#         self.enable_start_trigger(*CaptureModule.get_units(capm))
         
         
-class SendRecvCaptureParam(CaptureParam):
+# class SendRecvCaptureParam(CaptureParam):
     
-    def __init__(self, wave_seq):
+#     def __init__(self, wave_seq):
         
-        cl = additional_capture_length = 1e-6 # [s]
-        d = capture_delay = 0
-        ro_chunk = c = wave_seq.chunk(0)
+#         cl = additional_capture_length = 1e-6 # [s]
+#         d = capture_delay = 0
+#         ro_chunk = c = wave_seq.chunk(0)
         
-        capture_param = p = CaptureParam()
-        p.num_integ_sections = c.num_repeats # 積算区間数
+#         capture_param = p = CaptureParam()
+#         p.num_integ_sections = c.num_repeats # 積算区間数
         
-        # readout 波形の長さから, 追加で 1us キャプチャするためのキャプチャワード数を計算
-        sampling_rate = r = CaptureCtrl.SAMPLING_RATE
-        nw = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        cw = int(cl * r) // nw
-        cw = min(cw, c.num_blank_words - 1)
+#         # readout 波形の長さから, 追加で 1us キャプチャするためのキャプチャワード数を計算
+#         sampling_rate = r = CaptureCtrl.SAMPLING_RATE
+#         nw = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
+#         cw = int(cl * r) // nw
+#         cw = min(cw, c.num_blank_words - 1)
         
-        sum_section_len = s = c.num_words - c.num_blank_words + cw
-        num_blank_words = b = c.num_words - s
+#         sum_section_len = s = c.num_words - c.num_blank_words + cw
+#         num_blank_words = b = c.num_words - s
         
-        p.add_sum_section(s, b)
-        p.sum_start_word_no = 0
-        p.num_words_to_sum = CaptureParam.MAX_SUM_SECTION_LEN
-        p.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
-        p.capture_delay = int(d * r) // nw
+#         p.add_sum_section(s, b)
+#         p.sum_start_word_no = 0
+#         p.num_words_to_sum = CaptureParam.MAX_SUM_SECTION_LEN
+#         p.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
+#         p.capture_delay = int(d * r) // nw
         
-        # readout 波形のサンプル数とキャプチャするサンプル数が一致することを確認
-        # assert w.num_all_samples == p.num_samples_to_process
+#         # readout 波形のサンプル数とキャプチャするサンプル数が一致することを確認
+#         # assert w.num_all_samples == p.num_samples_to_process
         
         
-class SendRecv(object):
+# class SendRecv(object):
     
-    def get_timestamp(self):
-        period = 1 / CaptureCtrl.SAMPLING_RATE
-        return np.arange(0, 10e-6, period)
+#     def get_timestamp(self):
+#         period = 1 / CaptureCtrl.SAMPLING_RATE
+#         return np.arange(0, 10e-6, period)
     
-    @classmethod
-    def gen_timestamp(cls, iq):
-        period = 1 / CaptureCtrl.SAMPLING_RATE
-        return np.linspace(0, len(iq) * period, len(iq))
+#     @classmethod
+#     def gen_timestamp(cls, iq):
+#         period = 1 / CaptureCtrl.SAMPLING_RATE
+#         return np.linspace(0, len(iq) * period, len(iq))
     
-    def __init__(self, ipfpga, awgs, capm, dulation=10e-6):
+#     def __init__(self, ipfpga, awgs, capm, dulation=10e-6):
         
-        self.ipaddr = ipfpga
-        self.awgs = awgs
-        self.iqs = [np.zeros(*self.get_timestamp().shape).astype(complex) for o in awgs]
-        self.capm = capm
-        self.capu = CaptureModule.get_units(capm)
-        self.data = None
-        self.timeout = 5
+#         self.ipaddr = ipfpga
+#         self.awgs = awgs
+#         self.iqs = [np.zeros(*self.get_timestamp().shape).astype(complex) for o in awgs]
+#         self.capm = capm
+#         self.capu = CaptureModule.get_units(capm)
+#         self.data = None
+#         self.timeout = 5
         
-    def prepare(self, awg_ctrl, cap_ctrl):
+#     def prepare(self, awg_ctrl, cap_ctrl):
         
-        awg_ctrl.initialize(*self.awgs) # 2 ms / awg ?
-        cap_ctrl.initialize(*self.capu) # 20ms
+#         awg_ctrl.initialize(*self.awgs) # 2 ms / awg ?
+#         cap_ctrl.initialize(*self.capu) # 20ms
 
-        cap_ctrl.set_trigger_awg(self.capm, self.awgs[0])
+#         cap_ctrl.set_trigger_awg(self.capm, self.awgs[0])
 
-        nww = num_wait_words = 0
-        trigw = None
-        for awg, iq in zip(self.awgs, self.iqs):
-            w = WaveSequence(nww, num_repeats = 1, enable_lib_log = True)
-            w.set_iq(iq)
-            awg_ctrl.set_wave_sequence(awg, w) # 6 ms
-            trigw = w
+#         nww = num_wait_words = 0
+#         trigw = None
+#         for awg, iq in zip(self.awgs, self.iqs):
+#             w = WaveSequence(nww, num_repeats = 1, enable_lib_log = True)
+#             w.set_iq(iq)
+#             awg_ctrl.set_wave_sequence(awg, w) # 6 ms
+#             trigw = w
 
-        p = cap_ctrl.param(trigw)
-        for u in self.capu:
-            cap_ctrl.set_capture_params(u, p) # 20 ms
+#         p = cap_ctrl.param(trigw)
+#         for u in self.capu:
+#             cap_ctrl.set_capture_params(u, p) # 20 ms
         
-    def ready(self, awg_ctrl, cap_ctrl):
+#     def ready(self, awg_ctrl, cap_ctrl):
         
-        t = self.timeout
-        self._ready(awg_ctrl)
+#         t = self.timeout
+#         self._ready(awg_ctrl)
 
-        awg_ctrl.wait_for_awgs_to_stop(t, *self.awgs)
-        cap_ctrl.wait_for_capture_units_to_stop(t + 5, *self.capu)
+#         awg_ctrl.wait_for_awgs_to_stop(t, *self.awgs)
+#         cap_ctrl.wait_for_capture_units_to_stop(t + 5, *self.capu)
 
-        awg_ctrl.check_err(*self.awgs)
-        cap_ctrl.check_err(*self.capu)
+#         awg_ctrl.check_err(*self.awgs)
+#         cap_ctrl.check_err(*self.capu)
 
-        self.data = cap_ctrl.get_capture_data(*self.capu)
+#         self.data = cap_ctrl.get_capture_data(*self.capu)
 
-    def _ready(self, awg_ctrl):
+#     def _ready(self, awg_ctrl):
         
-        awg_ctrl.start_awgs(*self.awgs)
+#         awg_ctrl.start_awgs(*self.awgs)
         
-    @property
-    def awg_ctrl(self):
+#     @property
+#     def awg_ctrl(self):
         
-        return SendRecvAwgCtrl(self.ipaddr)
+#         return SendRecvAwgCtrl(self.ipaddr)
         
-    @property
-    def cap_ctrl(self):
+#     @property
+#     def cap_ctrl(self):
         
-        return SendRecvCaptureCtrl(self.ipaddr)
+#         return SendRecvCaptureCtrl(self.ipaddr)
         
         
         
-class SendRecvMulti(SendRecv):
+# class SendRecvMulti(SendRecv):
     
-    def _ready(self, awg_ctrl):
+#     def _ready(self, awg_ctrl):
         
-        print('wait for started by sequencer.')
+#         print('wait for started by sequencer.')
         

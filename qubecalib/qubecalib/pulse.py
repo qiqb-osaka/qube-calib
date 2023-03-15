@@ -1,14 +1,17 @@
 import numpy as np
-from .meas import AwgCtrl, CaptureCtrl
 
-class LogicalWaveChunk(object):
-    def __init__(self, duration, amplitude=32767, sampling_rate=AwgCtrl.SAMPLING_RATE):
+
+SAMPLING_RATE = 500000000
+
+
+class Slot(object):
+    def __init__(self, duration, amplitude=1, sampling_rate=SAMPLING_RATE):
         self.duration = duration
         self.amplitude = amplitude
         self.sampling_rate = sampling_rate
         
     @property
-    def timestamp(self): # Get local timestamp in wave chunk.
+    def timestamp(self): # Get local timestamp in slot.
         d = self.duration
         s = self.sampling_rate
         return np.linspace(0, d, int(d * s * 1e-9), endpoint=False).astype(int)
@@ -17,10 +20,12 @@ class LogicalWaveChunk(object):
         raise NotImplementedError('{}.combine method shuld be implemented.'.format(type(self)))
         return None
     
+        
     
-class LogicalWaveChunkWithIQ(LogicalWaveChunk):
+    
+class SlotWithIQ(Slot):
     def combine(self, v):
-        if isinstance(v, LogicalWaveChunkWithIQ):
+        if isinstance(v, SlotWithIQ):
             o = Arbitrary(duration=self.duration, amplitude=self.amplitude, sampling_rate=self.sampling_rate)
             o.duration += v.duration
             sr, vr = o.sampling_rate, v.sampling_rate
@@ -30,9 +35,13 @@ class LogicalWaveChunkWithIQ(LogicalWaveChunk):
         else:
             raise ValueError('{}: Invalid combine object.'.format(self))
 
-    
-class Blank(LogicalWaveChunk):
-    def __init__(self, duration, sampling_rate=AwgCtrl.SAMPLING_RATE):
+    def renew(self):
+        s = SlotWithIQ(self.duration, self.amplitude, self.sampling_rate)
+        s.iq = np.zeros(s.iq.shape)
+        return s
+        
+class Blank(Slot):
+    def __init__(self, duration, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=0, sampling_rate=sampling_rate)
         
     def combine(self, v):
@@ -45,14 +54,16 @@ class Blank(LogicalWaveChunk):
             raise ValueError('{}: Invalid combine object.'.format(self))
         
         
-class RxBlank(LogicalWaveChunk):
-    def __init__(self, duration, sampling_rate=AwgCtrl.SAMPLING_RATE):
+class RxBlank(Slot):
+    def __init__(self, duration, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=0, sampling_rate=sampling_rate)
 
         
-class Read(LogicalWaveChunk):
-    def __init__(self, duration, sampling_rate=AwgCtrl.SAMPLING_RATE):
+class Read(Slot):
+    def __init__(self, duration, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=0, sampling_rate=sampling_rate)
+        self.global_timestamp = None
+        self.iq = None
         
     def combine(self, v):
         if isinstance(v, Read):
@@ -64,16 +75,16 @@ class Read(LogicalWaveChunk):
             raise ValueError('{}: Invalid combine object.'.format(self))
             
         
-class Arbitrary(LogicalWaveChunkWithIQ):
-    def __init__(self, duration, amplitude=32767, sampling_rate=AwgCtrl.SAMPLING_RATE):
+class Arbitrary(SlotWithIQ):
+    def __init__(self, duration, amplitude=1, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=amplitude, sampling_rate=sampling_rate)
         self.iq = np.zeros(self.timestamp.shape).astype(complex)
 
 Arbit = Arbitrary
 
 
-class Rectangular(LogicalWaveChunkWithIQ):
-    def __init__(self, duration, amplitude=32767, sampling_rate=AwgCtrl.SAMPLING_RATE):
+class Rectangular(SlotWithIQ):
+    def __init__(self, duration, amplitude=1, sampling_rate=SAMPLING_RATE):
         super().__init__(duration=duration, amplitude=amplitude, sampling_rate=sampling_rate)
         self.iq = np.ones(self.timestamp.shape).astype(complex)
 
@@ -82,7 +93,7 @@ Rect = Rectangular
 
 class Channel(list):
     
-    def __init__(self, wire, center_frequency, band_width=500e+6, *args, **kwargs):
+    def __init__(self, center_frequency, wire=None, band_width=500e+6, *args, **kwargs):
         self.wire = wire
         self.center_frequency = center_frequency
         self.band_width = 500e+6
@@ -90,8 +101,8 @@ class Channel(list):
     def simplify(self):
         return self
     
-    def __lshift__(self, chunk):
-        self.append(chunk)
+    def __lshift__(self, slot):
+        self.append(slot)
         return self
     
     def findall(self, klass):
@@ -99,20 +110,25 @@ class Channel(list):
     
     @property
     def duration(self):
-        t = 0
-        for o in self:
-            t += o.duration
-        return t
+        # t = 0
+        # for o in self:
+        #     t += o.duration
+        # return t
+        return sum([o.duration for o in self])
     
     def get_offset(self, x):
-        i = self.index(x)
-        t = 0
-        for o in self[:i]:
-            t += o.duration
-        return t
+        # i = self.index(x)
+        # t = 0
+        # for o in self[:i]:
+        #     t += o.duration
+        # return t
+        return sum([o.duration for o in self[:self.index(x)]])
     
     def get_timestamp(self, x): # Get local timestamp in channel.
         return x.timestamp + self.get_offset(x)
+    
+    def renew(self):
+        return Channel(self.center_frequency, self.wire, self.band_width)
     
     # Obsolete
     @property
@@ -125,8 +141,8 @@ class Channel(list):
 
 class RxChannel(Channel):
     
-    def __init__(self, wire, center_frequency, *args, **kwargs):
-        super().__init__(wire, center_frequency, *args, **kwargs)
+    def __init__(self, center_frequency, wire=None, *args, **kwargs):
+        super().__init__(center_frequency, wire, *args, **kwargs)
         self.timestamp = None
         self.iq = None
         
@@ -135,9 +151,10 @@ class Schedule(dict):
         super().__init__(*args, **kwargs)
         self.offset = offset # [ns]
         
-    def add_channel(self, key, wire, center_frequency):
-        self[key] = Channel(wire, center_frequency)
+    def add_channel(self, key, center_frequency, wire=None):
+        self[key] = Channel(center_frequency, wire)
         
     @property
     def timetable(self):
         return self
+

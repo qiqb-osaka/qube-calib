@@ -5,5 +5,7 @@
 log
 .DS_Store
 ._.DS_Store
+*.SOURCES.txt
 *.pickle
-qubecalib/build
+qubecalib/qubecalib.egg-info
+qubecalib/build/*

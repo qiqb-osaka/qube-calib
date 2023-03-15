@@ -1,4 +1,3 @@
-from . import alias
 from . import meas
 
 from abc import ABC, abstractmethod
@@ -13,6 +12,18 @@ import e7awgsw
 from typing import Final
 import os
 import subprocess
+import weakref
+
+if 'QUBECALIB_PATH_TO_ROOT' in os.environ:
+    PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT']
+else:
+    PATH_TO_ROOT: Final[str] = '.'
+PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
+PATH_TO_API: str = "{}/adi_api_mod".format(PATH_TO_ROOT)
+if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
+    PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
+else:
+    PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
 
 class LSI(ABC):
     
@@ -205,6 +216,7 @@ class AWG(AD9082):
         self.id = awg
         self.ipfpga = ipfpga
         self.nco = nco
+        self.port = None
         
     def _status(self):
         
@@ -221,14 +233,31 @@ class AWG(AD9082):
         
         o = meas.Send(self.ipfpga, [self], [meas.WaveSequenceCW()])
         o.terminate()
+        
+    def modulation_frequency(self, mhz):
+        
+        port = self.port()
+        lo_mhz = port.lo.mhz
+        cnco_mhz = port.nco.mhz
+        fnco_mhz = self.nco.mhz
+        usb_mhz = lo_mhz + (cnco_mhz + fnco_mhz)
+        lsb_mhz = lo_mhz - (cnco_mhz + fnco_mhz)
+        if port.mix.ssb == SSB.USB:
+            df_mhz = mhz - usb_mhz # mhz = usb_mhz + df
+        elif port.mix.ssb == SSB.LSB:
+            df_mhz = lsb_mhz - mhz # mhz = lsb_mhz - df
+        else:
+            raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
+        return df_mhz
 
-    
 class CPT(AD9082):
     
     def __init__(self, lsi, cptm, ipfpga):
         super().__init__(lsi)
         self.id = cptm
         self.ipfpga = ipfpga
+        self.port = None
+        self.ssb = SSB.USB
         
     def _status(self):
         
@@ -241,6 +270,20 @@ class CPT(AD9082):
         
         return None
         
+    def modulation_frequency(self, mhz):
+        
+        port = self.port()
+        lo_mhz = port.lo.mhz
+        cnco_mhz = port.nco.mhz
+        usb_mhz = lo_mhz + cnco_mhz
+        lsb_mhz = lo_mhz - cnco_mhz
+        if self.ssb == SSB.USB:
+            df_mhz = mhz - usb_mhz
+        elif self.ssb == SSB.LSB:
+            df_mhz = lsb_mhz - mhz
+        else:
+            raise ValueError('A port.captX.ssb shuld be instance of SSB(Enum).')
+        return df_mhz
         
 class DAC(AD9082):
     
@@ -290,10 +333,8 @@ class RF(object):
     
 class Port(object):
     
-    @abstractmethod
-    def __init__(self):
-        
-        pass
+    def __init__(self, qube):
+        self.qube = weakref.ref(qube)
         
     @abstractmethod
     def _status(self):
@@ -308,7 +349,8 @@ class Port(object):
         
 class Output(Port):
     
-    def __init__(self, dac, lo, mix):
+    def __init__(self, qube, dac, lo, mix):
+        super().__init__(qube)
         self._rf = RF(self._calc_rf)
         self.dac = dac
         self.lo = lo
@@ -362,7 +404,8 @@ class Output(Port):
         
 class Input(Port):
     
-    def __init__(self, adc, lo):
+    def __init__(self, qube, adc, lo):
+        super().__init__(qube)
         self._rf = RF(self._calc_rf)
         self.adc = adc
         self.lo = lo
@@ -400,7 +443,8 @@ class Input(Port):
         
 class Monitorout(Port):
     
-    def __init__(self):
+    def __init__(self, qube):
+        super().__init__(qube)
         self._rf = RF(self._calc_rf)
     
     def _calc_rf(self):
@@ -409,7 +453,8 @@ class Monitorout(Port):
         
 class NotAvailable(Port):
     
-    def __init__(self):
+    def __init__(self, qube):
+        super().__init__(qube)
         self._rf = RF(self._calc_rf)
         
     def _calc_rf(self):
@@ -419,22 +464,22 @@ class NotAvailable(Port):
         
 class Ctrl(Output):
     
-    def __init__(self, dac, lo, mix):
-        super().__init__(dac, lo, mix)
+    def __init__(self, qube, dac, lo, mix):
+        super().__init__(qube, dac, lo, mix)
         self.mix.ssb = SSB.LSB
 
 
 class Readout(Output):
     
-    def __init__(self, dac, lo, mix):
-        super().__init__(dac, lo, mix)
+    def __init__(self, qube, dac, lo, mix):
+        super().__init__(qube, dac, lo, mix)
         self.mix.ssb = SSB.USB
     
     
 class Pump(Output):
     
-    def __init__(self, dac, lo, mix):
-        super().__init__(dac, lo, mix)
+    def __init__(self, qube, dac, lo, mix):
+        super().__init__(qube, dac, lo, mix)
         self.mix.ssb = SSB.USB
     
     def _calc_rf(self):
@@ -445,20 +490,14 @@ class Pump(Output):
     
 class Readin(Input):
     
-    def __init__(self, adc, lo):
-        super().__init__(adc, lo)
+    def __init__(self, qube, adc, lo):
+        super().__init__(qube, adc, lo)
     
     
 class Monitorin(Input):
     
-    def __init__(self, adc, lo):
-        super().__init__(adc, lo)
-    
-
-PATH_TO_CONFIG = './.config'
-PATH_TO_BITFILE: str = "/home/qube/bin"
-PATH_TO_API: str = "./adi_api_mod"
-
+    def __init__(self, qube, adc, lo):
+        super().__init__(qube, adc, lo)
 
 class ConfigFPGA(object):
     
@@ -510,6 +549,20 @@ class QubeBase(qubelsi.qube.Qube):
     def __init__(self, addr, path, config=None):
         
         super().__init__(addr, path)
+        if config is None:
+            self.iplsi = addr
+            buf = addr.split('.')
+            buf[1] = '1'
+            self.ipfpga = '.'.join(buf)
+            buf = addr.split('.')
+            buf[1] = '2'
+            self.ipmulti = '.'.join(buf)
+            self._config = {
+                'iplsi': self.iplsi,
+                'ipfpga': self.ipfpga,
+                'ipmulti': self.ipmulti,
+            }
+            return
         self.bitfile: Final[str] = config['bitfile']
         self.ipfpga: Final[str] = config['ipfpga']
         self.iplsi: Final[str] = config['iplsi']
@@ -574,8 +627,9 @@ class QubeBase(qubelsi.qube.Qube):
 class QubeTypeA(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self.nports: Final[int] = 14
-        self._config['nports'] = self.nports
+        if config is not None:
+            self.nports: Final[int] = 14
+            self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
@@ -585,88 +639,120 @@ class QubeTypeA(QubeBase):
         e7 = e7awgsw
         
         self.port0: Final[Port] = Readout(
+            qube = self,
             dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
             lo = LMX2594(lsi = lo[0]),
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
+        for p in self.port0.awgs.values():
+            p.port = weakref.ref(self.port0)
         
         self.port1: Final[Port] = Readin(
-            adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [CaptureModule.U1,]),
+            qube = self,
+            adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[0]),
         )
+        self.port1.adc.capt0.port = weakref.ref(self.port1)
 
         self.port2: Final[Port] = Pump(
+            qube = self,
             dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U14, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
+        for p in self.port2.awgs.values():
+            p.port = weakref.ref(self.port2)
         
-        self.port3: Final[Port] = Monitorin(
+        self.port3: Final[Port] = Monitorout(qube = self)
+        
+        self.port4: Final[Port] = Monitorin(
+            qube = self,
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        
-        self.port4: Final[Port] = Monitorout()
+        self.port4.adc.capt0.port = weakref.ref(self.port4)
         
         self.port5: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2),(e7.AWG.U12, 3),(e7.AWG.U13, 4),]),
+            qube = self,
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4),(e7.AWG.U12, 3),(e7.AWG.U13, 2),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
+        for p in self.port5.awgs.values():
+            p.port = weakref.ref(self.port5)
         
         self.port6: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
+            qube = self,
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7),(e7.AWG.U9, 6),(e7.AWG.U10, 5),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
+        for p in self.port6.awgs.values():
+            p.port = weakref.ref(self.port6)
         
         self.port7: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0),(e7.AWG.U6, 1),(e7.AWG.U7, 2),]),
+            qube = self,
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 2),(e7.AWG.U6, 1),(e7.AWG.U7, 0),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
+        for p in self.port7.awgs.values():
+            p.port = weakref.ref(self.port7)
         
         self.port8: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3),(e7.AWG.U3, 4),(e7.AWG.U4, 5),]),
+            qube = self,
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 5),(e7.AWG.U3, 4),(e7.AWG.U4, 3),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
+        for p in self.port8.awgs.values():
+            p.port = weakref.ref(self.port8)
         
-        self.port9: Final[Port] = Monitorout()
-        
-        self.port10: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+        self.port9: Final[Port] = Monitorin(
+            qube = self,
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
+        self.port9.adc.capt0.port = weakref.ref(self.port9)
+        
+        self.port10: Final[Port] = Monitorout(qube = self)
         
         self.port11: Final[Port] = Pump(
+            qube = self,
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
             lo = LMX2594(lsi = lo[6]),
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
+        for p in self.port11.awgs.values():
+            p.port = weakref.ref(self.port11)
         
         self.port12: Final[Port] = Readin(
-            adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [CaptureModule.U0,]),
+            qube = self,
+            adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[7]),
         )
+        self.port12.adc.capt0.port = weakref.ref(self.port12)
         
         self.port13: Final[Port] = Readout(
+            qube = self,
             dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
             lo = LMX2594(lsi = lo[7]),
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
+        for p in self.port13.awgs.values():
+            p.port = weakref.ref(self.port13)
         
         self.readout0: Final[Port] = self.port0
         self.readin0: Final[Port] = self.port1
         self.pump0: Final[Port] = self.port2
-        self.auxin0: Final[Port] = self.port3
-        self.auxout0: Final[Port] = self.port4
+        self.auxout0: Final[Port] = self.port3
+        self.auxin0: Final[Port] = self.port4
         self.ctrl0: Final[Port] = self.port5
         self.ctrl1: Final[Port] = self.port6
         self.ctrl2: Final[Port]= self.port7
         self.ctrl3: Final[Port] = self.port8
-        self.auxout1: Final[Port] = self.port9
-        self.auxin1: Final[Port] = self.port10
+        self.auxin1: Final[Port] = self.port9
+        self.auxout1: Final[Port] = self.port10
         self.pump1: Final[Port] = self.port11
         self.readin1: Final[Port] = self.port12
         self.readout1: Final[Port] = self.port13
@@ -675,8 +761,9 @@ class QubeTypeA(QubeBase):
 class QubeTypeB(QubeBase):
     def __init__(self, addr, path, config):
         super().__init__(addr, path, config)
-        self.nports: Final[int] = 14
-        self._config['nports'] = self.nports
+        if config is not None:
+            self.nports: Final[int] = 14
+            self._config['nports'] = self.nports
         ip = self['ipfpga']
         dac = self.ad9082
         adc = self.ad9082
@@ -686,80 +773,108 @@ class QubeTypeB(QubeBase):
         e7 = e7awgsw
         
         self.port0: Final[Port] = Ctrl(
+            qube = self,
             dac = DAC(lsi = dac[0], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U15, 0),]),
             lo = LMX2594(lsi = lo[0]),
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
+        for p in self.port0.awgs.values():
+            p.port = weakref.ref(self.port0)
         
-        self.port1: Final[Port] = NotAvailable()
+        self.port1: Final[Port] = NotAvailable(qube = self)
         
         self.port2: Final[Port] = Ctrl(
+            qube = self,
             dac = DAC(lsi = dac[0], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U14, 1),]),
             lo = LMX2594(lsi = lo[1]),
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
+        for p in self.port2.awgs.values():
+            p.port = weakref.ref(self.port2)
         
-        self.port3: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [CaptureModule.U1,]),
+        self.port3: Final[Port] = Monitorout(qube = self)
+
+        self.port4: Final[Port] = Monitorin(
+            qube = self,
+            adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        
-        self.port4: Final[Port] = Monitorout()
-        
+        self.port4.adc.capt0.port = weakref.ref(self.port4)
+
         self.port5: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 2), (e7.AWG.U12, 3), (e7.AWG.U13, 4),]),
+            qube = self,
+            dac = DAC(lsi = dac[0], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U11, 4), (e7.AWG.U12, 3), (e7.AWG.U13, 2),]),
             lo = LMX2594(lsi = lo[2]),
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
+        for p in self.port5.awgs.values():
+            p.port = weakref.ref(self.port5)
         
         self.port6: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
+            qube = self,
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7), (e7.AWG.U9, 6), (e7.AWG.U10, 5),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
+        for p in self.port6.awgs.values():
+            p.port = weakref.ref(self.port6)
         
         self.port7: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 0), (e7.AWG.U6, 1), (e7.AWG.U7, 2),]),
+            qube = self,
+            dac = DAC(lsi = dac[1], ch = 0, ipfpga = ip, awgs = [(e7.AWG.U5, 2), (e7.AWG.U6, 1), (e7.AWG.U7, 0),]),
             lo = LMX2594(lsi = lo[4]),
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
+        for p in self.port7.awgs.values():
+            p.port = weakref.ref(self.port7)
         
         self.port8: Final[Port] = Ctrl(
-            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 3), (e7.AWG.U3, 4), (e7.AWG.U4, 5),]),
+            qube = self,
+            dac = DAC(lsi = dac[1], ch = 1, ipfpga = ip, awgs = [(e7.AWG.U0, 5), (e7.AWG.U3, 4), (e7.AWG.U4, 3),]),
             lo = LMX2594(lsi = lo[5]),
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
+        for p in self.port8.awgs.values():
+            p.port = weakref.ref(self.port8)
         
-        self.port9: Final[Port] = Monitorout()
-        
-        self.port10: Final[Port] = Monitorin(
-            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [CaptureModule.U0,]),
+        self.port9: Final[Port] = Monitorin(
+            qube = self,
+            adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
+        self.port9.adc.capt0.port = weakref.ref(self.port9)
+        
+        self.port10: Final[Port] = Monitorout(qube = self)
         
         self.port11: Final[Port] = Ctrl(
+            qube = self,
             dac = DAC(lsi = dac[1], ch = 2, ipfpga = ip, awgs = [(e7.AWG.U1, 6),]),
             lo = LMX2594(lsi = lo[6]),
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
+        for p in self.port11.awgs.values():
+            p.port = weakref.ref(self.port11)
         
-        self.port12: Final[Port] =  NotAvailable()
+        self.port12: Final[Port] =  NotAvailable(qube = self)
         
         self.port13: Final[Port] = Ctrl(
+            qube = self,
             dac = DAC(lsi = dac[1], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U2, 7),]),
             lo = LMX2594(lsi = lo[7]),
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
+        for p in self.port13.awgs.values():
+            p.port = weakref.ref(self.port13)
         
         self.ctrl4: Final[Port] = self.port0
         self.ctrl5: Final[Port] = self.port2
-        self.auxin0: Final[Port] = self.port3
-        self.auxout0: Final[Port] = self.port4
+        self.auxout0: Final[Port] = self.port3
+        self.auxin0: Final[Port] = self.port4
         self.ctrl0: Final[Port] = self.port5
         self.ctrl1: Final[Port] = self.port6
         self.ctrl2: Final[Port] = self.port7
         self.ctrl3: Final[Port] = self.port8
-        self.auxout1: Final[Port] = self.port9
-        self.auxin1: Final[Port] = self.port10
+        self.auxin1: Final[Port] = self.port9
+        self.auxout1: Final[Port] = self.port10
         self.ctrl6: Final[Port] = self.port11
         self.ctrl7: Final[Port] = self.port13

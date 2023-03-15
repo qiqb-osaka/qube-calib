@@ -17,7 +17,7 @@ class _Wire(object):
         self.port = port
         self.band = band
         self.cnco_mhz = 2000
-
+        
 class _RxWire(_Wire):
     def __init__(self, port, band, delay=0):
         super().__init__(port, band)
