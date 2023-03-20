@@ -7,7 +7,7 @@ import math
 import warnings
 import traceback
 import qubelsi.qube
-from e7awgsw import AWG, CaptureModule
+from e7awgsw import AWG, CaptureModule, AwgCtrl, CaptureCtrl
 import e7awgsw
 from typing import Final
 import os
@@ -231,8 +231,8 @@ class AWG(AD9082):
         
     def terminate(self):
         
-        o = meas.Send(self.ipfpga, [self], [meas.WaveSequenceCW()])
-        o.terminate()
+        with AwgCtrl(self.ipfpga) as a:
+            a.terminate_awgs(self.id)
         
     def modulation_frequency(self, mhz):
         
