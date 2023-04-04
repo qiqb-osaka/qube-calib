@@ -1414,15 +1414,17 @@ class QuBE_Server(DeviceServer):
 
     chassis_list     = c[QSConstants.DAC_CNXT_TAG].keys()
     tentative_master = list(chassis_list)[ 0 ]
-    clock            = self._sync_ctrl[tentative_master].read_time() + delay
+    clock            = self._sync_ctrl[tentative_master].read_time()
+    start_time = clock + delay
                                                             # In a case where we use master FPGA
                                                             # board as a trigger source    
                                                             # clock = self._master_ctrl.read_clock() + delay
     for chassis_name in chassis_list:
       skew              = self.chassisSkew[chassis_name]
       dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-      resp = self._sync_ctrl[chassis_name].add_sequencer(clock+skew,list(enabled_awgs))
-      print(chassis_name, 'kick at ', clock+skew, enabled_awgs)
+      resp = self._sync_ctrl[chassis_name].add_sequencer(16*(start_time//16+1)+skew,list(enabled_awgs))
+      print(f'read_clock from: {tentative_master}, clock: {clock}, delay: {delay}, skew: {skew}')
+      print(chassis_name, 'kick at ', 16*(start_time//16+1)+skew, enabled_awgs)
 
     return True
 
