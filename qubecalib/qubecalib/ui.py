@@ -238,7 +238,7 @@ class QuBEMonitor(object):
         
         
 class QubeControl(object):
-    
+
     def __init__(self, config_file_name, qube=None):
         
         self._container = {}
@@ -269,7 +269,29 @@ class QubeControl(object):
                     print("LinkStatus:")
                     for o in qube.ad9082:
                         print(o.get_jesd_status())
-        
+       
+        class BootButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Boot'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                qube, wout = c['qube'], c['wout']
+                wout.clear_output()
+                with wout:
+                    print('Boot from ROM sequence ... ', qube.adapter_au50)
+                os.environ['ADAPTER'] = qube.adapter_au50
+                cmd = 'vivado -mode batch -source /home/sio3/qube_multi/qube_client/tools/reboot_from_rom.tcl'.split(' ')
+                ret = subprocess.check_output(cmd, encoding='utf-8')
+                with wout:
+                    print(ret)
+                    qube.do_init(message_out=True)
+                    print("\nGPIO: {:04x}".format(qube.gpio.read_value()))
+                    print("LinkStatus:")
+                    for o in qube.ad9082:
+                        print(o.get_jesd_status())
+
+
         class ShowConfigButton(ipw.Button):
             def __init__(self, *args, **kw):
                 super().__init__(*args, **kw)
@@ -384,7 +406,20 @@ class QubeControl(object):
                 p.num_integ_sections = 1
                 # p.num_integ_sections = 10000
                 # p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
-                
+               
+                try:
+                    p1, p12 = qube.port1, qube.port12
+                    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                    r1.start(timeout=0.5)
+                    r12.start(timeout=0.5)
+                except AttributeError:
+                    p1, p12 = qube.port4, qube.port9
+                    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                    r1.start(timeout=0.5)
+                    r12.start(timeout=0.5)
+
                 p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
                 p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
                 r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
@@ -477,6 +512,7 @@ class QubeControl(object):
                 ConfigFPGAButton(),
             ]),
             ipw.HBox([
+                BootButton(),
                 ShowPortsButton(),
                 ShowPortStatusButton(),
             ]),

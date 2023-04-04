@@ -562,6 +562,7 @@ class QubeBase(qubelsi.qube.Qube):
                 'ipfpga': self.ipfpga,
                 'ipmulti': self.ipmulti,
             }
+            adapter_au50 = ''
             return
         self.bitfile: Final[str] = config['bitfile']
         self.ipfpga: Final[str] = config['ipfpga']
@@ -570,6 +571,7 @@ class QubeBase(qubelsi.qube.Qube):
         self.macfpga: Final[str] = config['macfpga']
         self.maclsi: Final[str] = config['maclsi']
         self.type: Final[str] = config['type']
+        self.adapter_au50: Final[str] = config['adapter_au50']
         self._config = config
         
     def __getitem__(self, v):
