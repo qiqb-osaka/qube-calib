@@ -203,6 +203,85 @@ def lmx2594_ad9082_do_init(self, ad9082_mode=True, readout_mode=False):
     return self.read_value(0x00)
 
 
+def show_status(qube):
+    print("GPIO: {:04x}".format(qube.gpio.read_value()))
+    print("LinkStatus:")
+    for o in qube.ad9082:
+        print(o.get_jesd_status())
+
+
+def boot_fpga_from_rom(qube):
+    os.environ['ADAPTER'] = qube.adapter_au50
+    cmd = 'vivado -mode batch -source /home/sio3/qube_multi/qube_client/tools/reboot_from_rom.tcl'.split(' ')
+    ret = subprocess.check_output(cmd, encoding='utf-8')
+    return ret
+
+
+def set_mixer_mode_to_usb_for_all(qube):
+    for k, v in qube.ports.items():
+        if isinstance(v, lib_qube.Output):
+            v.mix.ssb = lib_qube.SSB.USB
+
+
+def set_mixer_mode_to_lsb_for_all(qube):
+    for k, v in qube.ports.items():
+        if isinstance(v, lib_qube.Output):
+            v.mix.ssb = lib_qube.SSB.LSB
+
+
+def restore_mixer_mode_to_default_for_all(qube):
+    for k, v in qube.ports.items():
+        if isinstance(v, lib_qube.Ctrl):
+            v.mix.ssb = lib_qube.SSB.LSB
+        elif isinstance(v, lib_qube.Readout):
+            v.mix.ssb = lib_qube.SSB.USB
+        elif isinstance(v, lib_qube.Pump):
+            v.mix.ssb = lib_qube.SSB.USB
+
+
+def show_port_status(qube):
+    print("Port Status:")
+    for k, v in qube.ports.items():
+        print(k,v.status)
+
+
+def plot_recv(qube, c):
+    
+    p = meas.CaptureParam()
+    p.num_integ_sections = 1
+    p.add_sum_section(num_words=1024, num_post_blank_words=1)
+    p.capture_delay = 0
+    
+    try:
+        p1, p12 = qube.port1, qube.port12
+        r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+        r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+        r1.start(timeout=0.5)
+        r12.start(timeout=0.5)
+    except AttributeError:
+        p1, p12 = qube.port4, qube.port9
+        r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+        r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+        r1.start(timeout=0.5)
+        r12.start(timeout=0.5)
+    
+    p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+    p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+    r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
+    r.start(timeout=0.5)
+    
+    plt = MATPLOTLIB_PYPLOT
+    fig = plt.figure()
+    ax = fig.add_subplot(211)
+    ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+    ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+    ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
+    ax = fig.add_subplot(212)
+    ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+    ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+    ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
+    
+    return plt, fig
 
 
 class QuBEMonitor(object):
@@ -233,10 +312,6 @@ class QuBEMonitor(object):
         print(ret)
 
 
-
-    
-        
-        
 class QubeControl(object):
 
     def __init__(self, config_file_name, qube=None):
@@ -247,49 +322,50 @@ class QubeControl(object):
             c['qube'] = lib_qube.Qube.create(config_file_name)
         else:
             c['qube'] = qube
+        qube: Final[lib_qube.Qube] = c['qube']
         # c['wout'] = ipw.Output(layout={'border': '1px solid black'})
         c['wout'] = ipw.Output()
+        wout: Final[ipw.Output] = c['wout']
         c['fname'] = ipw.Text(description='', value=config_file_name, disabled=True)
         # c['mon'] = ipw.Checkbox(value=False, description='Enable Monitor4', disabled=False)
         # c['mon2'] = ipw.Checkbox(value=False, description='Enable Monitor9', disabled=False)
         c['mon'] = ipw.ToggleButtons(description='ADC0', options=['Readin1', 'Monitor4'], disabled=False)
         c['mon2'] = ipw.ToggleButtons(description='ADC1', options=['Readin12', 'Monitor9'], disabled=False)
         c['loopback'] = ipw.Checkbox(value=False, description='Switch Loopback', disabled=False)
+        c['maxtryad9082'] = ipw.IntText(value=5, description='Max Try:', disabled=False, layout=ipw.Layout(width='192px'))
         
         class ShowStatusButton(ipw.Button):
             def __init__(self, *args, **kw):
                 super().__init__(*args, **kw)
-                self.description = 'Show status'
+                self.description = 'Show link status'
                 self.on_click(self._on_click)
             def _on_click(self, e):
-                qube, wout = c['qube'], c['wout']
                 wout.clear_output()
                 with wout:
-                    print("GPIO: {:04x}".format(qube.gpio.read_value()))
-                    print("LinkStatus:")
-                    for o in qube.ad9082:
-                        print(o.get_jesd_status())
-       
+                    show_status(qube)
+
         class BootButton(ipw.Button):
             def __init__(self, *args, **kw):
                 super().__init__(*args, **kw)
-                self.description = 'Boot'
+                self.description = 'Boot Unit'
                 self.on_click(self._on_click)
             def _on_click(self, e):
-                qube, wout = c['qube'], c['wout']
+                # qube, wout = c['qube'], c['wout']
                 wout.clear_output()
                 with wout:
-                    print('Boot from ROM sequence ... ', qube.adapter_au50)
-                os.environ['ADAPTER'] = qube.adapter_au50
-                cmd = 'vivado -mode batch -source /home/sio3/qube_multi/qube_client/tools/reboot_from_rom.tcl'.split(' ')
-                ret = subprocess.check_output(cmd, encoding='utf-8')
+                    print('Boot FPGA from ROM sequence ... ', qube.adapter_au50)
+                #os.environ['ADAPTER'] = qube.adapter_au50
+                #cmd = 'vivado -mode batch -source /home/sio3/qube_multi/qube_client/tools/reboot_from_rom.tcl'.split(' ')
+                #ret = subprocess.check_output(cmd, encoding='utf-8')
+                #print(ret)
+                ret = boot_fpga_from_rom(qube)
+                print(ret)
                 with wout:
-                    print(ret)
-                    qube.do_init(message_out=True)
-                    print("\nGPIO: {:04x}".format(qube.gpio.read_value()))
-                    print("LinkStatus:")
-                    for o in qube.ad9082:
-                        print(o.get_jesd_status())
+                    print('Initialize LSI sequence ...')
+                qube.do_init(message_out=True)
+                with wout:
+                    show_status(qube)
+                restore_mixer_mode_to_default_for_all(qube)
 
 
         class ShowConfigButton(ipw.Button):
@@ -298,10 +374,10 @@ class QubeControl(object):
                 self.description = 'Show config'
                 self.on_click(self._on_click)
             def _on_click(self, e):
-                c['wout'].clear_output()
-                with c['wout']:
+                wout.clear_output()
+                with wout:
                     print("Config:")
-                    print(c['qube'].config)
+                    print(qube.config)
 
         class RestartAD9082Button(ipw.Button):
             def __init__(self, *args, **kw):
@@ -346,9 +422,10 @@ class QubeControl(object):
                     return True
                 
                 qube, wout, mon = c['qube'], c['wout'], c['mon']
+                max_try = c['maxtryad9082'].value
                 wout.clear_output()
                 with wout:
-                    for i in range(100):
+                    for i in range(max_try):
                         print(i+1, end=' ', flush=True)
                         for p in c['qube'].lmx2594_ad9082:
                             # p.do_init(ad9082_mode=True, message_out=False)
@@ -382,14 +459,12 @@ class QubeControl(object):
                 self.description = 'do_init'
                 self.on_click(self._on_click)
             def _on_click(self, e):
-                qube, wout = c['qube'], c['wout']
                 wout.clear_output()
                 with wout:
-                    qube.do_init(message_out=True)
-                    print("\nGPIO: {:04x}".format(qube.gpio.read_value()))
-                    print("LinkStatus:")
-                    for o in qube.ad9082:
-                        print(o.get_jesd_status())
+                    print('Initialize LSI sequence ...')
+                qube.do_init(message_out=True)
+                with wout:
+                    show_status(qube)
         
         class ShowRecvButton(ipw.Button):
             def __init__(self, *args, **kw):
@@ -397,48 +472,49 @@ class QubeControl(object):
                 self.description = 'Recv'
                 self.on_click(self._on_click)
             def _on_click(self, e):
-                assert [dict(c['qube'].ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)] == [True, True], 'Link status is unusual.'
+                assert [dict(qube.ad9082[i].get_jesd_status())['0x55E'] == '0xE0' for i in range(2)] == [True, True], 'Link status is unusual.'
                 
-                qube = c['qube']
-                p = meas.CaptureParam()
-                p.capture_delay = 100
-                p.add_sum_section(num_words=1024, num_post_blank_words=1)
-                p.num_integ_sections = 1
-                # p.num_integ_sections = 10000
-                # p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
-               
-                try:
-                    p1, p12 = qube.port1, qube.port12
-                    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
-                    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
-                    r1.start(timeout=0.5)
-                    r12.start(timeout=0.5)
-                except AttributeError:
-                    p1, p12 = qube.port4, qube.port9
-                    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
-                    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
-                    r1.start(timeout=0.5)
-                    r12.start(timeout=0.5)
-
-                p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
-                p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
-                r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
-                r.start(timeout=0.5)
+                #qube = c['qube']
+                #p = meas.CaptureParam()
+                #p.capture_delay = 100
+                #p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                #p.num_integ_sections = 1
+                #p.num_integ_sections = 10000
+                #p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
                 
-                plt = MATPLOTLIB_PYPLOT
-                fig = plt.figure()
-                ax = fig.add_subplot(211)
-                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
-                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
-                ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
-                ax = fig.add_subplot(212)
-                ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
-                ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
-                ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
+                plt, fig = plot_recv(qube,c)
                 
-                c['wout'].clear_output()
-                # import matplotlib
-                with c['wout']:
+                #try:
+                #    p1, p12 = qube.port1, qube.port12
+                #    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                #    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                #    r1.start(timeout=0.5)
+                #    r12.start(timeout=0.5)
+                #except AttributeError:
+                #    p1, p12 = qube.port4, qube.port9
+                #    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                #    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                #    r1.start(timeout=0.5)
+                #    r12.start(timeout=0.5)
+                #
+                #p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                #p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                #r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
+                #r.start(timeout=0.5)
+                #
+                #plt = MATPLOTLIB_PYPLOT
+                #fig = plt.figure()
+                #ax = fig.add_subplot(211)
+                #ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                #ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                #ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
+                #ax = fig.add_subplot(212)
+                #ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                #ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                #ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
+                
+                wout.clear_output()
+                with wout:
                     plt.show(fig)
                 plt.close()
                 
@@ -501,25 +577,62 @@ class QubeControl(object):
                     print("LinkStatus:")
                     for o in qube.ad9082:
                         print(o.get_jesd_status())
-                        
+
+        class MixerModeDefaultButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'Default'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                wout.clear_output()
+                restore_mixer_mode_to_default_for_all(qube)
+                with wout:
+                    show_port_status(qube)
+
+        class MixerModeLsbButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'LSB'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                wout.clear_output()
+                set_mixer_mode_to_lsb_for_all(qube)
+                with wout:
+                    show_port_status(qube)
+
+        class MixerModeUsbButton(ipw.Button):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.description = 'USB'
+                self.on_click(self._on_click)
+            def _on_click(self, e):
+                wout.clear_output()
+                set_mixer_mode_to_usb_for_all(qube)
+                with wout:
+                    show_port_status(qube)
+
         self.widgets = ipw.VBox([
             ipw.HBox([
                 c['fname'],
                 # CreateQubeInstanceButton(description='Create instance'),
+                BootButton(),
                 DoInitButton(),
                 KickSoftReset(),
-                ipw.Text(description='', value=c['qube'].bitfile, disabled=True),
-                ConfigFPGAButton(),
+                #ipw.Text(description='', value=c['qube'].bitfile, disabled=True),
+                #ConfigFPGAButton(),
             ]),
             ipw.HBox([
-                BootButton(),
-                ShowPortsButton(),
                 ShowPortStatusButton(),
+                MixerModeDefaultButton(),
+                MixerModeLsbButton(),
+                MixerModeUsbButton(),
             ]),
             ipw.HBox([
                 ShowStatusButton(),
+                ShowPortsButton(),
                 ShowConfigButton(),
                 ShowRecvButton(),
+                c['maxtryad9082'],
                 RestartAD9082Button(),
                 c['loopback'],
             ]),

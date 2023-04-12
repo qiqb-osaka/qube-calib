@@ -439,18 +439,26 @@ def _conv_channel_for_e7awgsw(channels, awg_capt, offset_time):
     if not isinstance(quantized_channel[-1], Blank):
         quantized_channel.append(Blank(duration=0))
     return quantized_channel
-    
+
+
 def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, trigger_awg=None):
     
-    channels = adda_to_channels
-    
     # どの ipfpga の qube が使われているかリストする
-    qube_ipfpgas = list(set([k.port().qube() for k, v in channels.items()]))
+    qubes = list(set([k.port().qube() for k, v in adda_to_channels.items()]))
     # このバージョンでは単一筐体を仮定しているので第一要素を ipfpga とする
-    ipfpga = qube_ipfpgas[0]
+    # ipfpga = qube_ipfpgas[0]
     # 
-    ipfpga_to_e7awgsw = {
-        ipfpga: {
+    qube_to_e7awgsw = {}
+    for qube in qubes:
+        channels = {k: v for k, v in adda_to_channels.items() if k.port().qube() == qube}
+        qube_to_e7awgsw[qube] = _conv_to_e7awgsw_single(qube, channels, offset, repeats, interval, trigger_awg)[qube]
+    
+    return qube_to_e7awgsw
+
+def _conv_to_e7awgsw_single(qube, channels, offset, repeats, interval, trigger_awg):
+
+    qube_to_e7awgsw = {
+        qube: {
             'awg_to_wavesequence': {},
             'capt_to_captparam': {},
             'awg_to_mergedchannel': {},
@@ -461,8 +469,8 @@ def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, tri
     
     # Wire に紐づけられている Channels を e7awgsw の制約のもとに変換する <- AWG の単位に変更する予定
     w2c = dict([(k, _conv_channel_for_e7awgsw(v, k, offset)) for k, v in channels.items()])
-    ipfpga_to_e7awgsw[ipfpga]['awg_to_mergedchannel'] = {k:v for k, v in w2c.items() if isinstance(k, AWG)}
-    ipfpga_to_e7awgsw[ipfpga]['capt_to_mergedchannel'] = {k:v for k, v in w2c.items() if isinstance(k, CPT)}
+    qube_to_e7awgsw[qube]['awg_to_mergedchannel'] = {k:v for k, v in w2c.items() if isinstance(k, AWG)}
+    qube_to_e7awgsw[qube]['capt_to_mergedchannel'] = {k:v for k, v in w2c.items() if isinstance(k, CPT)}
     # すべてのチャネルの全長を揃える
     m = max([v.duration for k, v in w2c.items()])
     for k, v in w2c.items():
@@ -525,9 +533,9 @@ def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, tri
     conv = conv_channel_to_e7awgsw_capture_param
     recv = [(w, conv(c, w.port().delay)) for w, c in w2c.items() if isinstance(w, CPT)]
     
-    ipfpga_to_e7awgsw[ipfpga]['awg_to_wavesequence'] = {f:s for f, s in send}
-    ipfpga_to_e7awgsw[ipfpga]['capt_to_captparam'] = {f:s for f, s in recv}
-#     print(ipfpga_to_e7awgsw)
+    qube_to_e7awgsw[qube]['awg_to_wavesequence'] = {f:s for f, s in send}
+    qube_to_e7awgsw[qube]['capt_to_captparam'] = {f:s for f, s in recv}
+#     print(qube_to_e7awgsw)
 #     # トリガを設定する
 #     # Readout_send の Wire のリストを得る
 #     if trigger_awg is None:
@@ -539,9 +547,9 @@ def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, tri
 #         else:
 #             # モニタ経路を使う場合必ずしも Readout がある訳ではない
 #             trigger_awg = [w.port.awg0 for w, c in w2c.items() if not isInputPort(w.port)][0]
-#     ipfpga_to_e7awgsw[ipfpga]['trigger_awg'] = trigger_awg
+#     qube_to_e7awgsw[qube]['trigger_awg'] = trigger_awg
     
-    return ipfpga_to_e7awgsw
+    return qube_to_e7awgsw
 
     
     
@@ -645,8 +653,7 @@ def conv_to_e7awgsw(schedule, repeats=1, interval=100000, trigger_awg=None):
     
     return ipfpga_to_e7awgsw
     
-    
-def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=None):
+def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=None, timeout=30):
     """
     Qube でのスケジュール実行．現状では同一筐体．
     """
@@ -655,16 +662,21 @@ def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=No
         result = send_recv(ipfpga_to_e7awgsw)
         ipfpga = list(ipfpga_to_e7awgsw.keys())[0]
         demodulate(schedule, ipfpga_to_e7awgsw[ipfpga], result[ipfpga]['recv'])
-    else:
-        qube_to_trigger = {o.port().qube(): o for o in triggers}
-        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
-        result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
-        # c2c = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel']
-        for qube in qube_to_trigger:
-            _demodulate(schedule, ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], adda_to_channels, offset=0)
-        # iq = result[qube]['recv'].data[CaptureModule.get_units(qube.port1.adc.capt0.id)[0]]
-        # convert_receive_data(ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], offset=0)
-        # RO_return0 = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'][qube.port1.adc.capt0]
+#    else:
+#        neorun(adda_to_channels, triggers, repeats, timeout, interval)
+#        ipfpga_to_e7awgsw = None
+#        result = None
+#
+#        qubes = list(set([k.port().qube() for k, v in adda_to_channels.items()]))
+#        qube_to_trigger = {o.port().qube(): o for o in triggers}
+#        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
+#        result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
+#        # c2c = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel']
+#        for qube in qube_to_trigger:
+#            _demodulate(schedule, ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], adda_to_channels, offset=0)
+#        # iq = result[qube]['recv'].data[CaptureModule.get_units(qube.port1.adc.capt0.id)[0]]
+#        # convert_receive_data(ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], offset=0)
+#        # RO_return0 = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'][qube.port1.adc.capt0]
     
     return ipfpga_to_e7awgsw, result
     
