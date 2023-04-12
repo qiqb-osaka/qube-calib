@@ -4,27 +4,25 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-e7awg-sw = {path = "./e7awg_sw"}
-qubelsi = {path = "./adi_api_mod/python/qubelsi"}
+e7awg-sw = {path = "./qube-calib/e7awg_sw"}
+qubelsi = {path = "./qube-calib/adi_api_mod/python/qubelsi"}
+qubecalib = {path = "./qube-calib/qubecalib"}
 sphinx = "*"
 sphinx-sizzle-theme = "*"
 numpy = "*"
 matplotlib = "*"
 pylabrad = "*"
-jupyterlab = "*"
+jupyterlab = ">=3"
 pyvisa = "*"
 pyvisa-py = "*"
-ipywidgets = "*"
-bokeh = "*"
-notebook = "*"
-jupyter-bokeh = "*"
-ipywidgets-bokeh = "*"
-lckr-jupyterlab-variableinspector = "*"
 scipy = "*"
-nbstripout = "*"
-jupyterlab-widgets = "*"
 pyyaml = "*"
-urllib3 = "*"
+ipywidgets = ">=7.6"
+plotly = "*"
+jupyter-dash = "*"
+pandas = "*"
+nbconvert = "*"
+scikit-learn = "*"
 
 [dev-packages]
 
