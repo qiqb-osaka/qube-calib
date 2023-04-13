@@ -7,5 +7,6 @@ log
 ._.DS_Store
 *.SOURCES.txt
 *.pickle
+Pipfile.lock
 qubecalib/qubecalib.egg-info
 qubecalib/build/*
