@@ -303,7 +303,10 @@ def multishot_multi(pulse, triggers, repeats=1, timeout=30, interval=50000):
             for qube in pulse.keys():
                 a = qube.ipmulti
                 s = SequencerClient(a, PORT)
-                r, a = s.add_sequencer(mark)
+                try:
+                    r, a = s.add_sequencer(mark+qube.skew)
+                except NameError as e:
+                    raise NameError('qube.skew is required')
                 
             for a in awgs:
                 a.result()
