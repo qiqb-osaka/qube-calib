@@ -662,18 +662,14 @@ def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=No
         result = send_recv(ipfpga_to_e7awgsw)
         ipfpga = list(ipfpga_to_e7awgsw.keys())[0]
         demodulate(schedule, ipfpga_to_e7awgsw[ipfpga], result[ipfpga]['recv'])
-#    else:
-#        neorun(adda_to_channels, triggers, repeats, timeout, interval)
-#        ipfpga_to_e7awgsw = None
-#        result = None
-#
+    else:
 #        qubes = list(set([k.port().qube() for k, v in adda_to_channels.items()]))
-#        qube_to_trigger = {o.port().qube(): o for o in triggers}
-#        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
-#        result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
+        qube_to_trigger = {o.port().qube(): o for o in triggers}
+        ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
+        result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
 #        # c2c = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel']
-#        for qube in qube_to_trigger:
-#            _demodulate(schedule, ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], adda_to_channels, offset=0)
+        for qube in qube_to_trigger:
+            _demodulate(schedule, ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], adda_to_channels, offset=0)
 #        # iq = result[qube]['recv'].data[CaptureModule.get_units(qube.port1.adc.capt0.id)[0]]
 #        # convert_receive_data(ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'], result[qube]['recv'], offset=0)
 #        # RO_return0 = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel'][qube.port1.adc.capt0]

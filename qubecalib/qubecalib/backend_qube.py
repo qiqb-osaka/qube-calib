@@ -1,7 +1,7 @@
 from .qube import CPT, AWG
 from .meas import WaveSequenceFactory, CaptureModule, CaptureCtrl, CaptureParam, AwgCtrl
 from .setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
-from .pulse import Read
+from .pulse import Read, Arbit
 import e7awgsw
 
 import os
@@ -263,7 +263,7 @@ def multishot(adda_to_channels, triggers, repeats=1, timeout=30, interval=50000)
     else:
         units = multishot_multi(qube_to_pulse, triggers, repeats, timeout, interval)
 
-    return units
+    return units, qube_to_pulse
 
 def duplicate_captparam(cp):
     p = CaptureParam()
@@ -304,7 +304,7 @@ def multishot_multi(pulse, triggers, repeats=1, timeout=30, interval=50000):
                 a = qube.ipmulti
                 s = SequencerClient(a, PORT)
                 try:
-                    r, a = s.add_sequencer(mark+qube.skew)
+                    r, a = s.add_sequencer(16*(mark//16+1)+qube.skew)
                 except NameError as e:
                     raise NameError('qube.skew is required')
                 
@@ -324,7 +324,7 @@ def multishot_multi(pulse, triggers, repeats=1, timeout=30, interval=50000):
     return units
 
 def multishot_single(qube, pulse, trigger, repeats=1, timeout=30, interval=50000):
-
+    
     def set_repeats(w, v):
         w.num_repeats = v
         return w
@@ -334,7 +334,7 @@ def multishot_single(qube, pulse, trigger, repeats=1, timeout=30, interval=50000
         n.num_integ_sections = v
         n.sel_dsp_units_to_enable(e7awgsw.DspUnit.INTEGRATION)
         return n
-
+    
     arg_send = tuple([(a, set_repeats(w,repeats)) for a, w in pulse.awg_to_wavesequence.items()])
     arg_recv = tuple([(c, tuple([enable_integration(i,repeats) for i in p])) for c, p in pulse.capt_to_captparam.items()])
     
@@ -343,13 +343,61 @@ def multishot_single(qube, pulse, trigger, repeats=1, timeout=30, interval=50000
          time.sleep(0.1)
          with Send(qube, *arg_send) as s:
              s.start()
-         units = [thread.result()]
-    
-    for captm, p in arg_recv:
-        channels = pulse.adda_to_channels[captm]
-        multishot_get_data(captm, channels)
+         units = thread.result()
+   
+    capt_to_mergedchannel = pulse.capt_to_mergedchannel
+    retrieve_data_into_mergedchannel(capt_to_mergedchannel, units)
+
+    capt_to_channels = {cpt: ch for cpt, ch in pulse.adda_to_channels.items() if isinstance(cpt, CPT)}
+
+    # 各 Readin チャネルの読み出しスロットに復調したデータを格納する
+    for cpt, chs in capt_to_channels.items():
+        for ch in chs:
+            is_Read_in_Channel = np.sum([True if isinstance(o, Read) else False for o in ch]) == True
+            if not is_Read_in_Channel:
+                continue
+            mch = capt_to_mergedchannel[cpt]
+
+            for slot in ch:
+                if not isinstance(slot, Read):
+                    continue
+                # スロットが含まれる多重化スロットを見つける
+                for mslot in mch:
+                    mt = mch.get_timestamp(mslot)
+                    st = ch.get_timestamp(slot)
+                    if mt[0] <= st[0] and st[-1] <= mt[-1]:
+                        break
+                slot.iq = np.zeros(len(st)).astype(complex)
+                slot.iq[:] = mslot.iq[(st[0] <= mt) & (mt <= st[-1])]
+                slot.iq *= np.exp(-1j * 2 * np.pi * cpt.modulation_frequency(ch.center_frequency*1e-6)*1e-3 * st)
+
+
+#    for captm, p in arg_recv:
+#        channels = pulse.adda_to_channels[captm]
+#        multishot_get_data(captm, channels)
     
     return units
+
+def retrieve_data_into_mergedchannel(capt_to_mergedchannel, units, offset=0):
+
+    cpt2ch = capt_to_mergedchannel
+    qubes = list(set([k.port().qube() for k, v in cpt2ch.items()]))
+    if not len(qubes) == 1:
+        raise ValueError('There must be single qube in capt_to_mergedchannel.')
+    qube = qubes[0]
+
+    # 各 Channel には Read スロットが単一であると仮定
+    # 各 CaptureModule に割り当てられた合成チャネルの時間軸とデータを生成する
+    for cpt, ch in cpt2ch.items():
+        # 合成チャネルの読み出しスロットにデータを埋め込む
+        for slt in ch:
+            if not isinstance(slt, Arbit):
+                continue
+            t_ns = ch.get_timestamp(slt)
+            slt.iq = np.zeros(len(t_ns)).astype(complex)
+            with CaptMemory(qube.ipfpga) as m:
+                for unit in units:
+                    slt.iq[:] = m.get_data(unit)
 
 def multishot_get_data(captm, channels):
 
@@ -358,7 +406,7 @@ def multishot_get_data(captm, channels):
 
     with CaptMemory(captm.port().qube().ipfpga) as m:
         for unit, channel in unit_to_channel.items():
-            slot = channel.findall(Read)[0]
+            slot = channel.findall(Read)[-1]
             v = m.get_data(unit)
             t = np.arange(0, len(v)) / CaptureCtrl.SAMPLING_RATE
             v *= np.exp(-1j * 2 * np.pi * captm.modulation_frequency(channel.center_frequency*1e-6)*1e+6 * t)
@@ -405,7 +453,7 @@ def singleshot_singleqube(qube, pulse, trigger, repeats, timeout=30, interval=50
          time.sleep(0.1)
          with Send(qube, *arg_send) as s:
              s.start()
-         units = [thread.result()]
+         units = thread.result()
     
     captm = arg_recv[0][0]
     for channel in pulse.adda_to_channels[captm]:
@@ -454,7 +502,10 @@ def singleshot_multiqube(pulse, triggers, repeats, timeout=30, interval=50000):
             for qube in pulse.keys():
                 a = qube.ipmulti
                 s = SequencerClient(a, PORT)
-                r, a = s.add_sequencer(mark)
+                try:
+                    r, a = s.add_sequencer(16*(mark//16+1)+qube.skew)
+                except NameError as e:
+                    raise NameError('qube.skew is required')
                 
             for a in awgs:
                 a.result()
