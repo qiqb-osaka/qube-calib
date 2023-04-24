@@ -212,7 +212,8 @@ def show_status(qube):
 
 def boot_fpga_from_rom(qube):
     os.environ['ADAPTER'] = qube.adapter_au50
-    cmd = 'vivado -mode batch -source /home/sio3/qube_multi/qube_client/tools/reboot_from_rom.tcl'.split(' ')
+    ROOT = lib_qube.QUBECALIB_PATH_TO_ROOT
+    cmd = 'vivado -mode batch -source {}/../qube_multi/qube_client/tools/reboot_from_rom.tcl'.format(ROOT).split(' ')
     ret = subprocess.check_output(cmd, encoding='utf-8')
     return ret
 
