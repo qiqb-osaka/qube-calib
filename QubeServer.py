@@ -95,18 +95,18 @@ class QSConstants:
   DAQ_CNCO_BITS      = 48
   DAQ_LO_RESOL       = 100                                  # - The minimum frequency resolution of
                                                             #   the analog local oscillators in MHz.
-  DAC_CNCO_RESOL     = 12000/2**13                          # - The frequency resolution of the
+  DAC_CNCO_RESOL     = 12000/2**11                          # - The frequency resolution of the
                                                             #   coarse NCOs in upconversion paths.
-                                                            #   unit in MHz; DAC_SAMPLE_R/2**13
-  DAC_FNCO_RESOL     = 2000/2**12                           # - The frequency resolution of the fine
+                                                            #   unit in MHz; DAC_SAMPLE_R/2**11
+  DAC_FNCO_RESOL     = 2000/2**10                           # - The frequency resolution of the fine
                                                             #   NCOs in digital upconversion paths.
-                                                            #   unit in MHz; DAC_SAMPLE_R/M=6/2**12
-  ADC_CNCO_RESOL     = 6000/2**13                           # - The frequency resolution of coarse
+                                                            #   unit in MHz; DAC_SAMPLE_R/M=6/2**10
+  ADC_CNCO_RESOL     = 6000/2**10                           # - The frequency resolution of coarse
                                                             #   NCOs in demodulation path
-                                                            #   unit in MHz; ADC_SAMPLE_R/2**13
-  ADC_FNCO_RESOL     = 1000/2**11                           # - The frequency resolution of fine
+                                                            #   unit in MHz; ADC_SAMPLE_R/2**10
+  ADC_FNCO_RESOL     = 1000/2**9                            # - The frequency resolution of fine
                                                             #   NCOs in demodulation path.
-                                                            #   unit in MHz; ADC_SAMPLE_R/M=6/2**11
+                                                            #   unit in MHz; ADC_SAMPLE_R/M=6/2**9
   DAQ_REPT_RESOL     = 10240                                # - The mininum time resolution of a
                                                             #   repetition time in nanoseconds.
   DAQ_SEQL_RESOL     = 128                                  # - The mininum time resolution of a
