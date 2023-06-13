@@ -1138,17 +1138,16 @@ class QuBE_Server(DeviceServer):
 
     chassis_list     = c[QSConstants.DAC_CNXT_TAG].keys()
     tentative_master = list(chassis_list)[ 0 ]
-    clock            = self._sync_ctrl[tentative_master].read_time()
-    start_time = clock + delay
+    clock            = (self._sync_ctrl[tentative_master].read_time() + delay) \
+                     & 0xfffffffffffffff0
                                                             # In a case where we use master FPGA
                                                             # board as a trigger source    
                                                             # clock = self._master_ctrl.read_clock() + delay
     for chassis_name in chassis_list:
       skew              = self.chassisSkew[chassis_name]
       dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-      resp = self._sync_ctrl[chassis_name].add_sequencer(16*(start_time//16+1)+skew,list(enabled_awgs))
-      print(f'read_clock from: {tentative_master}, clock: {clock}, delay: {delay}, skew: {skew}')
-      print(chassis_name, 'kick at ', 16*(start_time//16+1)+skew, enabled_awgs)
+      resp = self._sync_ctrl[chassis_name].add_sequencer(clock+skew,list(enabled_awgs))
+      print(chassis_name, 'kick at ', clock+skew, enabled_awgs)
 
     return True
 
@@ -3195,15 +3194,15 @@ if __name__ == '__main__':
 506:class QuBE_ControlLine(QuBE_Control_FPGA, QuBE_Control_LSI):
 513:class QuBE_ReadoutLine(QuBE_ControlLine):
 822:class QuBE_Server(DeviceServer):
-1782:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
-1820:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
-1827:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
-1835:class QuBE_Server_debug_otasuke(QuBE_Server):
-2038:class QuBE_Manager_Device(DeviceWrapper):
-2123:class QuBE_Manager_Server(DeviceServer):
-2459:class QuBESequencerMaster(QuBEMasterClient):
-2475:class QuBESequencerClient(SequencerClient):
-2511:class QuBECaptureCtrl(CaptureCtrl):
+1781:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
+1819:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
+1826:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
+1834:class QuBE_Server_debug_otasuke(QuBE_Server):
+2037:class QuBE_Manager_Device(DeviceWrapper):
+2122:class QuBE_Manager_Server(DeviceServer):
+2458:class QuBESequencerMaster(QuBEMasterClient):
+2474:class QuBESequencerClient(SequencerClient):
+2510:class QuBECaptureCtrl(CaptureCtrl):
 
 67:class QSConstants:
 184:  def __init__(self):
@@ -3297,99 +3296,99 @@ if __name__ == '__main__':
 1079:  def daq_start(self,c):
 1106:  def _readout_mux_start(self,c):
 1127:  def daq_trigger(self,c):
-1156:  def daq_stop(self,c):
-1177:  def daq_clear(self,c):
-1188:  def daq_terminate(self,c):
-1207:  def daq_timeout(self,c,t = None):
-1216:  def daq_sync_delay(self,c,t = None):
-1225:  def daq_channels(self,c):
-1239:  def upload_parameters(self,c,channels):
-1258:  def _register_awg_channels(self,c,dev,channels):
-1285:  def upload_readout_parameters(self,c,muxchs):
-1308:  def _register_mux_channels(self,c,dev,selected_mux_channels):
-1342:  def upload_waveform(self,c, wavedata,channels):
-1373:  def download_waveform(self,c,muxchs):
-1400:  def acquisition_count(self,c,acqcount = None):
-1413:  def acquisition_number(self,c,muxch,acqnumb = None):
-1440:  def acquisition_window(self,c,muxch,window = None):
-1476:  def acquisition_mode(self,c,muxch,mode = None):
-1535:  def acquisition_mux_enable(self,c,muxch = None):
-1576:  def filter_pre_coefficients(self,c,muxch,coeffs):
-1584:  def set_window_coefficients(self,c,muxch,coeffs):
-1592:  def acquisition_fir_coefficients(self,c,muxch,coeffs):
-1622:  def acquisition_window_coefficients(self,c,muxch,coeffs):
-1653:  def local_frequency(self,c,frequency = None):
-1680:  def coarse_tx_nco_frequency(self,c,frequency = None):
-1708:  def fine_tx_nco_frequency(self,c,channel,frequency = None):
-1744:  def coarse_rx_nco_frequency(self,c,frequency = None):
-1758:  def sideband_selection(self,c,sideband = None):
-1782:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
-1785:  def get_connected(self,*args,**kw):
-1798:  def get_microwave_switch(self):
-1809:  def set_microwave_switch(self,output):
-1820:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
-1823:  def get_connected(self,*args,**kw ):                      # @inlineCallbacks
-1827:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
-1830:  def get_connected(self,*args,**kw ):                      # @inlineCallbacks
-1835:class QuBE_Server_debug_otasuke(QuBE_Server):
-1840:  def __init__(self,*args,**kw):
-1843:  def instantiateChannel(self,name,channels,awg_ctrl,cap_ctrl,lsi_ctrl):
-1856:  def debug_awg_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
-1886:  def debug_cap_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
-1918:  def debug_auto_acquisition_fir_coefficients(self,c,muxch,bb_frequency,sigma = None):
-1959:  def debug_auto_acquisition_window_coefficients(self,c,muxch,bb_frequency):
-2008:  def debug_microwave_switch(self,c,output = None):
-2038:class QuBE_Manager_Device(DeviceWrapper):
-2041:  def connect(self, *args, **kw):                           # @inlineCallbacks
-2056:  def initialize(self):                                     # @inlineCallbacks
-2068:  def read_chassis_clock(self):
-2074:  def set_microwave_switch(self,value):                     # @inlineCallbacks
-2079:  def read_microwave_switch(self):
-2085:  def read_adconverter_jesd_status(self):
-2098:  def verbose(self):                                        # @property
-2101:  def verbose(self,x):                                      # @verbose.setter
-2106:  def ipaddr_synchronization(self):
-2110:  def synchronize_with_master(self):                        # @inlineCallbacks
-2123:class QuBE_Manager_Server(DeviceServer):
-2130:  def initServer(self):                                     # @inlineCallbacks
-2147:  def extract_links(self,link):
-2153:  def initContext(self, c):
-2158:  def findDevices(self):                                    # @inlineCallbacks
-2182:  def instantiateQube(self, name, role, iplsi, ipclk, channel_info):    # @inlineCallbacks
-2195:  def device_reinitialize(self,c):
-2210:  def microwave_switch(self,c,value = None):
-2243:  def debug_verbose_message(self,c,flag = None):
-2260:  def debug_jesd_status(self,c):
-2274:  def reconnect_master(self,c):
-2295:  def clear_master_clock(self,c):
-2320:  def read_master_clock(self,c):
-2337:  def read_chassis_clock(self,c):
-2355:  def synchronize_with_master(self,c):
-2371:  def _synchronize_with_master_clock(self,target_addr):     # @inlineCallbacks
-2392:  def _read_master_clock(self):                             # @inlineCallbacks
-2408:  def debug_select_synchronization_device(self,c):
-2425:  def debug_group_synchronization(self,c):
-2459:class QuBESequencerMaster(QuBEMasterClient):
-2463:  def __init__(self, ip_addr):
-2467:  def read_clock(self, value=0):                            # inherited from QuBEMasterClient
-2475:class QuBESequencerClient(SequencerClient):
-2480:  def __init__(self, ip_addr):
-2484:  def add_sequencer(self, value, awgs = range(16)):
-2501:  def read_time(self):
-2511:class QuBECaptureCtrl(CaptureCtrl):
-2513:  def terminate_capture_units(self, *capture_unit_id_list):
-2537:def basic_config():
-2739:def load_config(cxn,config):
-2750:def load_skew_zero(cxn):
-2772:def usage():
-2928:def test_control_ch(device_name):
-2957:def test_control_ch_bandwidth(device_name):
-3000:def test_readout_ch_bandwidth_and_spurious(device_name):
-3007:  def spectrum_analyzer_get():
-3047:  def experiment_nco_sweep( vault, fnco, file_idx ):
-3092:def test_timing_calib(cxn, device_name):
-3168:if server_select is None:
-3171:if __name__ == '__main__':
+1155:  def daq_stop(self,c):
+1176:  def daq_clear(self,c):
+1187:  def daq_terminate(self,c):
+1206:  def daq_timeout(self,c,t = None):
+1215:  def daq_sync_delay(self,c,t = None):
+1224:  def daq_channels(self,c):
+1238:  def upload_parameters(self,c,channels):
+1257:  def _register_awg_channels(self,c,dev,channels):
+1284:  def upload_readout_parameters(self,c,muxchs):
+1307:  def _register_mux_channels(self,c,dev,selected_mux_channels):
+1341:  def upload_waveform(self,c, wavedata,channels):
+1372:  def download_waveform(self,c,muxchs):
+1399:  def acquisition_count(self,c,acqcount = None):
+1412:  def acquisition_number(self,c,muxch,acqnumb = None):
+1439:  def acquisition_window(self,c,muxch,window = None):
+1475:  def acquisition_mode(self,c,muxch,mode = None):
+1534:  def acquisition_mux_enable(self,c,muxch = None):
+1575:  def filter_pre_coefficients(self,c,muxch,coeffs):
+1583:  def set_window_coefficients(self,c,muxch,coeffs):
+1591:  def acquisition_fir_coefficients(self,c,muxch,coeffs):
+1621:  def acquisition_window_coefficients(self,c,muxch,coeffs):
+1652:  def local_frequency(self,c,frequency = None):
+1679:  def coarse_tx_nco_frequency(self,c,frequency = None):
+1707:  def fine_tx_nco_frequency(self,c,channel,frequency = None):
+1743:  def coarse_rx_nco_frequency(self,c,frequency = None):
+1757:  def sideband_selection(self,c,sideband = None):
+1781:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
+1784:  def get_connected(self,*args,**kw):
+1797:  def get_microwave_switch(self):
+1808:  def set_microwave_switch(self,output):
+1819:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
+1822:  def get_connected(self,*args,**kw ):                      # @inlineCallbacks
+1826:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
+1829:  def get_connected(self,*args,**kw ):                      # @inlineCallbacks
+1834:class QuBE_Server_debug_otasuke(QuBE_Server):
+1839:  def __init__(self,*args,**kw):
+1842:  def instantiateChannel(self,name,channels,awg_ctrl,cap_ctrl,lsi_ctrl):
+1855:  def debug_awg_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
+1885:  def debug_cap_ctrl_reg(self,c, addr, offset, pos, bits, data = None):
+1917:  def debug_auto_acquisition_fir_coefficients(self,c,muxch,bb_frequency,sigma = None):
+1958:  def debug_auto_acquisition_window_coefficients(self,c,muxch,bb_frequency):
+2007:  def debug_microwave_switch(self,c,output = None):
+2037:class QuBE_Manager_Device(DeviceWrapper):
+2040:  def connect(self, *args, **kw):                           # @inlineCallbacks
+2055:  def initialize(self):                                     # @inlineCallbacks
+2067:  def read_chassis_clock(self):
+2073:  def set_microwave_switch(self,value):                     # @inlineCallbacks
+2078:  def read_microwave_switch(self):
+2084:  def read_adconverter_jesd_status(self):
+2097:  def verbose(self):                                        # @property
+2100:  def verbose(self,x):                                      # @verbose.setter
+2105:  def ipaddr_synchronization(self):
+2109:  def synchronize_with_master(self):                        # @inlineCallbacks
+2122:class QuBE_Manager_Server(DeviceServer):
+2129:  def initServer(self):                                     # @inlineCallbacks
+2146:  def extract_links(self,link):
+2152:  def initContext(self, c):
+2157:  def findDevices(self):                                    # @inlineCallbacks
+2181:  def instantiateQube(self, name, role, iplsi, ipclk, channel_info):    # @inlineCallbacks
+2194:  def device_reinitialize(self,c):
+2209:  def microwave_switch(self,c,value = None):
+2242:  def debug_verbose_message(self,c,flag = None):
+2259:  def debug_jesd_status(self,c):
+2273:  def reconnect_master(self,c):
+2294:  def clear_master_clock(self,c):
+2319:  def read_master_clock(self,c):
+2336:  def read_chassis_clock(self,c):
+2354:  def synchronize_with_master(self,c):
+2370:  def _synchronize_with_master_clock(self,target_addr):     # @inlineCallbacks
+2391:  def _read_master_clock(self):                             # @inlineCallbacks
+2407:  def debug_select_synchronization_device(self,c):
+2424:  def debug_group_synchronization(self,c):
+2458:class QuBESequencerMaster(QuBEMasterClient):
+2462:  def __init__(self, ip_addr):
+2466:  def read_clock(self, value=0):                            # inherited from QuBEMasterClient
+2474:class QuBESequencerClient(SequencerClient):
+2479:  def __init__(self, ip_addr):
+2483:  def add_sequencer(self, value, awgs = range(16)):
+2500:  def read_time(self):
+2510:class QuBECaptureCtrl(CaptureCtrl):
+2512:  def terminate_capture_units(self, *capture_unit_id_list):
+2536:def basic_config():
+2738:def load_config(cxn,config):
+2749:def load_skew_zero(cxn):
+2771:def usage():
+2927:def test_control_ch(device_name):
+2956:def test_control_ch_bandwidth(device_name):
+2999:def test_readout_ch_bandwidth_and_spurious(device_name):
+3006:  def spectrum_analyzer_get():
+3046:  def experiment_nco_sweep( vault, fnco, file_idx ):
+3091:def test_timing_calib(cxn, device_name):
+3167:if server_select is None:
+3170:if __name__ == '__main__':
 
 67:class QSConstants:
 187:class QSMessage:
@@ -3406,53 +3405,53 @@ if __name__ == '__main__':
 1053:  @setting(103, 'DAQ Length', length = ['v[s]'], returns = ['v[s]'])
 1078:  @setting(105, 'DAQ Start', returns = ['b'])
 1126:  @setting(106, 'DAQ Trigger', returns = ['b'])
-1155:  @setting(107, 'DAQ Stop', returns = ['b'])
-1176:  @setting(112, 'DAQ Clear', returns = ['b'])
-1187:  @setting(113, 'DAQ Terminate', returns = ['b'])
-1206:  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['v[s]'])
-1215:  @setting(111, 'DAQ Synchronization Delay', t = ['v[s]'], returns = ['v[s]'])
-1224:  @setting(110, 'DAC Channels', returns = ['w'])
-1238:  @setting(200, 'Upload Parameters', channels=['w','*w'],returns=['b'])
-1284:  @setting(201, 'Upload Readout Parameters', muxchs=['*w','w'],returns=['b'])
-1341:  @setting(202, 'Upload Waveform', wavedata =['*2c','*c'], channels=['*w','w'],returns=['b'])
-1372:  @setting(203, 'Download Waveform', muxchs = ['*w','w'], returns = ['*c','*2c'])
-1399:  @setting(300, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
-1412:  @setting(301, 'Acquisition Number', muxch = ['w'], acqnumb = ['w'], returns = ['w'])
-1439:  @setting(302, 'Acquisition Window', muxch = ['w'], window = ['*(v[s]v[s])'], returns=['*(v[s]v[s])'])
-1475:  @setting(303, 'Acquisition Mode', muxch = ['w'], mode = ['s'], returns=['s'])
-1534:  @setting(304, 'Acquisition Mux Enable', muxch = ['w'], returns = ['b','*b'])
-1575:  @setting(305, 'Filter Pre Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
-1583:  @setting(306, 'Average Window Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
-1591:  @setting(307, 'Acquisition FIR Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
-1621:  @setting(308, 'Acquisition Window Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
-1652:  @setting(400, 'Frequency Local', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1679:  @setting(401, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1707:  @setting(402, 'Frequency TX Fine NCO', channel = ['w'], frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1743:  @setting(403, 'Frequency RX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
-1757:  @setting(404, 'Frequency Sideband', sideband = ['s'], returns = ['s'])
-1782:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
-1820:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
-1827:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
-1835:class QuBE_Server_debug_otasuke(QuBE_Server):
-1855:  @setting(502, 'DEBUG AWG REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
-1885:  @setting(501, 'DEBUG CAP REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
-1917:  @setting(503, 'DEBUG Auto Acquisition FIR Coefficients', muxch = ['w'], bb_frequency = ['v[Hz]'], sigma = ['v[s]'], returns = ['b'])
-1958:  @setting(504, 'DEBUG Auto Acquisition Window Coefficients', muxch = ['w'], bb_frequency = ['v[Hz]'], returns = ['b'])
-2007:  @setting(505, 'DEBUG Microwave Switch', output = ['b'], returns = ['b'])
-2038:class QuBE_Manager_Device(DeviceWrapper):
-2123:class QuBE_Manager_Server(DeviceServer):
-2194:  @setting(100, 'Reset', returns=['b'])
-2209:  @setting(101, 'Microwave Switch', value = ['w'], returns = ['w'])
-2242:  @setting(200, 'Debug Verbose', flag = ['b'], returns=['b'])
-2259:  @setting(201, 'Debug JESD Status', returns  = ['*(isi)'])
-2273:  @setting(301, 'Reconnect Master Clock', returns = ['b'])
-2294:  @setting(302, 'Clear Master Clock', returns = ['b'])
-2319:  @setting(303, 'Read Master Clock', returns = ['ww'])
-2336:  @setting(305, 'Read Chassis Clock', returns = ['ww'])
-2354:  @setting(304, 'Synchronize Clock', returns = ['b'])
-2407:  @setting(306, 'Debug Select Synchronization Device')
-2424:  @setting(307, 'Debug Group Synchronization')
-2459:class QuBESequencerMaster(QuBEMasterClient):
-2475:class QuBESequencerClient(SequencerClient):
-2511:class QuBECaptureCtrl(CaptureCtrl):
+1154:  @setting(107, 'DAQ Stop', returns = ['b'])
+1175:  @setting(112, 'DAQ Clear', returns = ['b'])
+1186:  @setting(113, 'DAQ Terminate', returns = ['b'])
+1205:  @setting(108, 'DAQ Timeout', t = ['v[s]'], returns = ['v[s]'])
+1214:  @setting(111, 'DAQ Synchronization Delay', t = ['v[s]'], returns = ['v[s]'])
+1223:  @setting(110, 'DAC Channels', returns = ['w'])
+1237:  @setting(200, 'Upload Parameters', channels=['w','*w'],returns=['b'])
+1283:  @setting(201, 'Upload Readout Parameters', muxchs=['*w','w'],returns=['b'])
+1340:  @setting(202, 'Upload Waveform', wavedata =['*2c','*c'], channels=['*w','w'],returns=['b'])
+1371:  @setting(203, 'Download Waveform', muxchs = ['*w','w'], returns = ['*c','*2c'])
+1398:  @setting(300, 'Acquisition Count', acqcount = ['w'], returns = ['w'])
+1411:  @setting(301, 'Acquisition Number', muxch = ['w'], acqnumb = ['w'], returns = ['w'])
+1438:  @setting(302, 'Acquisition Window', muxch = ['w'], window = ['*(v[s]v[s])'], returns=['*(v[s]v[s])'])
+1474:  @setting(303, 'Acquisition Mode', muxch = ['w'], mode = ['s'], returns=['s'])
+1533:  @setting(304, 'Acquisition Mux Enable', muxch = ['w'], returns = ['b','*b'])
+1574:  @setting(305, 'Filter Pre Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
+1582:  @setting(306, 'Average Window Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
+1590:  @setting(307, 'Acquisition FIR Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
+1620:  @setting(308, 'Acquisition Window Coefficients', muxch = ['w'], coeffs = ['*c'], returns = ['b'])
+1651:  @setting(400, 'Frequency Local', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1678:  @setting(401, 'Frequency TX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1706:  @setting(402, 'Frequency TX Fine NCO', channel = ['w'], frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1742:  @setting(403, 'Frequency RX NCO', frequency = ['v[Hz]'], returns = ['v[Hz]'])
+1756:  @setting(404, 'Frequency Sideband', sideband = ['s'], returns = ['s'])
+1781:class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
+1819:class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
+1826:class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
+1834:class QuBE_Server_debug_otasuke(QuBE_Server):
+1854:  @setting(502, 'DEBUG AWG REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
+1884:  @setting(501, 'DEBUG CAP REG', addr = ['w'], offset = ['w'], pos = ['w'], bits = ['w'], data = ['w'], returns = ['w'])
+1916:  @setting(503, 'DEBUG Auto Acquisition FIR Coefficients', muxch = ['w'], bb_frequency = ['v[Hz]'], sigma = ['v[s]'], returns = ['b'])
+1957:  @setting(504, 'DEBUG Auto Acquisition Window Coefficients', muxch = ['w'], bb_frequency = ['v[Hz]'], returns = ['b'])
+2006:  @setting(505, 'DEBUG Microwave Switch', output = ['b'], returns = ['b'])
+2037:class QuBE_Manager_Device(DeviceWrapper):
+2122:class QuBE_Manager_Server(DeviceServer):
+2193:  @setting(100, 'Reset', returns=['b'])
+2208:  @setting(101, 'Microwave Switch', value = ['w'], returns = ['w'])
+2241:  @setting(200, 'Debug Verbose', flag = ['b'], returns=['b'])
+2258:  @setting(201, 'Debug JESD Status', returns  = ['*(isi)'])
+2272:  @setting(301, 'Reconnect Master Clock', returns = ['b'])
+2293:  @setting(302, 'Clear Master Clock', returns = ['b'])
+2318:  @setting(303, 'Read Master Clock', returns = ['ww'])
+2335:  @setting(305, 'Read Chassis Clock', returns = ['ww'])
+2353:  @setting(304, 'Synchronize Clock', returns = ['b'])
+2406:  @setting(306, 'Debug Select Synchronization Device')
+2423:  @setting(307, 'Debug Group Synchronization')
+2458:class QuBESequencerMaster(QuBEMasterClient):
+2474:class QuBESequencerClient(SequencerClient):
+2510:class QuBECaptureCtrl(CaptureCtrl):
 """
