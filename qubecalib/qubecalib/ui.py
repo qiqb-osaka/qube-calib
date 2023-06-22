@@ -334,6 +334,12 @@ class QubeControl(object):
         c['mon2'] = ipw.ToggleButtons(description='ADC1', options=['Readin12', 'Monitor9'], disabled=False)
         c['loopback'] = ipw.Checkbox(value=False, description='Switch Loopback', disabled=False)
         c['maxtryad9082'] = ipw.IntText(value=5, description='Max Try:', disabled=False, layout=ipw.Layout(width='192px'))
+        if qube._config['type'] == 'A':
+            c['mon'].value = 'Readin1'
+            c['mon2'].value = 'Readin12'
+        else:
+            c['mon'].value = 'Monitor4'
+            c['mon2'].value = 'Monitor9'
         
         class ShowStatusButton(ipw.Button):
             def __init__(self, *args, **kw):
