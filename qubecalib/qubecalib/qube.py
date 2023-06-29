@@ -7,7 +7,7 @@ import math
 import warnings
 import traceback
 import qubelsi.qube
-from e7awgsw import AWG, CaptureModule, AwgCtrl, CaptureCtrl
+from e7awgsw import AWG, CaptureModule, AwgCtrl, CaptureCtrl, CaptureUnit
 import e7awgsw
 from typing import Final
 import os
@@ -216,8 +216,12 @@ class AWG(AD9082):
         self.id = awg
         self.ipfpga = ipfpga
         self.nco = nco
-        self.port = None
-        
+        self._port = None
+       
+    @property
+    def port(self):
+        return self._port()
+
     def _status(self):
         
         return {
@@ -236,7 +240,7 @@ class AWG(AD9082):
         
     def modulation_frequency(self, mhz):
         
-        port = self.port()
+        port = self.port
         lo_mhz = port.lo.mhz
         cnco_mhz = port.nco.mhz
         fnco_mhz = self.nco.mhz
@@ -250,14 +254,29 @@ class AWG(AD9082):
             raise ValueError('A port.mix.ssb shuld be instance of SSB(Enum).')
         return df_mhz
 
+class UNIT(object):
+    def __init__(self, capt, unit):
+        self.id = unit
+        self.__capt = weakref.ref(capt)
+
+    @property
+    def capt(self):
+        return self.__capt()
+
 class CPT(AD9082):
     
     def __init__(self, lsi, cptm, ipfpga):
         super().__init__(lsi)
         self.id = cptm
         self.ipfpga = ipfpga
-        self.port = None
+        self._port = None
         self.ssb = SSB.USB
+        for i,u in enumerate(e7awgsw.CaptureModule.get_units(cptm)):
+            setattr(self,'unit{}'.format(i),UNIT(self,u))
+
+    @property
+    def port(self):
+        return self._port()
         
     def _status(self):
         
@@ -272,7 +291,7 @@ class CPT(AD9082):
         
     def modulation_frequency(self, mhz):
         
-        port = self.port()
+        port = self.port
         lo_mhz = port.lo.mhz
         cnco_mhz = port.nco.mhz
         usb_mhz = lo_mhz + cnco_mhz
@@ -334,7 +353,11 @@ class RF(object):
 class Port(object):
     
     def __init__(self, qube):
-        self.qube = weakref.ref(qube)
+        self._qube = weakref.ref(qube)
+
+    @property
+    def qube(self):
+        return self._qube()
         
     @abstractmethod
     def _status(self):
@@ -647,14 +670,14 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
         for p in self.port0.awgs.values():
-            p.port = weakref.ref(self.port0)
+            p._port = weakref.ref(self.port0)
         
         self.port1: Final[Port] = Readin(
             qube = self,
             adc = ADC(lsi = adc[0], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[0]),
         )
-        self.port1.adc.capt0.port = weakref.ref(self.port1)
+        self.port1.adc.capt0._port = weakref.ref(self.port1)
 
         self.port2: Final[Port] = Pump(
             qube = self,
@@ -663,7 +686,7 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         for p in self.port2.awgs.values():
-            p.port = weakref.ref(self.port2)
+            p._port = weakref.ref(self.port2)
         
         self.port3: Final[Port] = Monitorout(qube = self)
         
@@ -672,7 +695,7 @@ class QubeTypeA(QubeBase):
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        self.port4.adc.capt0.port = weakref.ref(self.port4)
+        self.port4.adc.capt0._port = weakref.ref(self.port4)
         
         self.port5: Final[Port] = Ctrl(
             qube = self,
@@ -681,7 +704,7 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         for p in self.port5.awgs.values():
-            p.port = weakref.ref(self.port5)
+            p._port = weakref.ref(self.port5)
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
@@ -690,7 +713,7 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         for p in self.port6.awgs.values():
-            p.port = weakref.ref(self.port6)
+            p._port = weakref.ref(self.port6)
         
         self.port7: Final[Port] = Ctrl(
             qube = self,
@@ -699,7 +722,7 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         for p in self.port7.awgs.values():
-            p.port = weakref.ref(self.port7)
+            p._port = weakref.ref(self.port7)
         
         self.port8: Final[Port] = Ctrl(
             qube = self,
@@ -708,14 +731,14 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         for p in self.port8.awgs.values():
-            p.port = weakref.ref(self.port8)
+            p._port = weakref.ref(self.port8)
         
         self.port9: Final[Port] = Monitorin(
             qube = self,
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
-        self.port9.adc.capt0.port = weakref.ref(self.port9)
+        self.port9.adc.capt0._port = weakref.ref(self.port9)
         
         self.port10: Final[Port] = Monitorout(qube = self)
         
@@ -726,14 +749,14 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
         for p in self.port11.awgs.values():
-            p.port = weakref.ref(self.port11)
+            p._port = weakref.ref(self.port11)
         
         self.port12: Final[Port] = Readin(
             qube = self,
             adc = ADC(lsi = adc[1], ch = 3, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[7]),
         )
-        self.port12.adc.capt0.port = weakref.ref(self.port12)
+        self.port12.adc.capt0._port = weakref.ref(self.port12)
         
         self.port13: Final[Port] = Readout(
             qube = self,
@@ -742,7 +765,7 @@ class QubeTypeA(QubeBase):
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
         for p in self.port13.awgs.values():
-            p.port = weakref.ref(self.port13)
+            p._port = weakref.ref(self.port13)
         
         self.readout0: Final[Port] = self.port0
         self.readin0: Final[Port] = self.port1
@@ -781,7 +804,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[0], ad5328 = AD5328(lsi = vatt, ch = 0)),
         )
         for p in self.port0.awgs.values():
-            p.port = weakref.ref(self.port0)
+            p._port = weakref.ref(self.port0)
         
         self.port1: Final[Port] = NotAvailable(qube = self)
         
@@ -792,7 +815,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[1], ad5328 = AD5328(lsi = vatt, ch = 1)),
         )
         for p in self.port2.awgs.values():
-            p.port = weakref.ref(self.port2)
+            p._port = weakref.ref(self.port2)
         
         self.port3: Final[Port] = Monitorout(qube = self)
 
@@ -801,7 +824,7 @@ class QubeTypeB(QubeBase):
             adc = ADC(lsi = adc[0], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U1,]),
             lo = LMX2594(lsi = lo[1]),
         )
-        self.port4.adc.capt0.port = weakref.ref(self.port4)
+        self.port4.adc.capt0._port = weakref.ref(self.port4)
 
         self.port5: Final[Port] = Ctrl(
             qube = self,
@@ -810,7 +833,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[2], ad5328 = AD5328(lsi = vatt, ch = 2)),
         )
         for p in self.port5.awgs.values():
-            p.port = weakref.ref(self.port5)
+            p._port = weakref.ref(self.port5)
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
@@ -819,7 +842,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
         for p in self.port6.awgs.values():
-            p.port = weakref.ref(self.port6)
+            p._port = weakref.ref(self.port6)
         
         self.port7: Final[Port] = Ctrl(
             qube = self,
@@ -828,7 +851,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[4], ad5328 = AD5328(lsi = vatt, ch = 4)),
         )
         for p in self.port7.awgs.values():
-            p.port = weakref.ref(self.port7)
+            p._port = weakref.ref(self.port7)
         
         self.port8: Final[Port] = Ctrl(
             qube = self,
@@ -837,14 +860,14 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[5], ad5328 = AD5328(lsi = vatt, ch = 5)),
         )
         for p in self.port8.awgs.values():
-            p.port = weakref.ref(self.port8)
+            p._port = weakref.ref(self.port8)
         
         self.port9: Final[Port] = Monitorin(
             qube = self,
             adc = ADC(lsi = adc[1], ch = 2, ipfpga = ip, cpts = [e7.CaptureModule.U0,]),
             lo = LMX2594(lsi = lo[6]),
         )
-        self.port9.adc.capt0.port = weakref.ref(self.port9)
+        self.port9.adc.capt0._port = weakref.ref(self.port9)
         
         self.port10: Final[Port] = Monitorout(qube = self)
         
@@ -855,7 +878,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[6], ad5328 = AD5328(lsi = vatt, ch = 6)),
         )
         for p in self.port11.awgs.values():
-            p.port = weakref.ref(self.port11)
+            p._port = weakref.ref(self.port11)
         
         self.port12: Final[Port] =  NotAvailable(qube = self)
         
@@ -866,7 +889,7 @@ class QubeTypeB(QubeBase):
             mix = ADRF6780(lsi = mix[7], ad5328 = AD5328(lsi = vatt, ch = 7)),
         )
         for p in self.port13.awgs.values():
-            p.port = weakref.ref(self.port13)
+            p._port = weakref.ref(self.port13)
         
         self.ctrl4: Final[Port] = self.port0
         self.ctrl5: Final[Port] = self.port2
