@@ -444,13 +444,13 @@ def _conv_channel_for_e7awgsw(channels, awg_capt, offset_time):
 def _conv_to_e7awgsw(adda_to_channels, offset=0, repeats=1, interval=100000, trigger_awg=None):
     
     # どの ipfpga の qube が使われているかリストする
-    qubes = list(set([k.port().qube() for k, v in adda_to_channels.items()]))
+    qubes = list(set([k.port.qube for k, v in adda_to_channels.items()]))
     # このバージョンでは単一筐体を仮定しているので第一要素を ipfpga とする
     # ipfpga = qube_ipfpgas[0]
     # 
     qube_to_e7awgsw = {}
     for qube in qubes:
-        channels = {k: v for k, v in adda_to_channels.items() if k.port().qube() == qube}
+        channels = {k: v for k, v in adda_to_channels.items() if k.port.qube == qube}
         qube_to_e7awgsw[qube] = _conv_to_e7awgsw_single(qube, channels, offset, repeats, interval, trigger_awg)[qube]
     
     return qube_to_e7awgsw
@@ -531,7 +531,7 @@ def _conv_to_e7awgsw_single(qube, channels, offset, repeats, interval, trigger_a
             
         return p
     conv = conv_channel_to_e7awgsw_capture_param
-    recv = [(w, conv(c, w.port().delay)) for w, c in w2c.items() if isinstance(w, CPT)]
+    recv = [(w, conv(c, w.port.delay)) for w, c in w2c.items() if isinstance(w, CPT)]
     
     qube_to_e7awgsw[qube]['awg_to_wavesequence'] = {f:s for f, s in send}
     qube_to_e7awgsw[qube]['capt_to_captparam'] = {f:s for f, s in recv}
@@ -663,8 +663,8 @@ def run(schedule, repeats=1, interval=100000, adda_to_channels=None, triggers=No
         ipfpga = list(ipfpga_to_e7awgsw.keys())[0]
         demodulate(schedule, ipfpga_to_e7awgsw[ipfpga], result[ipfpga]['recv'])
     else:
-#        qubes = list(set([k.port().qube() for k, v in adda_to_channels.items()]))
-        qube_to_trigger = {o.port().qube(): o for o in triggers}
+#        qubes = list(set([k.port.qube for k, v in adda_to_channels.items()]))
+        qube_to_trigger = {o.port.qube: o for o in triggers}
         ipfpga_to_e7awgsw = _conv_to_e7awgsw(adda_to_channels, offset=schedule.offset, repeats=repeats, interval=interval)
         result = _send_recv(ipfpga_to_e7awgsw, trigger_awg=qube_to_trigger)
 #        # c2c = ipfpga_to_e7awgsw[qube]['capt_to_mergedchannel']
