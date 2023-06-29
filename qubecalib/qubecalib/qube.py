@@ -1,5 +1,6 @@
 from . import meas
 
+import sys
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 import yaml
@@ -14,16 +15,19 @@ import os
 import subprocess
 import weakref
 
+VERSION = '1.5.0'
+
 if 'QUBECALIB_PATH_TO_ROOT' in os.environ:
     PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT']
 else:
     PATH_TO_ROOT: Final[str] = '.'
 PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
-PATH_TO_API: str = "{}/adi_api_mod".format(PATH_TO_ROOT)
+PATH_TO_API: str = "{}/../adi_api_mod".format(PATH_TO_ROOT)
 if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
     PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
 else:
     PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
+sys.path.append(os.path.join(PATH_TO_ROOT,'..'))
 
 class LSI(ABC):
     
