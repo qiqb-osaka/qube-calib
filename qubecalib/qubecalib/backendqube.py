@@ -678,7 +678,12 @@ def send_recv(*setup,trigs={},delay=1,timeout=30):
     if len(setup_qube.keys()) == 1: # standalone mode
         send, recv = split_send_recv(*setup)
         if send and recv:
-            rslt = standalone_send_recv(*setup,trig=trigs[list(setup_qube.keys())[0]],timeout=timeout)
+            q = list(setup_qube.keys())[0]
+            if q in trigs:
+                trig = trigs[q]
+            else:
+                trig, _ = send[0]
+            rslt = standalone_send_recv(*setup,trig=trig,timeout=timeout)
         elif send and not recv:
             rslt = standalone_send(*setup)
         elif not send and recv:
