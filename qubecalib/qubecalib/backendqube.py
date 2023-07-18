@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 import warnings
 import datetime
 import numpy as np
-from e7awgsw import AwgCtrl, CaptureCtrl
+from e7awgsw import AwgCtrl, CaptureCtrl, DspUnit, DspUnit
 # from e7awgsw import AwgCtrl, CaptureCtrl, CaptureParam, CaptureModule, AWG
 # from qubecalib.qube import CPT
 # from qubecalib.meas import WaveSequenceFactory
@@ -209,14 +209,32 @@ class Recv(CaptureCtrl):
         self.check_err(*self.units)
     
     def get(self):
+        
+        return {u: self._get(u, p) for u, p in self.parms}
 
-        rst = {}
-        for u, p in self.parms:
-            n = self.num_captured_samples(u.id)
-            c = np.array(self.get_capture_data(u.id, n))
-            self.check_err(u.id)
-            rst[u] = c[:,0] + 1j * c[:,1]
-        return rst
+
+    def _get(self, u, p):
+
+        u = u.id if isinstance(u,UNIT) else u
+        l = p.num_integ_sections
+        m = len(p.sum_section_list)
+        n = self.num_captured_samples(u)
+        if DspUnit.CLASSIFICATION in p.dsp_units_enabled:
+            d = np.array(list(self.get_classification_results(u, n)))
+        else:
+            c = np.array(self.get_capture_data(u, n))
+            d = c[:,0] + 1j * c[:,1]
+        if DspUnit.INTEGRATION in p.dsp_units_enabled:
+            d = d.reshape(1,-1)
+        else:
+            d = d.reshape(l,-1)
+        if DspUnit.SUM in p.dsp_units_enabled:
+            d = np.hsplit(d, list(range(m)[1:]))
+        else:
+            d = np.hsplit(d, [w * p.NUM_SAMPLES_IN_ADC_WORD for w,b in p.sum_section_list[:-1]])
+            d = [di.transpose() for di in d]
+        
+        return d
 
     
 #     def check_err(self, *units):
