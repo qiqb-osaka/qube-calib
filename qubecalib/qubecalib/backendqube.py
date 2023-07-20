@@ -638,7 +638,7 @@ def standalone_recv(*setup,timeout=30):
         d = c.get()
     return d
 
-def stanadlone_send(*setup):
+def standalone_send(*setup):
     with Send(*setup) as c:
         c.send()
 
