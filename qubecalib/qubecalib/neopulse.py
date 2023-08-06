@@ -330,4 +330,21 @@ def plot_setup(fig,setup,capture_delay=0):
                 ax.add_patch(patches.Rectangle(xy=(begin,-32767),width=width,height=2*32767))
                 begin += width + b
                 ax.set_ylim(-32767*1.2,32767*1.2)
-    
+
+def plot_sequence(fig,sequence):
+    for i,q in enumerate(sequence):
+        if i == 0:
+            ax = ax1 = fig.add_subplot(len(sequence),1,i+1)
+        else:
+            ax = fig.add_subplot(len(sequence),1,i+1, sharex=ax1)
+        for s in q:
+            if isinstance(s,Range):
+                begin = int(s.begin)
+                width = int(s.width)
+                ax.add_patch(patches.Rectangle(xy=(begin,-1),width=width,height=2))
+                ax.set_ylim(-1.2,1.2)
+            else:
+                t = s.sampling_points
+                ax.plot(t,np.real(s.iq))
+                ax.plot(t,np.imag(s.iq))
+                ax.set_ylim(-1.2,1.2)
