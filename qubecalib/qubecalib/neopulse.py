@@ -70,42 +70,42 @@ class ContextNode ( object ):
 
 class Slot ( ContextNode, HasTraits ):
 
-    begin = Float(-2*nS)
-    duration = Float(-2*nS)
-    end = Float(-2*nS)
+    begin = Float(None,allow_none=True)
+    duration = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
 
-    def __init__(self,**kw):
+    def __init__(self,begin=None,duration=None,end=None,**kw):
 
         self.__mute__ = False
-
-        # kw に duration が含まれていれば優先してセットする
-        if 'duration' in kw and kw['duration'] != -2:
-            self.duration = kw['duration']
-            del kw['duration']
+        
+        if begin != None and duration != None and end != None:
+            raise ValueError('Simultaneously setting "begin", "end" and "duration" is not possible.')
+        if duration != None:
+            self.duration = duration
+        if begin != None:
+            self.begin = begin
+        if end != None:
+            self.end = end
         super().__init__(**kw)
-
+    
     def replace(self):
         
-        self.__mute__ = True
-        self.begin = -2*nS
-        self.end = -2*nS
-        self.__mute__ = False
+        self.begin = None
+        self.end = None
         
     @observe("begin")
     def notify_begin_change(self,e):
-        if self.__mute__:
-            return
-        if self.duration == -2:
+        if self.duration == None:
             raise ValueError("'duration' member valiable is not initialized.")
-        self.end = self.begin + self.duration
+        if e['new'] != None:
+            self.end = self.begin + self.duration
         
     @observe("end")
     def notify_end_change(self,e):
-        if self.__mute__:
-            return
-        if self.duration == -2:
+        if self.duration == None:
             raise ValueError("'duration' member valiable is not initialized.")
-        self.begin = self.end - self.duration
+        if e['new'] != None:
+            self.begin = self.end - self.duration
         
         
 class ChannelMixin ( object ):
@@ -121,16 +121,20 @@ class SlotWithIQ ( Slot ):
     
     def __init__(self,**kw):
         
-        self.iq = None
+        self.__iq__ = None
         super().__init__(**kw)
 
     def update_iq(self):
         raise NotImplementedError()
     
+    @property
+    def iq(self):
+        self.update_iq()
+        return self.__iq__
+    
     @observe("duration")
     def notify_duration_change(self,e):
-        self.iq = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(complex) # iq data
-        self.update_iq()
+        self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(complex) # iq data
         
     @property
     def sampling_points(self):
@@ -138,7 +142,7 @@ class SlotWithIQ ( Slot ):
         
     @property
     def sampling_points_zero(self):
-        return np.arange(0,len(self.iq)) * self.SAMPLING_PERIOD # sampling points [ns]
+        return np.arange(0,len(self.__iq__)) * self.SAMPLING_PERIOD # sampling points [ns]
 
 
 class Arbit ( SlotWithIQ, ChannelMixin ):
@@ -181,12 +185,12 @@ class RaisedCosFlatTop ( SlotWithIQ, ChannelMixin ):
     def update_iq(self):
 
         t = self.sampling_points_zero
-        tz = self.duration
+        flattop_duration = self.duration - self.rise_time * 2
 
         t1 = 0
         t2 = t1 + self.rise_time # 立ち上がり完了時刻
-        t3 = self.duration - self.rise_time # 立ち下がり開始時刻 
-        t4 = self.duration # 立ち下がり完了時刻 
+        t3 = t2 + flattop_duration # 立ち下がり開始時刻 
+        t4 = t3 + self.rise_time # 立ち下がり完了時刻 
 
         cond12 = (t1 <= t) & (t < t2) # 立ち上がり時間領域の条件ブール値
         cond23 = (t2 <= t) & (t < t3) # 一定値領域の条件ブール値
@@ -196,11 +200,11 @@ class RaisedCosFlatTop ( SlotWithIQ, ChannelMixin ):
         t23 = t[cond23] # 一定値領域の時間リスト
         t34 = t[cond34] # 立ち下がり時間領域の時間リスト
         
-        self.iq[cond12] = (1.0 - np.cos(np.pi*(t12-t1)/self.rise_time)) / (2.0 + 0.0j) # 立ち上がり時間領域
-        self.iq[cond23] = 1.0 + 0.0j                                                    # 一定値領域
-        self.iq[cond34] = (1.0 - np.cos(np.pi*(t4-t34)/self.rise_time)) / (2.0 + 0.0j) # 立ち下がり時間領域
+        self.__iq__[cond12] = (1.0 - np.cos(np.pi*(t12-t1)/self.rise_time)) / (2.0 + 0.0j) # 立ち上がり時間領域
+        self.__iq__[cond23] = 1.0 + 0.0j                                                    # 一定値領域
+        self.__iq__[cond34] = (1.0 - np.cos(np.pi*(t4-t34)/self.rise_time)) / (2.0 + 0.0j) # 立ち下がり時間領域
         
-        self.iq[:] *= self.ampl * np.exp(1j * self.phase)
+        self.__iq__[:] *= self.ampl * np.exp(1j * self.phase)
 
 
 class Rectangle ( SlotWithIQ, ChannelMixin ):
@@ -213,7 +217,7 @@ class Rectangle ( SlotWithIQ, ChannelMixin ):
 
     def update_iq(self):
 
-        self.iq[:] = self.ampl * np.exp(1j * self.phase)
+        self.__iq__[:] = self.ampl * np.exp(1j * self.phase)
 
 
 class Sequence(deque):
