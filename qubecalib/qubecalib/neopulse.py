@@ -440,9 +440,7 @@ def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
             s.iq[:] = 0
             ss = section2slots[s]
             for v in ss:
-                rng = (v.begin <= t) * (t <= v.end)
-                if t[rng][-1] != v.end:
-                    rng = (v.begin <= t) * (t <= v.end + 2)
+                rng = (v.begin <= t) * (t < v.end)
                 s.iq[rng] += v.miq / len(ss)
     
     # 束ねるチャネルを WaveSequence に変換
