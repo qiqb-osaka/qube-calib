@@ -675,13 +675,14 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
     # 各セクション毎に Chunk を合成する
     awgs = [k for k in alloc_table if isinstance(k,AWG)]
     for i,k in enumerate(awgs):
-        for s in section[k]:
-            t = s.sampling_points
-            s.iq[:] = 0
-            ss = section2slots[s]
-            for v in ss:
-                rng = (v.begin <= t) * (t < v.end)
-                s.iq[rng] += v.miq / len(ss)
+        if k in section:
+            for s in section[k]:
+                t = s.sampling_points
+                s.iq[:] = 0
+                ss = section2slots[s]
+                for v in ss:
+                    rng = (v.begin <= t) * (t < v.end)
+                    s.iq[rng] += v.miq / len(ss)
     
     # # 束ねるチャネルを WaveSequence に変換
     awgs = [k for k in alloc_table if isinstance(k,AWG)] # alloc_table から AWG 関連だけ抜き出す
@@ -692,6 +693,27 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
     
     return Setup(*(wseqs + capts))
     
+
+def acquire_rx_section(sequence, alloc_table, sections=None):
+    if sections is None:
+        sections = Sections()
+    logch = [k for k in sequence.slots if isinstance(k,Readout)]
+    phych = [k for k in alloc_table for l in logch if l in alloc_table[k] and isinstance(k,UNIT)]
+    phychi = phych[0]
+    slots = np.array([(s.begin,s.duration,s.end) for s in sequence if isinstance(s,Range) and s.ch in alloc_table[phychi]])
+    slots = slots[np.argsort(slots[:,0])]
+    if (slots % int(WORD)).sum():
+        raise ValueError('!!!')
+    sections[phychi] = deque()
+    begin, duration, end = slots[0]
+    sections[phychi].append(RxSection(delay=begin,duration=duration,blank=0))
+    for i in range(1,slots.shape[0]):
+        begin, duration, end = slots[i,0], slots[i,1], slots[i-1,2]
+        sections[phychi].append(RxSection(delay=begin-end,duration=duration,blank=0))
+    
+    return sections
+
+
 def plot_send_recv(fig, data, mag=False):
 
     n = len([vv for k,v in data.items() for vv in v])
