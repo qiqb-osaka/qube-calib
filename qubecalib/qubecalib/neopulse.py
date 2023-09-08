@@ -1,6 +1,6 @@
 from .qube import AWG, UNIT
 import e7awgsw
-from e7awgsw import WaveSequence, CaptureParam
+from e7awgsw import WaveSequence, CaptureParam, AwgCtrl, IqWave
 
 from typing import Final
 from contextlib import contextmanager
@@ -220,16 +220,160 @@ class Rectangle ( SlotWithIQ, ChannelMixin ):
         self.__iq__[:] = self.ampl * np.exp(1j * self.phase)
 
 
-class Sequence(deque):
+class DequeWithContext( deque ):
+
+    def __enter__(self):
+
+        __rc__.contexts.append(self)
+
+        return self
+    
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        __rc__.contexts.pop()
+        __rc__.contexts[-1].append(self)
+
+
+class HasFlatten( object ):
+
+    def flatten(self):
+
+        rslt = Sequence()
+        for o in self:
+            if isinstance(o, HasFlatten):
+                for p in o.flatten():
+                    rslt.append(p)
+            else:
+                rslt.append(o)
+
+        return rslt
+
+
+class Sequence( DequeWithContext, HasFlatten ):
 
     def replace(self):
 
         for s in self:
             s.replace()
 
+    @property
+    def slots(self):
+        r = {}
+        for v in self:
+            if hasattr(v,'ch'):
+                if v.ch not in r:
+                    r[v.ch] = deque([v])
+                else:
+                    r[v.ch].append(v)
+            else:
+                if None not in r:
+                    r[None] = deque([v])
+                else:
+                    r[None].append(v)
+        return r
+    
+    def __exit__(self, exception_type, exception_value, traceback):
 
-class Section(dict): pass
+        __rc__.contexts.pop()
+
+
+class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
+
+    begin = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
+
+
+class Series( LayoutBase ):
+
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        for i in range(len(list(self)[:-1])):
+            link((self[i],'end'), (self[i+1],'begin'))
+        link((self[0],'begin'),(self,'begin'))
+        link((self[-1],'end'),(self,'end'))
+        super().__exit__(exception_type, exception_value, traceback)
+
+
+class Flushright( LayoutBase ):
+
+    leftmost = None
+
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        for i in range(len(list(self)[:-1])):
+            link((self[i],'end'), (self[i+1],'end'))
+        link((self[0] if self.leftmost is None else self.leftmost,'begin'),(self,'begin'))
+        link((self[-1],'end'),(self,'end'))
+        super().__exit__(exception_type, exception_value, traceback)
+
+
+class Flushleft( LayoutBase ):
+
+    rightmost = None
+
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        for i in range(len(list(self)[:-1])):
+            link((self[i],'begin'), (self[i+1],'begin'))
+        link((self[0],'begin'),(self,'begin'))
+        link((self[-1] if self.rightmost is None else self.rightmost,'end'),(self,'end'))
+        super().__exit__(exception_type, exception_value, traceback)
+
+
+def set_leftmost(slot):
+
+    __rc__.contexts[-1].leftmost = slot
+
+
+def set_rightmost(slot):
+
+    __rc__.contexts[-1].rightmost = slot
+
+
+class DictWithContext(dict):
+
+    def __enter__(self):
+
+        __rc__.contexts.append(deque())
+
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        __rc__.contexts.pop()
+
+
+class Sections(DictWithContext):
+    
+    def __init__(self,*args,**kw):
+        
+        super().__init__(**kw)
+        for k in args:
+            self[k] = None
+
+    def __exit__(self, exception_type, exception_value, traceback):
+
+        q = __rc__.contexts.pop()
+        for k in self:
+            if isinstance(q,Sections):
+                raise ValueError('Deep nesting is not allowed.')
+            self[k] = q
+        if len(self):
+            __rc__.contexts[-1].append(self)
+        else:
+            for o in q:
+                for k,v in o.items():
+                    if k in self:
+                        raise KeyError('Key dupulication is detected.')
+                    self[k] = v
+    
+
+class Allocation(DictWithContext):
+    pass
+
+
 class AllocTable(dict): pass
+
 
 @contextmanager
 def new_sequence():
@@ -240,14 +384,40 @@ def new_sequence():
     finally:
         __rc__.contexts.pop()
 
+
 @contextmanager
 def new_section():
 
-    __rc__.contexts.append(Section())
+    __rc__.contexts.append(Sections())
     try:
         yield __rc__.contexts[-1]
     finally:
         __rc__.contexts.pop()
+
+
+class SectionBase( ContextNode ):
+
+    def __init__(self, prior=0, duration=BLOCK, post=0, repeats=1):
+        
+        super().__init__()
+        self.prior = prior
+        self.duration = duration
+        self.post = post
+        self.repeats = repeats
+
+
+class TxSection( SectionBase ):
+
+    def __init__(self, wait=0, duration=BLOCK, blank=0, repeats=1):
+
+        super().__init__(wait, duration, blank, repeats)
+
+
+class RxSection( SectionBase ):
+
+    def __init__(self, delay=0, duration=BLOCK, blank=0, repeats=1):
+
+        super().__init__(delay, duration, blank, repeats)
 
 
 class ContextNodeAlloc(object):
@@ -305,7 +475,7 @@ class Chunk(ContextNodeAlloc):
 class SumSect(ContextNodeAlloc): pass
 
 
-class SequenceBase ( object ):
+class UserSequenceBase ( object ):
 
     def set_duration(self, **kw):
         for k,v in kw.items():
@@ -317,6 +487,7 @@ class SequenceBase ( object ):
             setattr(getattr(self,k),'channel',v)
         return self
 
+SequenceBase = UserSequenceBase
 
 class Setup(list):
 
@@ -388,7 +559,8 @@ def sect2capt(section,period,repeats):
 
 
 def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
-    channel2slot = r = organize_slots(sequence) # channel -> slot
+    # channel2slot = r = organize_slots(sequence) # channel -> slot
+    channel2slot = r = sequence.slots
     a,c = split_awg_unit(alloc_table) # channel -> txport, rxport
     
     # Tx チャネルはデータ変調
@@ -496,18 +668,21 @@ def plot_setup(fig,setup,capture_delay=0):
                 ax.set_ylim(-32767*1.2,32767*1.2)
 
 def plot_sequence(fig,sequence):
-    for i,s in enumerate(sequence):
+    slots = sequence.flatten().slots
+    for i,logch in enumerate(slots):
         if i == 0:
-            ax = ax1 = fig.add_subplot(len(sequence),1,i+1)
+            ax = ax1 = fig.add_subplot(len(slots),1,i+1)
         else:
-            ax = fig.add_subplot(len(sequence),1,i+1, sharex=ax1)
-        if isinstance(s,Range) or isinstance(s,Blank):
-            begin = int(s.begin)
-            duration = int(s.duration)
-            ax.add_patch(patches.Rectangle(xy=(begin,-1),width=duration,height=2))
-            ax.set_ylim(-1.2,1.2)
-        else:
-            t = s.sampling_points
-            ax.plot(t,np.real(s.iq))
-            ax.plot(t,np.imag(s.iq))
-            ax.set_ylim(-1.2,1.2)
+            ax = fig.add_subplot(len(slots),1,i+1, sharex=ax1)
+        for s in slots[logch]:
+            if isinstance(s,Range) or isinstance(s,Blank):
+                begin = int(s.begin)
+                duration = int(s.duration)
+                ax.add_patch(patches.Rectangle(xy=(begin,-1),width=duration,height=2))
+                ax.set_ylim(-1.2,1.2)
+            else:
+                t = s.sampling_points
+                ax.plot(t,np.real(s.iq))
+                ax.plot(t,np.imag(s.iq))
+                ax.set_ylim(-1.2,1.2)
+
