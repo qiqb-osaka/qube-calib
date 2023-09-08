@@ -366,7 +366,20 @@ class Sections(DictWithContext):
                     if k in self:
                         raise KeyError('Key dupulication is detected.')
                     self[k] = v
-    
+        self.place()
+
+    def place(self):
+        
+        for k, v in self.items():
+            if v:
+                v0 = v[0]
+                v0.begin = v0.prior
+                v0.end = v0.begin + v0.duration
+                for i in range(1,len(v)):
+                    total = v[i-1].prior + v[i-1].duration + v[i-1].post
+                    v[i].begin = v[i-1].end + v[i-1].post + (v[i-1].repeats - 1) * total + v[i].prior
+                    v[i].end = v[i].begin + v[i].duration
+
 
 class Allocation(DictWithContext):
     pass
@@ -405,13 +418,31 @@ class SectionBase( ContextNode ):
         self.post = post
         self.repeats = repeats
 
+    @property
+    def total(self):
+
+        return self.prior + self.duration + self.post
+
 
 class TxSection( SectionBase ):
 
     def __init__(self, wait=0, duration=BLOCK, blank=0, repeats=1):
 
         super().__init__(wait, duration, blank, repeats)
+        self._iq = None
 
+    @property
+    def iq(self):
+
+        if self._iq is None:
+            n = int(self.duration // 2)
+            self._iq = np.zeros(n).astype(complex)
+        return self._iq
+    
+    @property
+    def sampling_points(self):
+
+        return np.arange(len(self.iq)) * 2 + self.begin
 
 class RxSection( SectionBase ):
 
@@ -520,21 +551,47 @@ def split_awg_unit(alloc_table):
                 a[vv] = k
     return a,c
 
+def __acquire_chunk__(chunk, repeats=1, blank=0):
+
+    n = WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK
+    i, q = np.real(32767*chunk.iq).astype(int), np.imag(32767*chunk.iq).astype(int)
+    s = IqWave.convert_to_iq_format(i, q, n)
+
+    b = max(int(blank), 0)
+
+    return {
+        'iq_samples': s,
+        'num_blank_words': b // int(WORD),
+        'num_repeats': repeats
+    }
+
 def chunks2wseq(chunks, period, repeats):
+    # c = chunks
+    # if int(c[0].begin) % WORD:
+    #     raise('The wait duration must be an integer multiple of ()ns.'.format(int(WORD)))
+    # w = e7awgsw.WaveSequence(num_wait_words=int(c[0].begin) // int(WORD), num_repeats=repeats)
+    # boundary = b = [int(cc.begin) - int(c[0].begin) for cc in list(c)[1:]] + [period,]
+    # for s,p in zip(c,b):
+    #     if (p - (s.end - c[0].begin)) % WORD:
+    #         raise('The blank duration must be an integer multiple of ()ns.'.format(int(WORD)))
+    #     kw = {
+    #         'iq_samples': list(zip(np.real(32767*s.iq).astype(int), np.imag(32767*s.iq).astype(int))),
+    #         'num_blank_words': int(p - (s.end - c[0].begin)) // int(WORD),
+    #         'num_repeats': 1,
+    #     }
+    #     w.add_chunk(**kw)
+
     c = chunks
-    if int(c[0].begin) % WORD:
-        raise('The wait duration must be an integer multiple of ()ns.'.format(int(WORD)))
-    w = e7awgsw.WaveSequence(num_wait_words=int(c[0].begin) // int(WORD), num_repeats=repeats)
-    boundary = b = [int(cc.begin) - int(c[0].begin) for cc in list(c)[1:]] + [period,]
-    for s,p in zip(c,b):
-        if (p - (s.end - c[0].begin)) % WORD:
-            raise('The blank duration must be an integer multiple of ()ns.'.format(int(WORD)))
-        kw = {
-            'iq_samples': list(zip(np.real(32767*s.iq).astype(int), np.imag(32767*s.iq).astype(int))),
-            'num_blank_words': int(p - (s.end - c[0].begin)) // int(WORD),
-            'num_repeats': 1,
-        }
-        w.add_chunk(**kw)
+    w = e7awgsw.WaveSequence(num_wait_words=int(c[0].prior) // int(WORD), num_repeats=repeats)
+
+    for j in range(len(c)-1):
+        if c[j].repeats > 1:
+            w.add_chunk(**__acquire_chunk__(c[j],c[j].repeats-1,c[j].post + c[j].prior))
+        w.add_chunk(**__acquire_chunk__(c[j],1,c[j].post + c[j+1].prior))
+    if c[-1].repeats > 1:
+        w.add_chunk(**__acquire_chunk__(c[-1],c[-1].repeats-1,c[-1].post + c[-1].prior))
+    w.add_chunk(**__acquire_chunk__(c[-1],1,(period - c[-1].end)))
+
     return w
 
 
@@ -542,23 +599,31 @@ def sect2capt(section,period,repeats):
     s = section
     p = e7awgsw.CaptureParam()
     p.num_integ_sections = repeats
-    if int(s[0].begin) % int(2*WORD):
+
+    if int(s[0].prior) % int(2*WORD):
         raise('The capture_delay must be an integer multiple of ()ns.'.format(int(2*WORD)))
-    p.capture_delay = int(s[0].begin) // int(WORD)
-    boundary = b = [int(ss.begin) - int(s[0].begin) for ss in s][1:] + [period,]
-    for ss,bb in zip(s,b):
-        if int(ss.duration) % int(WORD):
-            raise('error!!')
-        duration = int(ss.duration) // int(WORD)
-        if int(bb - (ss.end - s[0].begin)) % int(WORD):
-            raise('error!!')
-        blank =  int(bb - (ss.end - s[0].begin)) // int(WORD)
+    p.capture_delay = int(s[0].prior) // int(WORD)
+
+    for j in range(len(s)-1):
+        for i in range(s[j].repeats-1):
+            duration = int(s[j].duration) // int(WORD)
+            blank = int(s[j].post + s[j].prior) // int(WORD)
+            p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+        duration = int(s[j].duration) // int(WORD)
+        blank = int(s[j].post + s[j+1].prior) // int(WORD)
         p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+    for i in range(s[-1].repeats-1):
+        duration = int(s[-1].duration) // int(WORD)
+        blank = int(s[-1].post + s[-1].prior) // int(WORD)
+        p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+    duration = int(s[-1].duration) // int(WORD)
+    blank = int(period - s[-1].end) // int(WORD)
+    p.add_sum_section(num_words=duration, num_post_blank_words=blank)
     return p
 
 
 
-def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
+def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = r = sequence.slots
     a,c = split_awg_unit(alloc_table) # channel -> txport, rxport
@@ -580,8 +645,8 @@ def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
 
     # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
     section2slots = {}
-    for k,v in section.items(): # k:AWG,v:List[Chunk] or k:UNIT,v:List[SumSect]
-        for vv in v: # vv:Union[Chunk,SumSect]
+    for k,v in section.items(): # k:AWG,v:List[TxSection] or k:UNIT,v:List[RxSection]
+        for vv in v: # vv:Union[TxSection,RxSection]
             if vv not in section2slots:
                 section2slots[vv] = deque([])
             if k not in alloc_table: # k:Union[AWG,UNIT] 
@@ -598,12 +663,15 @@ def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
                         warnings.warn('Channel {} is Iqnored.'.format(c))
                     continue
                 for s in r[c]:
-                    if vv.begin <= s.begin and s.begin + s.duration <= vv.end:
-                        bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
-                        bunit = isinstance(k,UNIT) and isinstance(s,Range)
-                        if bawg or bunit:
-                            section2slots[vv].append(s)
-                            
+                    for i in range(vv.repeats):
+                        if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
+                            bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
+                            bunit = isinstance(k,UNIT) and isinstance(s,Range)
+                            if bawg and i == 0:
+                                section2slots[vv].append(s)
+                            if bunit:
+                                section2slots[vv].append(s)
+    
     # 各セクション毎に Chunk を合成する
     awgs = [k for k in alloc_table if isinstance(k,AWG)]
     for i,k in enumerate(awgs):
@@ -615,12 +683,12 @@ def convert(sequence, section, alloc_table, period, repeats=1, warn=False):
                 rng = (v.begin <= t) * (t < v.end)
                 s.iq[rng] += v.miq / len(ss)
     
-    # 束ねるチャネルを WaveSequence に変換
+    # # 束ねるチャネルを WaveSequence に変換
     awgs = [k for k in alloc_table if isinstance(k,AWG)] # alloc_table から AWG 関連だけ抜き出す
-    wseqs = [(k, chunks2wseq(section[k], period, repeats)) for k in awgs] # chunk obj を wseq へ変換する
+    wseqs = [(k, chunks2wseq(section[k], period, repeats)) for k in awgs if k in section] # chunk obj を wseq へ変換する
 
     units = [k for k in alloc_table if isinstance(k,UNIT)] 
-    capts = [(k,sect2capt(section[k],period,repeats)) for k in units]
+    capts = [(k,sect2capt(section[k],period,repeats)) for k in units if k in section]
     
     return Setup(*(wseqs + capts))
     
@@ -653,14 +721,19 @@ def plot_setup(fig,setup,capture_delay=0):
             begin = v.num_wait_words * int(WORDs)
             for cc,bb in zip(v.chunk_list,blank):
                 iq = np.array(cc.wave_data.samples)
-                t = np.arange(len(iq)) * 2 + begin
-                begin = t[-1] + bb
+                t = begin + np.arange(len(iq)) * 2
+                for _ in range(cc.num_repeats-1):
+                    ax.plot(t,iq[:,0],'b')
+                    ax.plot(t,iq[:,1],'r')
+                    ax.set_ylim(-32767*1.2,32767*1.2)
+                    t += len(iq) * 2 + bb
                 ax.plot(t,iq[:,0],'b')
                 ax.plot(t,iq[:,1],'r')
                 ax.set_ylim(-32767*1.2,32767*1.2)
+                begin = t[-1] + bb
         else:
             blank = [o[1] * int(WORDs) for o in v.sum_section_list]
-            begin = v.capture_delay - capture_delay
+            begin = (v.capture_delay - capture_delay) * int(WORDs)
             for s,b in zip(v.sum_section_list,blank):
                 duration = int(s[0]) * int(WORDs)
                 ax.add_patch(patches.Rectangle(xy=(begin,-32767),width=duration,height=2*32767))
@@ -686,3 +759,17 @@ def plot_sequence(fig,sequence):
                 ax.plot(t,np.imag(s.iq))
                 ax.set_ylim(-1.2,1.2)
 
+def plot_section(fig,section):
+    for i,phych in enumerate(section):
+        if i == 0:
+            ax = ax1 = fig.add_subplot(len(section),1,i+1)
+        else:
+            ax = fig.add_subplot(len(section),1,i+1,sharex=ax1)
+        for s in section[phych]:
+            begin = int(s.begin)
+            duration = int(s.duration)
+            total = int(s.prior + s.duration + s.post)
+            for i in range(s.repeats):
+                ax.add_patch(patches.Rectangle(xy=(begin + i * total,-1),width=duration,height=2,fill=False))
+        ax.set_xlim(0,s.end)
+        ax.set_ylim(-1.2,1.2)
