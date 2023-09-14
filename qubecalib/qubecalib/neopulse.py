@@ -285,13 +285,44 @@ class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
 
 class Series( LayoutBase ):
 
+    block_end = Float(None,allow_none=True)
+
+    def __init__(self, repeats=1, **kw):
+
+        super().__init__(**kw)
+        self.repeats = 1
+
     def __exit__(self, exception_type, exception_value, traceback):
 
         for i in range(len(list(self)[:-1])):
             link((self[i],'end'), (self[i+1],'begin'))
         link((self[0],'begin'),(self,'begin'))
-        link((self[-1],'end'),(self,'end'))
+        link((self[-1],'end'),(self,'block_end'))
         super().__exit__(exception_type, exception_value, traceback)
+
+    def flatten(self):
+
+        rslt = Sequence()
+        for _ in range(self.repeats):
+            for o in self:
+                if isinstance(o, HasFlatten):
+                    for p in o.flatten():
+                        rslt.append(p)
+                    else:
+                        rslt.append(o)
+            return rslt
+
+    @observe('block_end')
+    def notify_change_block_end(self, e):
+
+        if e['new'] != None:
+            self.end = self.begin + (self.repeats - 1) * (self.block_end - self.begin)
+
+    @observe('end')
+    def notify_change_block_end(self, e):
+
+        if e['new'] != None:
+            self.block_end = self.end - (self.repeats - 1) * (self.block_end - self.begin)
 
 
 class Flushright( LayoutBase ):
