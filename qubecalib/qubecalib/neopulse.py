@@ -5,7 +5,7 @@ from e7awgsw import WaveSequence, CaptureParam, AwgCtrl, IqWave
 from typing import Final
 from contextlib import contextmanager
 from collections import namedtuple, deque
-from traitlets import HasTraits, Int, Float, observe, link
+from traitlets import HasTraits, Int, Float, observe, link, directional_link
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -285,19 +285,21 @@ class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
 
 class Series( LayoutBase ):
 
-    block_end = Float(None,allow_none=True)
-
+    
     def __init__(self, repeats=1, **kw):
 
         super().__init__(**kw)
-        self.repeats = 1
+        self.repeats = repeats
 
     def __exit__(self, exception_type, exception_value, traceback):
 
         for i in range(len(list(self)[:-1])):
             link((self[i],'end'), (self[i+1],'begin'))
         link((self[0],'begin'),(self,'begin'))
-        link((self[-1],'end'),(self,'block_end'))
+        forward = lambda x: None if x is None else self.begin + self.repeats * (self[-1].end - self.begin)
+        reverse = lambda x: None if x is None else self.end - (self.repeats - 1) * (self[-1].end - self.begin)
+        directional_link((self[-1],'end'),(self,'end'),forward)
+        directional_link((self,'end'),(self[-1],'end'),reverse)
         super().__exit__(exception_type, exception_value, traceback)
 
     def flatten(self):
@@ -311,19 +313,7 @@ class Series( LayoutBase ):
                     else:
                         rslt.append(o)
             return rslt
-
-    @observe('block_end')
-    def notify_change_block_end(self, e):
-
-        if e['new'] != None:
-            self.end = self.begin + (self.repeats - 1) * (self.block_end - self.begin)
-
-    @observe('end')
-    def notify_change_block_end(self, e):
-
-        if e['new'] != None:
-            self.block_end = self.end - (self.repeats - 1) * (self.block_end - self.begin)
-
+        
 
 class Flushright( LayoutBase ):
 
