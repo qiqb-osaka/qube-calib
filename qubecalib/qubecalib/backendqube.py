@@ -231,7 +231,7 @@ class Recv(CaptureCtrl):
         if DspUnit.SUM in p.dsp_units_enabled:
             d = np.hsplit(d, list(range(m)[1:]))
         else:
-            d = np.hsplit(d, [w * p.NUM_SAMPLES_IN_ADC_WORD for w,b in p.sum_section_list[:-1]])
+            d = np.hsplit(d, np.cumsum(np.array([w for w, b in p.sum_section_list[:-1]])) * p.NUM_SAMPLES_IN_ADC_WORD)
             d = [di.transpose() for di in d]
         
         return d
