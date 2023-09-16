@@ -162,6 +162,8 @@ class Arbit ( SlotWithIQ, ChannelMixin ):
 
 class Shadow( HasTraits ):
 
+    SAMPLING_PERIOD: Final[float] = 2*nS
+
     begin = Float(None,allow_none=True)
     end = Float(None,allow_none=True)
 
@@ -198,6 +200,23 @@ class Shadow( HasTraits ):
     def duration(self):
 
         return self.weakref_body().duration
+
+    @property
+    def iq(self):
+        return self.weakref_body().iq
+
+    @property
+    def __iq__(self):
+        return self.weakref_body().__iq__
+
+    @property
+    def sampling_points(self):
+        return self.sampling_points_zero + self.begin # sampling points [ns]
+        
+    @property
+    def sampling_points_zero(self):
+        return np.arange(0,len(self.__iq__)) * self.SAMPLING_PERIOD # sampling points [ns]
+
 
 
 class Range( Slot, ChannelMixin ):
@@ -775,6 +794,9 @@ def sect2capt(section,period,repeats):
 
 
 def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
+
+    body = lambda x: x.weakref_body() if isinstance(x,Shadow) else x
+
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = r = sequence.slots
     a,c = split_awg_unit(alloc_table) # channel -> txport, rxport
@@ -788,7 +810,7 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
                 warnings.warn('Channel {} is Iqnored.'.format(k))
             continue
         for v in r[k]:
-            if isinstance(v,SlotWithIQ):
+            if isinstance(body(v),SlotWithIQ):
                 m = a[k].modulation_frequency(mhz=k.frequency*1e+3)*MHz
                 t = v.sampling_points
                 v.miq = v.iq * np.exp(1j*2*np.pi*(m*t))
@@ -816,13 +838,13 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
                 for s in r[c]:
                     for i in range(vv.repeats):
                         if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
-                            bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
-                            bunit = isinstance(k,UNIT) and isinstance(s,Range)
+                            bawg = isinstance(k,AWG) and isinstance(body(s),SlotWithIQ)
+                            bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
                             if bawg and i == 0:
                                 section2slots[vv].append(s)
                             if bunit:
                                 section2slots[vv].append(s)
-    
+    print(section2slots)
     # 各セクション毎に Chunk を合成する
     awgs = [k for k in alloc_table if isinstance(k,AWG)]
     for i,k in enumerate(awgs):
@@ -924,6 +946,7 @@ def plot_setup(fig,setup,capture_delay=0):
                 ax.set_ylim(-32767*1.2,32767*1.2)
 
 def plot_sequence(fig,sequence):
+    body = lambda x: x.weakref_body() if isinstance(x,Shadow) else x
     slots = sequence.flatten().slots
     for i,logch in enumerate(slots):
         if i == 0:
@@ -931,7 +954,7 @@ def plot_sequence(fig,sequence):
         else:
             ax = fig.add_subplot(len(slots),1,i+1, sharex=ax1)
         for s in slots[logch]:
-            if isinstance(s,Range) or isinstance(s,Blank):
+            if isinstance(body(s),Range) or isinstance(body(s),Blank):
                 begin = int(s.begin)
                 duration = int(s.duration)
                 ax.add_patch(patches.Rectangle(xy=(begin,-1),width=duration,height=2))
