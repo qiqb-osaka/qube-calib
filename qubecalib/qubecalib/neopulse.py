@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import warnings
+import weakref
 
 # The internal time and frequency units are [ns] and [GHz], respectively.
 
@@ -68,7 +69,7 @@ class ContextNode ( object ):
             c[-1].append(self)
 
 
-class Slot ( ContextNode, HasTraits ):
+class Slot (  HasTraits, ContextNode ):
 
     begin = Float(None,allow_none=True)
     duration = Float(None,allow_none=True)
@@ -159,6 +160,45 @@ class Arbit ( SlotWithIQ, ChannelMixin ):
     def update_iq(self): 
         self.iq[:] = self.init
 
+class Shadow( HasTraits ):
+
+    begin = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
+
+    def __init__(self, body, **kw):
+
+        self.weakref_body = weakref.ref(body)
+        super().__init__(**kw)
+    
+    def replace(self):
+        
+        self.begin = None
+        self.end = None
+        
+    @observe("begin")
+    def notify_begin_change(self,e):
+        if self.duration == None:
+            raise ValueError("'duration' member valiable is not initialized.")
+        if e['new'] != None:
+            self.end = self.begin + self.duration
+        
+    @observe("end")
+    def notify_end_change(self,e):
+        if self.duration == None:
+            raise ValueError("'duration' member valiable is not initialized.")
+        if e['new'] != None:
+            self.begin = self.end - self.duration
+
+    @property
+    def ch(self):
+
+        return self.weakref_body().ch
+
+    @property
+    def duration(self):
+
+        return self.weakref_body().duration
+
 
 class Range( Slot, ChannelMixin ):
     pass
@@ -239,6 +279,7 @@ class HasFlatten( object ):
     def flatten(self):
 
         rslt = Sequence()
+
         for o in self:
             if isinstance(o, HasFlatten):
                 for p in o.flatten():
@@ -285,35 +326,61 @@ class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
 
 class Series( LayoutBase ):
 
-    
+
     def __init__(self, repeats=1, **kw):
 
         super().__init__(**kw)
         self.repeats = repeats
+        self.bodies = Sequence()
 
     def __exit__(self, exception_type, exception_value, traceback):
+
+        for o in self:
+            self.bodies.append(o)
+        for i in range(1,self.repeats):
+            for o in self.bodies:
+                if isinstance(o,Flushright):
+                    self.append(FlushrightShadow(o))
+                elif isinstance(o,Flushleft):
+                    self.append(FlushleftShadow(o))
+                elif isinstance(o,Series):
+                    self.append(SeriesShadow(o))
+                elif isinstance(o,Slot):
+                    self.append(Shadow(o))
 
         for i in range(len(list(self)[:-1])):
             link((self[i],'end'), (self[i+1],'begin'))
         link((self[0],'begin'),(self,'begin'))
-        forward = lambda x: None if x is None else self.begin + self.repeats * (self[-1].end - self.begin)
-        reverse = lambda x: None if x is None else self.end - (self.repeats - 1) * (self[-1].end - self.begin)
-        directional_link((self[-1],'end'),(self,'end'),forward)
-        directional_link((self,'end'),(self[-1],'end'),reverse)
+        link((self[-1],'end'),(self,'end'))
         super().__exit__(exception_type, exception_value, traceback)
-
-    def flatten(self):
-
-        rslt = Sequence()
-        for _ in range(self.repeats):
-            for o in self:
-                if isinstance(o, HasFlatten):
-                    for p in o.flatten():
-                        rslt.append(p)
-                    else:
-                        rslt.append(o)
-            return rslt
         
+
+class SeriesShadow( HasTraits, HasFlatten, deque):
+
+    begin = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
+
+    def __init__(self, body, **kw):
+
+        super().__init__(**kw)
+
+        self.weakref_body = weakref.ref(body)
+
+        for o in body:
+            if isinstance(o,(Flushright,FlushrightShadow)):
+                self.append(FlushrightShadow(o))
+            elif isinstance(o,(Flushleft,FlushleftShadow)):
+                self.append(FlushleftShadow(o))
+            elif isinstance(o,(Series,SeriesShadow)):
+                self.append(SeriesShadow(o))
+            elif isinstance(o,(Slot,Shadow)):
+                self.append(Shadow(o))
+
+        for i in range(len(list(self)[:-1])):
+            link((self[i],'end'), (self[i+1],'begin'))
+        link((self[0],'begin'),(self,'begin'))
+        link((self[-1],'end'),(self,'end'))
+
 
 class Flushright( LayoutBase ):
 
@@ -325,8 +392,40 @@ class Flushright( LayoutBase ):
             link((self[i],'end'), (self[i+1],'end'))
         link((self[0] if self.leftmost is None else self.leftmost,'begin'),(self,'begin'))
         link((self[-1],'end'),(self,'end'))
+
         super().__exit__(exception_type, exception_value, traceback)
 
+
+class FlushrightShadow( HasTraits, HasFlatten, deque ):
+
+    begin = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
+    leftmost = None
+
+    def __init__(self, body, **kw):
+
+        super().__init__(**kw)
+
+        self.weakref_body = weakref.ref(body)
+
+        for o in body:
+            if isinstance(o,Flushright):
+                self.append(FlushrightShadow(o))
+            elif isinstance(o,Flushleft):
+                self.append(FlushleftShadow(o))
+            elif isinstance(o,Series):
+                self.append(SeriesShadow(o))
+            elif isinstance(o,Slot):
+                self.append(Shadow(o))
+                if body.leftmost == o:
+                    self.leftmost = self[-1]
+
+        for i, _ in enumerate(list(self)[:-1]):
+            link((self[i],'end'),(self[i+1],'end'))
+        link((self[0] if self.leftmost is None else self.leftmost,'begin'),(self,'begin'))
+        link((self[-1],'end'),(self,'end'))
+
+    
 
 class Flushleft( LayoutBase ):
 
@@ -340,13 +439,44 @@ class Flushleft( LayoutBase ):
         link((self[-1] if self.rightmost is None else self.rightmost,'end'),(self,'end'))
         super().__exit__(exception_type, exception_value, traceback)
 
+class FlushleftShadow( HasTraits, HasFlatten, deque ):
 
-def set_leftmost(slot):
+    begin = Float(None,allow_none=True)
+    end = Float(None,allow_none=True)
+    rightmost = None
+
+    def __init__(self, body, **kw):
+
+        super().__init__(**kw)
+
+        self.weakref_body = weakref.ref(body)
+
+        for o in body:
+            if isinstance(o,Flushright):
+                self.append(FlushrightShadow(o))
+            elif isinstance(o,Flushleft):
+                self.append(FlushleftShadow(o))
+            elif isinstance(o,Series):
+                self.append(SeriesShadow(o))
+            elif isinstance(o,Slot):
+                self.append(Shadow(o))
+                if body.rightmost == o:
+                    self.rightmost = self[-1]
+
+        for i in range(len(list(self)[:-1])):
+            link((self[i],'begin'), (self[i+1],'begin'))
+        link((self[0],'begin'),(self,'begin'))
+        link((self[-1] if self.rightmost is None else self.rightmost,'end'),(self,'end'))
+
+    
+
+
+def leftmost(slot):
 
     __rc__.contexts[-1].leftmost = slot
 
 
-def set_rightmost(slot):
+def rightmost(slot):
 
     __rc__.contexts[-1].rightmost = slot
 
@@ -715,24 +845,34 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
     return Setup(*(wseqs + capts))
     
 
-def acquire_rx_section(sequence, alloc_table, sections=None):
-    if sections is None:
-        sections = Sections()
+def acquire_tx_section(sequence, alloc_table, section=None):
+    if section is None:
+        section = Sections()
+    # repeats = [o.repeats for o in sequence if isinstance(o,Series) else 1]
+
+
+
+
+
+def acquire_rx_section(sequence, alloc_table, section=None):
+    if section is None:
+        section = Sections()
     logch = [k for k in sequence.slots if isinstance(k,Readout)]
     phych = [k for k in alloc_table for l in logch if l in alloc_table[k] and isinstance(k,UNIT)]
     phychi = phych[0]
-    slots = np.array([(s.begin,s.duration,s.end) for s in sequence if isinstance(s,Range) and s.ch in alloc_table[phychi]])
+    body = lambda x: x.weakref_body() if isinstance(x,Shadow) else x
+    slots = np.array([(s.begin,s.duration,s.end) for s in sequence if isinstance(body(s),Range) and s.ch in alloc_table[phychi]])
     slots = slots[np.argsort(slots[:,0])]
     if (slots % int(WORD)).sum():
         raise ValueError('!!!')
-    sections[phychi] = deque()
+    section[phychi] = deque()
     begin, duration, end = slots[0]
-    sections[phychi].append(RxSection(delay=begin,duration=duration,blank=0))
+    section[phychi].append(RxSection(delay=begin,duration=duration,blank=0))
     for i in range(1,slots.shape[0]):
         begin, duration, end = slots[i,0], slots[i,1], slots[i-1,2]
-        sections[phychi].append(RxSection(delay=begin-end,duration=duration,blank=0))
+        section[phychi].append(RxSection(delay=begin-end,duration=duration,blank=0))
     
-    return sections
+    return section
 
 
 def plot_send_recv(fig, data, mag=False):
