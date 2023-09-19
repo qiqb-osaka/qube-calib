@@ -7,7 +7,7 @@ import yaml
 import math
 import warnings
 import traceback
-import qubelsi.qube
+import qubecalib.mock_qubelsi
 from e7awgsw import AWG, CaptureModule, AwgCtrl, CaptureCtrl, CaptureUnit
 import e7awgsw
 from typing import Final
@@ -567,7 +567,7 @@ class Qube(object): # QubeInstanceFactory
             return QubeTypeB(o['iplsi'], PATH_TO_API, o)
         
         
-class QubeBase(qubelsi.qube.Qube):
+class QubeBase(qubecalib.mock_qubelsi.Qube):
     '''
     任意の IPADDR で設定する
     qube = QubeA(ipaddr, path_to_api) | QubeB(ipaddr, path_to_api)
