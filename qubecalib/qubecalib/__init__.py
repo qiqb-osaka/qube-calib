@@ -6,8 +6,10 @@ import qubecalib.backendqube
 import qubecalib.pulse
 # import qubecalib.ui
 
-__all__ =[
+__version__ = "0.2.0"
+
+__all__ = (
     "Qube",
     "Send",
     "Recv",
-]
+)
