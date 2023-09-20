@@ -6,17 +6,19 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from enum import Enum, auto
+from pathlib import Path
 from typing import Final
 
 import e7awgsw as e7
-import yaml
 from e7awgsw import AwgCtrl, CaptureModule
+import yaml
 
 import qubecalib.mock_qubelsi
 
 from . import meas
 
 VERSION = "1.5.0"
+
 
 if "QUBECALIB_PATH_TO_ROOT" in os.environ:
     PATH_TO_ROOT: Final[str] = os.environ["QUBECALIB_PATH_TO_ROOT"]
@@ -471,10 +473,10 @@ class Monitorin(Input):
         super().__init__(qube, adc, lo)
 
 
-class ConfigFPGA(object):
+class ConfigFPGA:
     @classmethod
-    def config(cls, bitfile: str) -> None:
-        os.environ["BITFILE"] = "{}/{}".format(PATH_TO_BITFILE, bitfile)
+    def config(cls, bitfile: str, path_to_bitfile: str=PATH_TO_BITFILE) -> None:
+        os.environ["BITFILE"] = f"{path_to_bitfile}/{bitfile}"
         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_API)]
         ret = subprocess.check_output(commands, encoding="utf-8")
         return ret
@@ -487,9 +489,8 @@ class Qube(object):  # QubeInstanceFactory
     """
 
     @classmethod
-    def load(cls, config_file_name):
-        name = "{}/{}".format(PATH_TO_CONFIG, config_file_name)
-        with open(name, "rb") as f:
+    def load(cls, config_file_name: str, config_dir_path: Path):
+        with open(config_dir_path / config_file_name, "rb") as f:
             o = yaml.safe_load(f)
 
         s = o["ipfpga"].split(".")
@@ -499,8 +500,8 @@ class Qube(object):  # QubeInstanceFactory
         return o
 
     @classmethod
-    def create(cls, config_file_name):
-        o = cls.load(config_file_name)
+    def create(cls, config_file_name: str, config_dir_name: str = PATH_TO_CONFIG):
+        o = cls.load(config_file_name, Path(config_dir_name))
 
         if o["type"] == "A":
             return QubeTypeA(o["iplsi"], PATH_TO_API, o)
@@ -544,17 +545,16 @@ class QubeBase(qubecalib.mock_qubelsi.Qube):
     def __getitem__(self, v):
         return self._config[v]
 
-    def config_fpga(self, bitfile=None):
-        if bitfile is None and "bitfile" not in self._config:
-            raise ValueError("Specify bitfile.")
-
+    def config_fpga(self, bitfile=None, bitfile_dir_name: str = PATH_TO_BITFILE):
         if bitfile is None:
-            bitfile = self["bitfile"]
+            if "bitfile" not in self._config:
+                raise ValueError("Specify bitfile.")
+            else:
+                bitfile = self["bitfile"]
+        self._config_fpga(bitfile, Path(bitfile_dir_name))
 
-        self._config_fpga(bitfile)
-
-    def _config_fpga(self, bitfile):
-        os.environ["BITFILE"] = "{}/{}".format(PATH_TO_BITFILE, bitfile)
+    def _config_fpga(self, bitfile: str, bitfile_dir_path: Path):
+        os.environ["BITFILE"] = str(bitfile_dir_path / bitfile)
         commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_API)]
         ret = subprocess.check_output(commands, encoding="utf-8")
         return ret
