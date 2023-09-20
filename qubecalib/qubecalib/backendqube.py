@@ -9,10 +9,10 @@ from typing import Union
 
 import e7awgsw
 import numpy as np
-from e7awgsw import AwgCtrl, CaptureCtrl, DspUnit, WaveSequence
+from e7awgsw import AwgCtrl, CaptureCtrl, DspUnit, WaveSequence, CaptureModule, CaptureParam
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
-from .meas import CaptureModule, CaptureParam, WaveSequenceFactory
+from .meas import WaveSequenceFactory
 from .pulse import Arbit, Read
 from .qube import AWG, CPT, UNIT
 from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw

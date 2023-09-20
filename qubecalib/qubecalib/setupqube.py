@@ -3,12 +3,13 @@ from collections import namedtuple
 from typing import Final, List
 
 import e7awgsw
+from e7awgsw import CaptureModule, CaptureParam
 import numpy as np
 
 from qubecalib.pulse import Arbitrary, Blank, Channel, Read, Schedule, SlotWithIQ
 from qubecalib.qube import AWG, CPT, SSB, Monitorin, Readin, Readout
 
-from .meas import AwgCtrl, CaptureModule, CaptureParam, Send, WaveSequenceFactory, _send_recv, send_recv
+from .meas import AwgCtrl, Send, WaveSequenceFactory, _send_recv, send_recv
 
 
 def isInputPort(p):
