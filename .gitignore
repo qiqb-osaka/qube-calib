@@ -11,3 +11,7 @@ log
 Pipfile.lock
 qubecalib/qubecalib.egg-info
 qubecalib/build/*
+venv-*/
+.idea/
+*.pyc
+
