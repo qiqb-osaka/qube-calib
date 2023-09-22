@@ -1,11 +1,18 @@
-'''Calibration package for QuBE'''
+"""Calibration package for QuBE"""
 
-__all__ =[
-    'Qube',
-]
+import qubecalib.backendqube as backendqube
+import qubecalib.pulse as pulse
+from qubecalib.meas import Recv, Send
+from qubecalib.qube import Qube
 
-from .qube import Qube
-from .meas import Send, Recv
-from . import backendqube
-from . import pulse
-from . import ui
+# import qubecalib.ui
+
+__version__ = "1.5.1"
+
+__all__ = (
+    "Qube",
+    "Send",
+    "Recv",
+    "pulse",
+    "backendqube",
+)
