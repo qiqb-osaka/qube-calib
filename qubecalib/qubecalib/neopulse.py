@@ -49,21 +49,21 @@ RAD: Final[float] = 1.
 DEG: Final[float] = np.pi / 180.
 
 
-class Channel(object):
+class Channel:
 
     def __init__(self,frequency,*args,**kw):
-
-        super().__init__(*args,**kw)
+        
         self.frequency = frequency
         
+
 class Control(Channel): pass
 class Readout(Channel): pass
 
 
-class ContextNode ( object ):
+class ContextNode:
 
     def __init__(self,**kw):
-        super().__init__(**kw)
+
         c = __rc__.contexts
         if len(c):
             c[-1].append(self)
@@ -87,6 +87,7 @@ class Slot (  HasTraits, ContextNode ):
             self.begin = begin
         if end != None:
             self.end = end
+
         super().__init__(**kw)
     
     def replace(self):
@@ -123,6 +124,7 @@ class SlotWithIQ ( Slot ):
     def __init__(self,**kw):
         
         self.__iq__ = None
+
         super().__init__(**kw)
 
     def update_iq(self):
@@ -239,6 +241,7 @@ class RaisedCosFlatTop ( SlotWithIQ, ChannelMixin ):
         self.ampl = ampl
         self.phase = phase
         self.rise_time = rise_time
+
         super().__init__(**kw)
 
     def update_iq(self):
@@ -367,10 +370,12 @@ class Series( LayoutBase ):
                 elif isinstance(o,Slot):
                     self.append(Shadow(o))
 
+
         for i in range(len(list(self)[:-1])):
             link((self[i],'end'), (self[i+1],'begin'))
         link((self[0],'begin'),(self,'begin'))
         link((self[-1],'end'),(self,'end'))
+
         super().__exit__(exception_type, exception_value, traceback)
         
 
@@ -456,6 +461,7 @@ class Flushleft( LayoutBase ):
             link((self[i],'begin'), (self[i+1],'begin'))
         link((self[0],'begin'),(self,'begin'))
         link((self[-1] if self.rightmost is None else self.rightmost,'end'),(self,'end'))
+
         super().__exit__(exception_type, exception_value, traceback)
 
 class FlushleftShadow( HasTraits, HasFlatten, deque ):
@@ -711,9 +717,9 @@ def organize_slots(sequence):
                 r[v.ch].append(v)
     return r
 
-def split_awg_unit(alloc_table):
+def split_awg_unit(channel_map):
     a,c = {},{}
-    for k,v in alloc_table.items():
+    for k,v in channel_map.items():
         for vv in v:
             if isinstance(k,UNIT):
                 c[vv] = k
@@ -754,14 +760,17 @@ def chunks2wseq(chunks, period, repeats):
     c = chunks
     w = e7awgsw.WaveSequence(num_wait_words=int(c[0].prior) // int(WORD), num_repeats=repeats)
 
-    for j in range(len(c)-1):
-        if c[j].repeats > 1:
-            w.add_chunk(**__acquire_chunk__(c[j],c[j].repeats-1,c[j].post + c[j].prior))
-        w.add_chunk(**__acquire_chunk__(c[j],1,c[j].post + c[j+1].prior))
-    if c[-1].repeats > 1:
-        w.add_chunk(**__acquire_chunk__(c[-1],c[-1].repeats-1,c[-1].post + c[-1].prior))
-    w.add_chunk(**__acquire_chunk__(c[-1],1,(period - c[-1].end)))
+    # print(c)
 
+    for j, d in enumerate(list(c)[:-1]):
+        if d.repeats > 1:
+            w.add_chunk(**__acquire_chunk__(d, d.repeats-1, d.post + d.prior))
+        w.add_chunk(**__acquire_chunk__(d, 1, d.post + c[j+1].prior))
+    d = c[-1]
+    if d.repeats > 1:
+        w.add_chunk(**__acquire_chunk__(d, d.repeats-1, d.post + d.prior))
+    w.add_chunk(**__acquire_chunk__(d, 1, (period - d.end)))
+    
     return w
 
 
@@ -775,20 +784,21 @@ def sect2capt(section,period,repeats):
     p.capture_delay = int(s[0].prior) // int(WORD)
 
     for j in range(len(s)-1):
-        for i in range(s[j].repeats-1):
-            duration = int(s[j].duration) // int(WORD)
-            blank = int(s[j].post + s[j].prior) // int(WORD)
-            p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+        # for i in range(s[j].repeats-1):
+        #     duration = int(s[j].duration) // int(WORD)
+        #     blank = int(s[j].post + s[j].prior) // int(WORD)
+        #     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
         duration = int(s[j].duration) // int(WORD)
         blank = int(s[j].post + s[j+1].prior) // int(WORD)
         p.add_sum_section(num_words=duration, num_post_blank_words=blank)
-    for i in range(s[-1].repeats-1):
-        duration = int(s[-1].duration) // int(WORD)
-        blank = int(s[-1].post + s[-1].prior) // int(WORD)
-        p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+    # for i in range(s[-1].repeats-1):
+    #     duration = int(s[-1].duration) // int(WORD)
+    #     blank = int(s[-1].post + s[-1].prior) // int(WORD)
+    #     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
     duration = int(s[-1].duration) // int(WORD)
-    blank = int(period - s[-1].end) // int(WORD)
+    blank = int(period - s[-1].end + s[0].prior) // int(WORD)
     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
+
     return p
 
 
@@ -803,11 +813,11 @@ def body(x):
             return body(b)
 
 
-def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
+def convert(sequence, channel_map, period, repeats=1, section=None, warn=False):
 
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = r = sequence.slots
-    a,c = split_awg_unit(alloc_table) # channel -> txport, rxport
+    a,c = split_awg_unit(channel_map) # channel -> txport, rxport
     
     # Tx チャネルはデータ変調
     for k in a:
@@ -826,35 +836,53 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
 
     # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
     section2slots = {}
-    for k,v in section.items(): # k:AWG,v:List[TxSection] or k:UNIT,v:List[RxSection]
+    for k, v in section.items(): # k:AWG,v:List[TxSection] or k:UNIT,v:List[RxSection]
         for vv in v: # vv:Union[TxSection,RxSection]
             if vv not in section2slots:
                 section2slots[vv] = deque([])
-            if k not in alloc_table: # k:Union[AWG,UNIT] 
+            if k not in channel_map: # k:Union[AWG,UNIT] 
                 with warnings.catch_warnings():
                     if not warn:
                         warnings.simplefilter('ignore')
                     warnings.warn('AWG|UNIT {} is Iqnored.'.format(k))
                 continue
-            for c in alloc_table[k]: # c:Channel
+            for c in channel_map[k]: # c:Channel
                 if c not in r: # sequence の定義内で使っていない論理チャネルがあり得る
                     with warnings.catch_warnings():
                         if not warn:
                             warnings.simplefilter('ignore')
                         warnings.warn('Channel {} is Iqnored.'.format(c))
                     continue
+                # for s in r[c]:
+                #     for i in range(vv.repeats):
+                #         print(vv, s, vv.begin + i * vv.total, s.begin, s.begin + s.duration, vv.end + i * vv.total)
+                #         if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
+                #             bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
+                #             bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
+                #             if bawg:
+                #                 section2slots[vv].append(s)
+                #             if bunit:
+                #                 section2slots[vv].append(s)
                 for s in r[c]:
-                    for i in range(vv.repeats):
-                        if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
-                            bawg = isinstance(k,AWG) and isinstance(body(s),SlotWithIQ)
-                            bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
-                            if bawg and i == 0:
-                                section2slots[vv].append(s)
-                            if bunit:
+                    bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
+                    bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
+                    if bawg:
+                        # print(vv, s, vv.begin, s.begin, s.begin + s.duration, vv.end)
+                        if vv.begin <= s.begin and s.begin <= vv.end:
+                            section2slots[vv].append(s)
+                    elif bunit:
+                        for i in range(vv.repeats):
+                            # print(vv, s, vv.begin + i * vv.total, s.begin, s.begin + s.duration, vv.end + i * vv.total)
+                            if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
                                 section2slots[vv].append(s)
 
+
+
+    # for k,v in section2slots.items():
+    #     print(k,v)
+
     # 各セクション毎に Chunk を合成する
-    awgs = [k for k in alloc_table if isinstance(k,AWG)]
+    awgs = [k for k in channel_map if isinstance(k,AWG)]
     for i,k in enumerate(awgs):
         if k in section:
             for s in section[k]:
@@ -866,10 +894,10 @@ def convert(sequence, alloc_table, period, repeats=1, section=None, warn=False):
                     s.iq[rng] += v.miq / len(ss)
     
     # # 束ねるチャネルを WaveSequence に変換
-    awgs = [k for k in alloc_table if isinstance(k,AWG)] # alloc_table から AWG 関連だけ抜き出す
+    awgs = [k for k in channel_map if isinstance(k,AWG)] # channel_map から AWG 関連だけ抜き出す
     wseqs = [(k, chunks2wseq(section[k], period, repeats)) for k in awgs if k in section] # chunk obj を wseq へ変換する
 
-    units = [k for k in alloc_table if isinstance(k,UNIT)] 
+    units = [k for k in channel_map if isinstance(k,UNIT)] 
     capts = [(k,sect2capt(section[k],period,repeats)) for k in units if k in section]
     
     return Setup(*(wseqs + capts))
@@ -895,13 +923,13 @@ def find_sequence(sequence, target):
             buf.append(o)
     return buf
 
-def acquire_section(sequence, alloc_table, section=None):
+def acquire_section(sequence, channel_map, section=None):
 
     if section is None:
         section = Sections()
 
-    tx = acquire_tx_section(sequence, alloc_table)
-    rx = acquire_rx_section(sequence.flatten(), alloc_table)
+    tx = acquire_tx_section(sequence, channel_map)
+    rx = acquire_rx_section(sequence.flatten(), channel_map)
 
     for k, v in tx.items():
         section[k] = v
@@ -913,97 +941,187 @@ def acquire_section(sequence, alloc_table, section=None):
 
     return section
 
-def acquire_tx_section(sequence, alloc_table, section=None):
-
-    log2phy = {o: k for k,v in alloc_table.items() if isinstance(k,AWG) for o in v}
-    logch = [k for k in sequence.flatten().slots if k is not None]
-    phych = [k for k in alloc_table for l in logch if l in alloc_table[k] and isinstance(k,AWG)]
-
-    # AWG と Series の対応辞書を作る
-    series = find_sequence(sequence, Series)
-    awg2series = d = dict()
-    for p in phych:
-        d[p] = deque()
-        for s in series:
-            if p in [log2phy[k] for k in s.flatten().slots.keys() if k is not None]:
-                d[p].append(s)
-
-    # 重複した Series を削除する
-    for k, v in awg2series.items():
-        item = lambda x: (x.begin, (x.end - x.begin) / x.repeats, x)
-        rng = r = sorted([item(o) for o in v], key=lambda x:x[1], reverse=True)
-        buffer = b = Sequence()
-        isout = lambda x, y: (y[0] + y[1] < x[0]) + (x[0] + x[1] < y[0])
-        isin = lambda x, y: (x[0] < y[0]) * (y[0] + y[1] < x[0] + x[1])
-        for i, o in enumerate(rng[:-1]):
-            skip = False
-            for m in rng[i+1:]:
-                if skip:
-                    continue
-                if isin(o, m):
-                    skip = True
-                    continue
-                b.append(o[2])
-        awg2series[k] = buffer
-        
-    # AWG と Slots の対応辞書を作る
-    awg2slots = dict()
-    slots = sequence.flatten().slots
-    for phychi in phych:
-        for k, v in slots.items():
-            if phychi is log2phy[k] if k is not None else None:
-                awg2slots[phychi] = deque()
-                for o in v:
-                    if isinstance(body(o),SlotWithIQ):
-                        if o not in awg2series[phychi].flatten():
-                            awg2slots[phychi].append(o)
+def acquire_tx_section(sequence, channel_map, section=None):
 
     if section is None:
         section = Sections()
 
-    for phychi in phych:
+    logch = [k for k in sequence.flatten().slots if k is not None]
+    phych = [k for k in channel_map for l in logch if l in channel_map[k] and isinstance(k,AWG)]
 
-        slots = np.array([(s.begin,(s.end-s.begin)/s.repeats,s.end,s.repeats) for s in awg2series[phychi] if isinstance(s,Series)])
-        if not slots:
-            if not awg2slots[phychi]:
-                continue
-            begin = min([o.begin for o in awg2slots[phychi]])
-            end = max([o.end for o in awg2slots[phychi]])
-            if begin % int(WORD):
-                raise ValueError('begin is not aligned')
-            if (end - begin) % int(BLOCK):
-                raise ValueError('durations is not aligned')
+    is_multi_chunk = math.prod([isinstance(v, (Series, Blank)) for o in sequence if isinstance(o, Series) for v in o])
+
+    if is_multi_chunk:
+
+        for phychi in phych:
+
             section[phychi] = deque()
-            section[phychi].append(TxSection(wait=begin,duration=end-begin,blank=0,repeats=1))
-            continue
-        slots = slots[np.argsort(slots[:,0])]
 
-        section[phychi] = deque()
+            wait = 0
+            series = [v for o in sequence if isinstance(o, Series) for v in o]
+            for o in [v for o in sequence if isinstance(o, (Series, Blank)) for v in o]:
 
-        begin, duration, end, repeats = slots[0]
-        section[phychi].append(TxSection(wait=begin,duration=duration,blank=0,repeats=int(repeats)))
-        for i in range(1,slots.shape[0]):
-            begin, duration, end, repeats = slots[i,0], slots[i,1], slots[i-1,2], slots[i,3]
-            section[phychi].append(TxSection(wait=begin-end,duration=duration,blank=0,repeats=int(repeats)))
+                if isinstance(o, Blank):
 
+                    wait += o.duration
+                    
+                elif isinstance(o, Series):
+                    
+                    d = (o.end - o.begin) / o.repeats
+
+                    if o is not series[-1]:
+
+                        blank = d % BLOCK
+                        if blank:
+                            u = [v for v in o.bodies.flatten() if not isinstance(v, (Range, Blank))]
+                            b = min([v.begin for v in u])
+                            e = max([v.end for v in u])
+                            if o.end / o.repeats - e < blank:
+                                raise ValueError('duration is wrong')
+                        d = d // BLOCK * BLOCK
+                        section[phychi].append(TxSection(wait=wait, duration=d, blank=blank, repeats=o.repeats))
+
+                    else:
+                        
+                        d = d // BLOCK * BLOCK + BLOCK
+                        section[phychi].append(TxSection(wait=wait, duration=d, blank=0, repeats=o.repeats))
+                    
+                    wait = 0
+
+    else:
+
+        for phychi in phych:
+
+            section[phychi] = deque()
+
+            u = [v for v in sequence.flatten() if not isinstance(v, (Range, Blank))]
+            b = min([v.begin for v in u]) // WORD * WORD
+            e = max([v.end for v in u])
+            d = ((e - b) // BLOCK + 1) * BLOCK
+            section[phychi].append(TxSection(wait=b, duration=d, blank=0, repeats=1))
+    
     return section
 
 
-def acquire_rx_section(sequence, alloc_table, section=None):
+    # # log2phy = {o: k for k,v in channel_map.items() if isinstance(k,AWG) for o in v}
+    # log2phy = {k: [o for o in v if isinstance(o,AWG)][0] for k, v in channel_map.logical.items()}
+    # logch = [k for k in sequence.flatten().slots if k is not None]
+    # phych = [k for k in channel_map for l in logch if l in channel_map[k] and isinstance(k,AWG)]
+
+    # # AWG と Series の対応辞書を作る
+    # series = find_sequence(sequence, Series)
+    # awg2series = d = dict()
+    # for p in phych:
+    #     d[p] = deque()
+    #     for s in series:
+    #         if p in [log2phy[k] for k in s.flatten().slots.keys() if k is not None]:
+    #             d[p].append(s)
+
+    # # 重複した Series を削除する
+    # for k, v in awg2series.items():
+    #     item = lambda x: (x.begin, (x.end - x.begin) / x.repeats, x)
+    #     rng = r = sorted([item(o) for o in v], key=lambda x:x[1], reverse=True)
+    #     buffer = b = Sequence()
+    #     isout = lambda x, y: (y[0] + y[1] < x[0]) + (x[0] + x[1] < y[0])
+    #     isin = lambda x, y: (x[0] < y[0]) * (y[0] + y[1] < x[0] + x[1])
+    #     for i, o in enumerate(rng[:-1]):
+    #         skip = False
+    #         for m in rng[i+1:]:
+    #             if skip:
+    #                 continue
+    #             if isin(o, m):
+    #                 skip = True
+    #                 continue
+    #             b.append(o[2])
+    #     awg2series[k] = buffer
+        
+    # # AWG と Slots の対応辞書を作る
+    # awg2slots = dict()
+    # slots = sequence.flatten().slots
+    # for phychi in phych:
+    #     for k, v in slots.items():
+    #         if phychi is log2phy[k] if k is not None else None:
+    #             awg2slots[phychi] = deque()
+    #             for o in v:
+    #                 if isinstance(body(o),SlotWithIQ):
+    #                     if o not in awg2series[phychi].flatten():
+    #                         awg2slots[phychi].append(o)
+
+    # 最も浅い repeats 付きの Series を参考にして Chunk をつくる
+    
+
+    # if section is None:
+    #     section = Sections()
+
+    # for phychi in phych:
+
+    #     print(phychi, awg2series[phychi])
+    #     slots = np.array([(s.begin,(s.end-s.begin)/s.repeats,s.end,s.repeats) for s in awg2series[phychi] if isinstance(s,Series)])
+    #     print(phychi, slots)
+    #     if not slots:
+    #         if not awg2slots[phychi]:
+    #             continue
+    #         begin = min([o.begin for o in awg2slots[phychi]])
+    #         end = max([o.end for o in awg2slots[phychi]])
+    #         if begin % int(WORD):
+    #             print(phychi, begin)
+    #             raise ValueError('begin is not aligned')
+    #         if (end - begin) % int(BLOCK):
+    #             raise ValueError('durations is not aligned')
+    #         section[phychi] = deque()
+    #         section[phychi].append(TxSection(wait=begin,duration=end-begin,blank=0,repeats=1))
+    #         continue
+    #     slots = slots[np.argsort(slots[:,0])]
+
+    #     section[phychi] = deque()
+
+    #     begin, duration, end, repeats = slots[0]
+    #     section[phychi].append(TxSection(wait=begin,duration=duration,blank=0,repeats=int(repeats)))
+    #     for i in range(1,slots.shape[0]):
+    #         begin, duration, end, repeats = slots[i,0], slots[i,1], slots[i-1,2], slots[i,3]
+    #         section[phychi].append(TxSection(wait=begin-end,duration=duration,blank=0,repeats=int(repeats)))
+
+    # return section
+
+
+def acquire_rx_section(sequence, channel_map, section=None):
 
     if section is None:
         section = Sections()
 
     logch = [k for k in sequence.slots if isinstance(k,Readout)]
-    phych = [k for k in alloc_table for l in logch if l in alloc_table[k] and isinstance(k,UNIT)]
+    phych = [k for k in channel_map for l in logch if l in channel_map[k] and isinstance(k,UNIT)]
 
     for phychi in phych:
 
-        slots = np.array([(s.begin,s.duration,s.end) for s in sequence if isinstance(body(s),Range) and s.ch in alloc_table[phychi]])
+        slots = np.array([(s.begin,s.duration,s.end) for s in sequence if isinstance(body(s),Range) and s.ch in channel_map[phychi]])
         slots = slots[np.argsort(slots[:,0])]
         
-        if (slots % int(WORD)).sum():
-            raise ValueError('!!!')
+        # duration % WORD == 0, blank % WORD == 0
+        # begin が条件を満たすように Range を前に offset する
+        # duration が条件を満たすように Range を stretch する
+        begin, duration, end = slots[0]
+        offset = begin - (begin // (2*WORD) * (2*WORD))
+        begin = begin - offset
+        duration = offset + duration
+        stretch = duration - (duration // WORD * WORD)
+        duration = duration + stretch
+        end = end + stretch
+        slots[0,:] = [begin, duration, end]
+        for i, slot in enumerate(slots[1:]):
+            begin, duration, end = slot
+            offset = begin - (begin // WORD * WORD)
+            begin = begin - offset
+            duration = offset + duration
+            stretch = duration - (duration // WORD * WORD)
+            duration = duration + stretch
+            end = end + stretch
+            slots[i+1,:] = [begin, duration, end]
+            
+        for i, _ in enumerate(slots[:-1]):
+            b, d, e = slots[i+1][0], slots[i+1][1], slots[i][2]
+            if b - e < 0:
+                raise ValueError('Sumsections are overlapped.')
         section[phychi] = deque()
 
         begin, duration, end = slots[0]

@@ -73,6 +73,37 @@ def split_send_recv(*setup):
     recv = tuple((o1, o2) for o1, o2 in setup if isinstance(o1,UNIT))
     return send, recv
 
+class ChannelMap(dict):
+
+    def __enter__(self):
+
+        return self
+    
+    def __exit__(self, exception_type, exception_value, traceback):
+        
+        pass
+
+    def map(self, physical, *logical):
+
+        self[physical] = logical
+
+    @property
+    def logical(self):
+        
+        rslt = {}
+        for k, v in self.items():
+            for o in v:
+                if o not in rslt:
+                    rslt[o] = [k]
+                else:
+                    rslt[o].append(k)
+
+        return rslt
+
+    @property
+    def physical(self):
+
+        return {k: v for k, v in self.items()}
 
 
 # WaveSequence と CaptureParam に直接アクセスできること
