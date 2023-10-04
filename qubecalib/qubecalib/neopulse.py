@@ -225,6 +225,8 @@ class Range( Slot, ChannelMixin ):
     pass
 
 
+Capture = Range
+
 class Blank ( Slot ):
     pass
 
@@ -344,6 +346,11 @@ class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
 
     begin = Float(None,allow_none=True)
     end = Float(None,allow_none=True)
+
+    def replace(self):
+
+        for s in self:
+            s.replace()
 
 
 class Series( LayoutBase ):
@@ -762,14 +769,24 @@ def chunks2wseq(chunks, period, repeats):
 
     # print(c)
 
-    for j, d in enumerate(list(c)[:-1]):
+    if len(c) > 1:
+        # ここは nS 単位で． __acquire_chunk__ 内で // int(WORD) してる
+        for j, d in enumerate(list(c)[:-1]):
+            if d.repeats > 1:
+                w.add_chunk(**__acquire_chunk__(d, d.repeats-1, d.post + d.prior))
+                # print((d.post + d.prior), (d.post + d.prior) // int(WORD))
+            w.add_chunk(**__acquire_chunk__(d, 1, d.post + c[j+1].prior))
+            # print((d.post + c[j+1].prior), (d.post + c[j+1].prior) // int(WORD))
+        d = c[-1]
         if d.repeats > 1:
             w.add_chunk(**__acquire_chunk__(d, d.repeats-1, d.post + d.prior))
-        w.add_chunk(**__acquire_chunk__(d, 1, d.post + c[j+1].prior))
-    d = c[-1]
-    if d.repeats > 1:
-        w.add_chunk(**__acquire_chunk__(d, d.repeats-1, d.post + d.prior))
-    w.add_chunk(**__acquire_chunk__(d, 1, (period - d.end)))
+            # print((d.post + d.prior), (d.post + d.prior) // int(WORD))
+        w.add_chunk(**__acquire_chunk__(d, 1, period - d.end + c[0].prior))
+        # print((period - d.end), (period - d.end) // int(WORD))
+    else:
+        d = c[0]
+        # print('LEN=1', d.prior, d.duration, d.end)
+        w.add_chunk(**__acquire_chunk__(d, 1, period - d.end + c[0].prior))
     
     return w
 
@@ -813,11 +830,11 @@ def body(x):
             return body(b)
 
 
-def convert(sequence, channel_map, period, repeats=1, section=None, warn=False):
+def convert(sequence, section, channel_map, period, repeats=1, warn=False):
 
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = r = sequence.slots
-    a,c = split_awg_unit(channel_map) # channel -> txport, rxport
+    a, c = split_awg_unit(channel_map) # channel -> txport, rxport
     
     # Tx チャネルはデータ変調
     for k in a:
@@ -864,7 +881,10 @@ def convert(sequence, channel_map, period, repeats=1, section=None, warn=False):
                 #             if bunit:
                 #                 section2slots[vv].append(s)
                 for s in r[c]:
-                    bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
+                    if vv.repeats == 1:
+                        bawg = isinstance(k,AWG) and isinstance(body(s),SlotWithIQ)
+                    else:
+                        bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
                     bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
                     if bawg:
                         # print(vv, s, vv.begin, s.begin, s.begin + s.duration, vv.end)
@@ -883,7 +903,7 @@ def convert(sequence, channel_map, period, repeats=1, section=None, warn=False):
 
     # 各セクション毎に Chunk を合成する
     awgs = [k for k in channel_map if isinstance(k,AWG)]
-    for i,k in enumerate(awgs):
+    for i, k in enumerate(awgs):
         if k in section:
             for s in section[k]:
                 t = s.sampling_points
@@ -949,7 +969,8 @@ def acquire_tx_section(sequence, channel_map, section=None):
     logch = [k for k in sequence.flatten().slots if k is not None]
     phych = [k for k in channel_map for l in logch if l in channel_map[k] and isinstance(k,AWG)]
 
-    is_multi_chunk = math.prod([isinstance(v, (Series, Blank)) for o in sequence if isinstance(o, Series) for v in o])
+    is_multi_chunk = np.array([isinstance(o, Series) for o in sequence]).prod()
+    is_multi_chunk *= np.array([isinstance(v, (Series, Blank)) for o in sequence if isinstance(o, Series) for v in o]).prod()
 
     if is_multi_chunk:
 
@@ -989,7 +1010,8 @@ def acquire_tx_section(sequence, channel_map, section=None):
                     wait = 0
 
     else:
-
+        
+        # print('Single Chunk Mode')
         for phychi in phych:
 
             section[phychi] = deque()
@@ -1137,6 +1159,7 @@ def plot_send_recv(fig, data, mag=False):
 
     n = len([vv for k,v in data.items() for vv in v])
     i = 1
+    rslt = []
     for k,v in data.items():
         for vv in v:
             if fig.axes:
@@ -1149,6 +1172,8 @@ def plot_send_recv(fig, data, mag=False):
                 ax.plot(np.real(vv))
                 ax.plot(np.imag(vv))
             i += 1
+            rslt.append(k)
+    return rslt
 
 def plot_setup(fig,setup,capture_delay=0):
     for i,tpl in enumerate(setup):
@@ -1201,6 +1226,7 @@ def plot_sequence(fig,sequence):
                 ax.set_ylim(-1.2,1.2)
 
 def plot_section(fig,section):
+
     for i,phych in enumerate(section):
         if i == 0:
             ax = ax1 = fig.add_subplot(len(section),1,i+1)

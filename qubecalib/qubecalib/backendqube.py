@@ -2,6 +2,7 @@ from .qube import CPT, AWG, UNIT
 from .meas import WaveSequenceFactory, CaptureModule, CaptureParam
 from .setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
 from .pulse import Read, Arbit
+from .neopulse import WORDs, nS
 import e7awgsw
 from e7awgsw import WaveSequence
 from typing import Union
@@ -747,3 +748,77 @@ def send_recv(*setup,trigs={},delay=1,timeout=30):
     return dct
     
 
+def quantize_sequence_duration(sequence_duration, constrain=10_240*nS):
+
+    return sequence_duration // constrain * constrain
+
+
+class WaveChunkFactory(object):
+    
+    def get_timestamp(self):
+        duration = self.num_wave_words * WORDs
+        samples = int(duration * 1e-9 * e7awgsw.AwgCtrl.SAMPLING_RATE)
+        return np.linspace(0, duration, samples)
+    
+    def __init__(self, num_wave_words=16, num_blank_words=0, num_repeats=1, init=0, amp=32767):
+        # duration の初期値は CW 出力を想定して設定した
+        # int(duration * AwgCtrl.SAMPLING_RATE) が 64 の倍数だと切れ目のない波形が出力される．
+        # 波形チャンクの最小サイズが 128ns (500Msps の繰り返し周期は 2ns)
+        
+        self._num_wave_words = num_wave_words
+        self.num_blank_words = num_blank_words # [s]
+        self.num_repeats = num_repeats # times
+        self.init = init # iq value
+        self.amp = amp
+        self.iq = np.zeros(*self.timestamp.shape).astype(complex)
+        self.iq[:] = init
+        
+    @property
+    def timestamp(self):
+        return self.get_timestamp()
+        
+    @property
+    def chunk(self):
+        
+        iq = self.amp * self.iq
+        i, q = np.real(iq).astype(int), np.imag(iq).astype(int)
+        s = e7awgsw.IqWave.convert_to_iq_format(i, q, e7awgsw.WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK)
+        
+        r = e7awgsw.AwgCtrl.SAMPLING_RATE
+        blank = self.num_blank_words * WORDs
+        b = int(r * blank * 1e-9)
+        n = e7awgsw.WaveSequence.NUM_SAMPLES_IN_AWG_WORD
+        
+        return {'iq_samples': s, 'num_blank_words': b // n, 'num_repeats': self.num_repeats}
+    
+    @property
+    def num_wave_words(self):
+        
+        return self._num_wave_words
+    
+    @num_wave_words.setter
+    def num_wave_words(self, v):
+        
+        self._num_wave_words = v
+        self.iq = np.zeros(*self.timestamp.shape).astype(complex)
+        self.iq[:] = self.init
+
+
+class WaveSequenceFactory(object):
+    
+    def __init__(self, num_wait_words=0, num_repeats=1):
+        
+        self.num_wait_words = num_wait_words
+        self.num_repeats = num_repeats
+        self.chunk = []
+        
+    def new_chunk(self, wave_chunk_factory):
+        
+        self.chunk.append(wave_chunk_factory)
+        
+    def acquire(self):
+        
+        w = e7awgsw.WaveSequence(self.num_wait_words, self.num_repeats)
+        for c in self.chunk:
+            w.add_chunk(**c.chunk)
+        return w
