@@ -2,7 +2,7 @@ from .qube import CPT, AWG, UNIT
 from .meas import WaveSequenceFactory, CaptureModule, CaptureParam
 from .setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
 from .pulse import Read, Arbit
-from .neopulse import WORDs, nS
+from .neopulse import WORDs, nS, MHz
 import e7awgsw
 from e7awgsw import WaveSequence
 from typing import Union
@@ -86,10 +86,14 @@ class ChannelMap(dict):
 
     def map(self, physical, *logical):
 
+        if isinstance(physical, UNIT):
+            if len(logical) != 1:
+                raise ValueError('Only one logical channel can be mapped to a capture unit.')
+
         self[physical] = logical
 
     @property
-    def logical(self):
+    def physical(self):
         
         rslt = {}
         for k, v in self.items():
@@ -102,7 +106,7 @@ class ChannelMap(dict):
         return rslt
 
     @property
-    def physical(self):
+    def logical(self):
 
         return {k: v for k, v in self.items()}
 
@@ -822,3 +826,69 @@ class WaveSequenceFactory(object):
         for c in self.chunk:
             w.add_chunk(**c.chunk)
         return w
+
+# from QubeServer.py by Tabuchi
+# DSPのバンドパスフィルターを構成するFIRの係数を生成.
+def acquisition_fir_coefficient(bb_frequency):
+    ADCBB_SAMPLE_R = 500
+    ACQ_MAX_FCOEF = 16 # The maximum number of the FIR filter taps prior to decimation process.
+    ACQ_FCBIT_POW_HALF = 2**15 # equivalent to 2^(ACQ_FCOEF_BITS-1).
+    
+    sigma = 100.0 # nanoseconds
+    freq_in_mhz = bb_frequency # MHz
+    n_of_band = 16 # The maximum number of the FIR filter taps prior to decimation process.
+    band_step = 500 / n_of_band
+    band_idx = ( int( freq_in_mhz/band_step+0.5+n_of_band)-n_of_band )
+    band_center = band_step * band_idx
+    x = np.arange(ACQ_MAX_FCOEF) - (ACQ_MAX_FCOEF-1)/2
+    gaussian = np.exp(-0.5*x**2/(sigma**2))
+    phase_factor = 2*np.pi*(band_center/ADCBB_SAMPLE_R)*np.arange(ACQ_MAX_FCOEF)
+    coeffs = gaussian*np.exp(1j*phase_factor)*(1-1e-3)
+    return list((np.real(coeffs) * ACQ_FCBIT_POW_HALF).astype(int) + 1j * (np.imag(coeffs) * ACQ_FCBIT_POW_HALF).astype(int))
+
+
+# CaptureParam.capture_delay に num_capture_delay_word を追加する
+# パルスシーケンスに必要な delay に追加する際に用いる
+def captparam_add_capture_delay(captparam, num_capture_delay_word):
+
+    captparam.capture_delay += num_capture_delay_word
+
+
+def captparam_enable_dspunit(captparam, dspunit):
+
+    dspunits = captparam.dsp_units_enabled
+    dspunits.append(dspunit)
+    captparam.sel_dsp_units_to_enable(*dspunits)
+
+
+def captparam_enable_integration(captparam):
+
+    captparam_enable_dspunit(captparam, e7awgsw.DspUnit.INTEGRATION) # DSPの積算測定モジュールを有効化. 積算回数はrepeatsで設定.
+
+
+def captparam_enable_sum(captparam):
+
+    captparam_enable_dspunit(captparam, e7awgsw.DspUnit.SUM)
+
+
+def captparam_enable_classification(captparam):
+
+    captparam_enable_dspunit(captparam, e7awgsw.DspUnit.CLASSIFICATION)
+
+
+def captparam_enable_demodulation(captparam, physical_channel, logical_channel):
+
+    p, u, o = captparam, physical_channel, logical_channel
+    # DSP で周波数変換する複素窓関数を設定
+    t = 4*np.arange(p.NUM_COMPLEXW_WINDOW_COEFS)*2*nS
+    m = u.capt.modulation_frequency(mhz=o.frequency/MHz)*MHz
+    p.complex_window_coefs = list(np.round((2**31-1) * np.exp(-1j*2*np.pi*(m*t))))
+    p.complex_fir_coefs = acquisition_fir_coefficient(-m/MHz) # BPFの係数を設定
+
+    dspunits = p.dsp_units_enabled
+    # DSPのどのモジュールを有効化するかを指定
+    dspunits.append(e7awgsw.DspUnit.COMPLEX_FIR) # DSPのBPFを有効化
+    dspunits.append(e7awgsw.DspUnit.DECIMATION) # DSPの間引1/4を有効化
+    # dspunits.append(e7awgsw.DspUnit.REAL_FIR)
+    dspunits.append(e7awgsw.DspUnit.COMPLEX_WINDOW) # 複素窓関数を有効化
+    p.sel_dsp_units_to_enable(*dspunits)

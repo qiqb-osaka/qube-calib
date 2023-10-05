@@ -703,7 +703,37 @@ class UserSequenceBase ( object ):
 
 SequenceBase = UserSequenceBase
 
+
 class Setup(list):
+
+    class CaptParamsIter( object ):
+
+        def __init__(self, setup, channel_map, *logical_channels):
+
+            self.setup = setup
+            self.channel_map = channel_map
+            if logical_channels:
+                self.logical_channels = logical_channels
+            else:
+                self.logical_channels = tuple([channel_map.logical[u][0] for u, c in setup if isinstance(u, UNIT)])
+            self.current_idx = 0
+        
+        def __iter__(self):
+
+            return self
+
+        def __next__(self):
+
+            try:
+                logical_channel = l = self.logical_channels[self.current_idx]
+            except IndexError:
+                raise StopIteration()
+
+            u = [o for o in self.channel_map.physical[l] if isinstance(o, UNIT)][0]
+
+            self.current_idx += 1
+
+            return self.setup.get(u), u, l
 
     def __init__(self,*args):
 
@@ -713,6 +743,12 @@ class Setup(list):
 
         keys = [k for k,v in self]
         return self[keys.index(arg)][1]
+
+    def captparams(self, channel_map, *logical_channels):
+
+        return Setup.CaptParamsIter(self, channel_map, *logical_channels)
+
+
 
 def organize_slots(sequence):
     r = {}
