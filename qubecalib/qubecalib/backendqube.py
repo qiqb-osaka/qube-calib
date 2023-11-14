@@ -1578,7 +1578,9 @@ def convert(sequence, section, channel_map, period, repeats=1, warn=False):
                 ss = section2slots[s]
                 for v in ss:
                     rng = (v.begin <= t) * (t < v.end)
-                    s.iq[rng] += v.miq / len(ss)
+                    s.iq[rng] += v.miq # / len(ss)
+                if max(abs(np.real(s.iq))) > 32767 or max(abs(np.imag(s.iq))) > 32767:
+                    raise ValueError('Exceeds the maximum allowable output.')
     
     # # 束ねるチャネルを WaveSequence に変換
     awgs = [k for k in channel_map if isinstance(k,AWG)] # channel_map から AWG 関連だけ抜き出す

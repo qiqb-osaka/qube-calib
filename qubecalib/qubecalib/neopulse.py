@@ -99,15 +99,20 @@ class SlotWithIQ ( Slot ):
     def __init__(self,**kw):
         
         self.__iq__ = None
+        self.__virtual_z_theta__ = 0
 
         super().__init__(**kw)
 
     def update_iq(self):
         raise NotImplementedError()
-    
+
+    def virtual_z(self, theta):
+        self.__virtual_z_theta__ = theta
+
     @property
     def iq(self):
         self.update_iq()
+        self.__iq__ = np.exp(1j * self.__virtual_z_theta__) * self.__iq__
         return self.__iq__
     
     @observe("duration")
@@ -199,11 +204,19 @@ class Shadow( HasTraits ):
 class Range( Slot, ChannelMixin ):
     pass
 
-
 Capture = Range
 
 class Blank ( Slot ):
     pass
+
+class VirtualZ ( Slot, ChannelMixin ):
+
+    def __init__(self,theta=0,begin=None,end=None,**kw):
+
+        self.theta = theta
+
+        super().__init__(begin, 0, end, **kw)
+        ChannelMixin.__init__(self)
 
 
 class RaisedCosFlatTop ( SlotWithIQ, ChannelMixin ):
@@ -311,10 +324,26 @@ class Sequence( DequeWithContext, HasFlatten ):
                 else:
                     r[None].append(v)
         return r
-    
+
+    def apply_virtual_z(self):
+
+        # Apply Virtual Z
+        theta = {}
+        for o in self.flatten():
+            if isinstance(o, VirtualZ):
+                if not o.ch in theta:
+                    theta[o.ch] = o.theta
+                else:
+                    theta[o.ch] += o.theta
+            if isinstance(o, SlotWithIQ):
+                if not o.ch in theta:
+                    theta[o.ch] = 0
+                o.virtual_z(theta[o.ch])
+
     def __exit__(self, exception_type, exception_value, traceback):
 
         __rc__.contexts.pop()
+        self.apply_virtual_z()
 
 
 class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
@@ -329,7 +358,6 @@ class LayoutBase( HasTraits, DequeWithContext, HasFlatten ):
 
 
 class Series( LayoutBase ):
-
 
     def __init__(self, repeats=1, **kw):
 
@@ -569,6 +597,8 @@ def plot_sequence(fig,sequence):
                 duration = int(s.duration)
                 ax.add_patch(patches.Rectangle(xy=(begin,-1),width=duration,height=2))
                 ax.set_ylim(-1.2,1.2)
+            elif isinstance(body(s),VirtualZ):
+                pass
             else:
                 t = s.sampling_points
                 ax.plot(t,np.real(s.iq))
