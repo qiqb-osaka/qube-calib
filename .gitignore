@@ -12,4 +12,3 @@ Pipfile.lock
 qubecalib/qubecalib.egg-info
 qubecalib/build/*
 qubecalib/dist/*
-qubecalib/qubecalib/__pycache__/*

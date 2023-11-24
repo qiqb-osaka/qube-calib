@@ -10,6 +10,7 @@ from e7awgsw import WaveSequence, CaptureParam, AwgCtrl, IqWave
 from typing import Union
 import os
 import time
+import socket
 import struct
 from collections import namedtuple, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -24,7 +25,40 @@ from e7awgsw import AwgCtrl, CaptureCtrl, DspUnit, DspUnit
 # from qubecalib.qube import CPT
 # from qubecalib.meas import WaveSequenceFactory
 # from qubecalib.setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
+<<<<<<< HEAD
 from quel_clock_master import QuBEMasterClient, SequencerClient
+=======
+from quel_clock_master.qubemasterclient import QuBEMasterClient
+from quel_clock_master.sequencerclient import SequencerClient
+# from quel_clock_master.software.readclock import QuBEMonitor
+
+class QuBEMonitor( object ):
+    BUFSIZE = 16384
+    TIMEOUT = 25
+
+    def __init__(self, ip_addr, port):
+        self.__dest_addr = (ip_addr, port)
+        self.__sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.__sock.settimeout(self.TIMEOUT)
+        self.__sock.bind(('', 0))
+        print('open: {}:{}'.format(ip_addr, port))
+
+    def send_recv(self, data):
+        try:
+            self.__sock.sendto(data, self.__dest_addr)
+            return self.__sock.recvfrom(self.BUFSIZE)
+        except socket.timeout as e:
+            print('{},  Dest {}'.format(e, self.__dest_addr))
+            raise
+        except Exception as e:
+            print(e)
+            raise
+
+    def read_time(self):
+        data = struct.pack('BBBB', 0x00, 0x00, 0x00, 0x04)
+        ret,addr = self.send_recv(data)
+        return struct.unpack('>Q', ret[4:12])[0]    
+>>>>>>> Changed to refer to quel_clock_master.
 
 
 PORT = 16384
@@ -32,7 +66,6 @@ IPADDR = '10.3.0.255'
 REPEAT_WAIT_SEC = 0.1
 REPEAT_WAIT_SEC = int(REPEAT_WAIT_SEC * 125000000) # 125Mcycles = 1sec
 CANCEL_STOP_PACKET = struct.pack(8*'B', 0x2c, *(7*[0]))
-
 
 
 def check_clock(*qubes, ipmaster='10.3.0.255'):
