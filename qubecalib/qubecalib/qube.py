@@ -1,33 +1,32 @@
-from . import meas
-
 import sys
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 import yaml
 import math
 import warnings
-import traceback
 import qubelsi.qube
-from e7awgsw import AWG, CaptureModule, AwgCtrl, CaptureCtrl, CaptureUnit
+from e7awgsw import AwgCtrl
 import e7awgsw
 from typing import Final
 import os
 import subprocess
 import weakref
 
+from . import meas
+
 VERSION = '1.5.0'
 
-if 'QUBECALIB_PATH_TO_ROOT' in os.environ:
-    PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT']
-else:
-    PATH_TO_ROOT: Final[str] = '.'
-PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
-PATH_TO_API: str = "{}/../adi_api_mod".format(PATH_TO_ROOT)
-if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
-    PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
-else:
-    PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
-sys.path.append(os.path.join(PATH_TO_ROOT,'..'))
+# PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT'] if 'QUBECALIB_PATH_TO_ROOT' in os.environ else '.'
+# PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
+# PATH_TO_API: str = "{}/../adi_api_mod".format(PATH_TO_ROOT)
+PATH_TO_CONFIG: Final[str] = os.environ['QUBECALIB_PATH_TO_CONFIG']
+PATH_TO_ADIAPIMOD: Final[str] = os.environ['QUBECALIB_PATH_TO_ADIAPIMOD']
+PATH_TO_BITFILE: Final[str] = os.environ['QUBECALIB_PATH_TO_BITFILE']
+# if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
+#     PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
+# else:
+#     PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
+sys.path.append(os.path.join(os.environ['QUBECALIB_PATH_TO_MODULES']))
 
 class LSI(ABC):
     
@@ -531,7 +530,7 @@ class ConfigFPGA(object):
     @classmethod
     def config(cls, bitfile: str) -> None:
         os.environ['BITFILE'] = '{}/{}'.format(PATH_TO_BITFILE, bitfile)
-        commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_API)]
+        commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_ADIAPIMOD)]
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
         
@@ -561,10 +560,10 @@ class Qube(object): # QubeInstanceFactory
         o = cls.load(config_file_name)
         
         if o['type'] == 'A':
-            return QubeTypeA(o['iplsi'], PATH_TO_API, o)
+            return QubeTypeA(o['iplsi'], PATH_TO_ADIAPIMOD, o)
         
         if o['type'] == 'B':
-            return QubeTypeB(o['iplsi'], PATH_TO_API, o)
+            return QubeTypeB(o['iplsi'], PATH_TO_ADIAPIMOD, o)
         
         
 class QubeBase(qubelsi.qube.Qube):
@@ -618,7 +617,7 @@ class QubeBase(qubelsi.qube.Qube):
     def _config_fpga(self, bitfile):
         
         os.environ['BITFILE'] = '{}/{}'.format(PATH_TO_BITFILE, bitfile)
-        commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_API)]
+        commands = ["vivado", "-mode", "batch", "-source", "{}/utils/config.tcl".format(PATH_TO_ADIAPIMOD)]
         ret = subprocess.check_output(commands , encoding='utf-8')
         return ret
     
