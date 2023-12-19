@@ -70,7 +70,7 @@ class QSConstants:
   MNRNAME            = 'QuBE Manager'
   ENV_SRVSEL         = 'QUBE_SERVER'
   THREAD_MAX_WORKERS = 32
-  DAQ_MAXLEN         = 199936                               # nano-seconds -> 24,992 AWG Word
+  DAQ_MAXLEN         = 134_217_728                          # nano-seconds -> 2^26 Samples
   DAC_SAMPLE_R       = 12000                                # MHz
   NCO_SAMPLE_F       = 2000                                 # MHz, NCO frequency at main data path
   ADC_SAMPLE_R       = 6000                                 # MHz
