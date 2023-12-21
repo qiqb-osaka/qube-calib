@@ -4,6 +4,8 @@ __all__ =[
     'Qube',
 ]
 
+__version__ = '1.0.0'
+
 from .qube import Qube
 from .meas import Send, Recv
 from . import backendqube

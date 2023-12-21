@@ -2,7 +2,7 @@ import setuptools
  
 setuptools.setup(
     name="qubecalib",
-    version="0.1",
+    version="1.0.0",
     author="h403",
     author_email="shiomi@ieee.org",
     description="QuBE calibration tools",
