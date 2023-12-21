@@ -14,8 +14,6 @@ import weakref
 
 from . import meas
 
-VERSION = '1.5.0'
-
 # PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT'] if 'QUBECALIB_PATH_TO_ROOT' in os.environ else '.'
 # PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
 # PATH_TO_API: str = "{}/../adi_api_mod".format(PATH_TO_ROOT)
@@ -711,7 +709,7 @@ class QubeTypeA(QubeBase):
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7),(e7.AWG.U9, 6),(e7.AWG.U10, 5),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
@@ -840,7 +838,7 @@ class QubeTypeB(QubeBase):
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7), (e7.AWG.U9, 6), (e7.AWG.U10, 5),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
