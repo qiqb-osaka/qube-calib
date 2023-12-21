@@ -1,6 +1,6 @@
 '''Calibration package for QuBE'''
 
-__version__ = "0.9.0"
+__version__ = '1.0.0'
 
 from .qube import Qube
 from .meas import Send, Recv

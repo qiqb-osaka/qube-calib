@@ -712,7 +712,7 @@ class QubeTypeA(QubeBase):
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7),(e7.AWG.U9, 6),(e7.AWG.U10, 5),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5),(e7.AWG.U9, 6),(e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
@@ -841,7 +841,7 @@ class QubeTypeB(QubeBase):
         
         self.port6: Final[Port] = Ctrl(
             qube = self,
-            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 7), (e7.AWG.U9, 6), (e7.AWG.U10, 5),]),
+            dac = DAC(lsi = dac[0], ch = 3, ipfpga = ip, awgs = [(e7.AWG.U8, 5), (e7.AWG.U9, 6), (e7.AWG.U10, 7),]),
             lo = LMX2594(lsi = lo[3]),
             mix = ADRF6780(lsi = mix[3], ad5328 = AD5328(lsi = vatt, ch = 3)),
         )
