@@ -4,6 +4,7 @@ from enum import Enum, auto
 import yaml
 import math
 import warnings
+import qubelsi
 import qubelsi.qube
 from e7awgsw import AwgCtrl
 import e7awgsw
@@ -14,17 +15,10 @@ import weakref
 
 from . import meas
 
-# PATH_TO_ROOT: Final[str] = os.environ['QUBECALIB_PATH_TO_ROOT'] if 'QUBECALIB_PATH_TO_ROOT' in os.environ else '.'
-# PATH_TO_CONFIG = '{}/.config'.format(PATH_TO_ROOT)
-# PATH_TO_API: str = "{}/../adi_api_mod".format(PATH_TO_ROOT)
+
 PATH_TO_CONFIG: Final[str] = os.environ['QUBECALIB_PATH_TO_CONFIG']
-PATH_TO_ADIAPIMOD: Final[str] = os.environ['QUBECALIB_PATH_TO_ADIAPIMOD']
+PATH_TO_ADIAPIMOD: Final[str] = qubelsi.__path__[0]+'/bin'
 PATH_TO_BITFILE: Final[str] = os.environ['QUBECALIB_PATH_TO_BITFILE']
-# if 'QUBECALIB_PATH_TO_BITFILE' in os.environ:
-#     PATH_TO_BITFILE: str = os.environ['QUBECALIB_PATH_TO_BITFILE']
-# else:
-#     PATH_TO_BITFILE: str = "{}/bin".format(os.environ['HOME'])
-sys.path.append(os.path.join(os.environ['QUBECALIB_PATH_TO_MODULES']))
 
 class LSI(ABC):
     
