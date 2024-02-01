@@ -1,10 +1,1 @@
-import importlib
-
-
-def reload(m):
-    try:
-        m
-    except NameError:
-        import m
-    else:
-        importlib.reload(m)
+from __future__ import annotations

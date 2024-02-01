@@ -1,41 +1,40 @@
-from enum import Enum
 from typing import Final
 
 import numpy as np
 
 
-class Units(Enum):
-    Sec = 1e9
-    mS = 1e6
-    uS = 1e3
-    nS = 1.0
-    Hz = 1e-9
-    kHz = 1e-6
-    MHz = 1e-3
-    GHz = 1.0
-    BLOCK = 128.0  # ns
-    BLOCKs = BLOCK
-    WORD = 8.0  # ns
-    WORDs = WORD
-    RAD = 1.0
-    DEG = np.pi / 180.0
+class Units:
+    Sec: Final[float] = 1e9
+    mS: Final[float] = 1e6
+    uS: Final[float] = 1e3
+    nS: Final[float] = 1.0
+    Hz: Final[float] = 1e-9
+    kHz: Final[float] = 1e-6
+    MHz: Final[float] = 1e-3
+    GHz: Final[float] = 1.0
+    BLOCK: Final[float] = 128.0  # ns
+    BLOCKs: Final[float] = BLOCK
+    WORD: Final[float] = 8.0  # ns
+    WORDs: Final[float] = WORD
+    RAD: Final[float] = 1.0
+    DEG: Final[float] = np.pi / 180.0
 
 
-Sec: Final[Units] = Units.Sec
-mS: Final[Units] = Units.mS
-uS: Final[Units] = Units.uS
-nS: Final[Units] = Units.nS
+Sec: Final[float] = Units.Sec
+mS: Final[float] = Units.mS
+uS: Final[float] = Units.uS
+nS: Final[float] = Units.nS
 
-Hz: Final[Units] = Units.Hz
-kHz: Final[Units] = Units.kHz
-MHz: Final[Units] = Units.MHz
-GHz: Final[Units] = Units.GHz
+Hz: Final[float] = Units.Hz
+kHz: Final[float] = Units.kHz
+MHz: Final[float] = Units.MHz
+GHz: Final[float] = Units.GHz
 
-BLOCK: Final[Units] = Units.BLOCK
-BLOCKs: Final[Units] = Units.BLOCKs
+BLOCK: Final[float] = Units.BLOCK
+BLOCKs: Final[float] = Units.BLOCKs
 
-WORD: Final[Units] = Units.WORD
-WORDs: Final[Units] = Units.WORDs
+WORD: Final[float] = Units.WORD
+WORDs: Final[float] = Units.WORDs
 
-RAD: Final[Units] = Units.RAD
-DEG: Final[Units] = Units.DEG
+RAD: Final[float] = Units.RAD
+DEG: Final[float] = Units.DEG
