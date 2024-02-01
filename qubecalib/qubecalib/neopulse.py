@@ -7,7 +7,7 @@ import matplotlib.patches as patches
 import numpy as np
 from traitlets import Float, HasTraits, link, observe
 
-from .units import *
+from .units import RAD, nS
 
 # The internal time and frequency units are [ns] and [GHz], respectively.
 
@@ -21,8 +21,31 @@ RunningConfig.__new__.__defaults__ = (deque(),)
 __rc__: Final[RunningConfig] = RunningConfig()
 
 
+def ceil(value: float, unit: float = 1) -> float:
+    """valueの値を指定したunitの単位でその要素以上の最も近い数値に丸める
+
+    Args:
+        value (float): 対象の値
+        unit (float, optional): 丸める単位. Defaults to 1.
+
+    Returns:
+        float: 丸めた値
+    """
+    MAGNIFIER = 1_000_000
+
+    # unit が循環小数の場合に丸めなければならない場合がある
+    if value % unit < 1e-9:
+        return value
+
+    value, unit = int(value * MAGNIFIER), int(unit * MAGNIFIER)
+    if value % unit:
+        return int((value // unit + 1) * unit) / MAGNIFIER
+    else:
+        return int((value // unit) * unit) / MAGNIFIER
+
+
 class Channel:
-    def __init__(self, frequency, *args, **kw):
+    def __init__(self, frequency: float, *args, **kw):
         self.frequency = frequency
 
 
@@ -96,36 +119,38 @@ class SlotWithIQ(Slot):
 
         super().__init__(**kw)
 
-    def update_iq(self):
+    def func(self, t):
         raise NotImplementedError()
+
+    def ufunc(self, t):
+        return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
 
     def virtual_z(self, theta):
         self.__virtual_z_theta__ = theta
 
     @property
     def iq(self):
-        self.update_iq()
-        self.__iq__ = np.exp(1j * self.__virtual_z_theta__) * self.__iq__
+        if self.begin == None or self.end == None:
+            raise ValueError("Either or both 'begin' and 'end' are not initialized.")
+        self.__iq__ = self.ufunc(self.sampling_points_zero) * np.exp(
+            1j * self.__virtual_z_theta__
+        )
         return self.__iq__
-
-    @observe("duration")
-    def notify_duration_change(self, e):
-        self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(
-            complex
-        )  # iq data
 
     @property
     def sampling_points(self):
-        return self.sampling_points_zero + self.begin  # sampling points [ns]
+        return np.arange(
+            ceil(self.begin, 2 * nS), ceil(self.end, 2 * nS), self.SAMPLING_PERIOD
+        )  # sampling points [ns]
 
     @property
     def sampling_points_zero(self):
-        return (
-            np.arange(0, len(self.__iq__)) * self.SAMPLING_PERIOD
-        )  # sampling points [ns]
+        return self.sampling_points - self.begin  # sampling points [ns]
 
 
 class Arbit(SlotWithIQ, ChannelMixin):
+    """ "サンプリング点を直接与えるためのオブジェクト"""
+
     def __init__(self, **kw):
         if "init" in kw:
             self.init = kw["init"]
@@ -134,11 +159,64 @@ class Arbit(SlotWithIQ, ChannelMixin):
             self.init = 0 + 0j
         super().__init__(**kw)
 
-    def update_iq(self):
-        self.iq[:] = self.init
+    @observe("duration")
+    def notify_duration_change(self, e):
+        self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(
+            complex
+        )  # iq data
+
+    def ufunc(self, t=None):
+        """
+        iq データを格納している numpy array への参照を返す
+
+        Parameters
+        ----------
+        t : numpy.ndarray(float)
+            与えると対象の時間列に則した点数にサンプルした iq データを返す
+        """
+        if t is None:
+            return self.__iq__
+        else:
+            rslt = np.zeros(t.shape).astype(complex)
+            b, e = self.begin, self.end
+            iq = self.__iq__
+            idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
+            # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
+            # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
+            # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
+            # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
+            l, m = t[idx].shape[0], iq.shape[0]
+            n = int(l // m)
+            v = (
+                np.stack(
+                    n
+                    * [
+                        iq,
+                    ]
+                )
+                .transpose()
+                .reshape(n * m)
+            )
+            o = v.shape[0]
+
+            if l == o:
+                rslt[idx] = v
+            elif l < o:
+                rslt[idx] = v[: (l - o)]
+            else:
+                idx[(o - l) :] = False
+                rslt[idx] = v
+
+            return rslt
+
+    @property
+    def iq_array(self):
+        return self.__iq__
 
 
 class Shadow(HasTraits):
+    """ "繰り返し機能を使うための影オブジェクト"""
+
     SAMPLING_PERIOD: Final[float] = 2 * nS
 
     begin = Float(None, allow_none=True)
@@ -184,13 +262,13 @@ class Shadow(HasTraits):
 
     @property
     def sampling_points(self):
-        return self.sampling_points_zero + self.begin  # sampling points [ns]
+        return np.arange(
+            ceil(self.begin, 2), ceil(self.end, 2), self.SAMPLING_PERIOD
+        )  # sampling points [ns]
 
     @property
     def sampling_points_zero(self):
-        return (
-            np.arange(0, len(self.__iq__)) * self.SAMPLING_PERIOD
-        )  # sampling points [ns]
+        return self.sampling_points - self.begin  # sampling points [ns]
 
 
 class Range(Slot, ChannelMixin):
@@ -201,7 +279,19 @@ Capture = Range
 
 
 class Blank(Slot):
-    pass
+    SAMPLING_PERIOD: Final[float] = 2 * nS
+
+    @property
+    def sampling_points(self) -> np.ndarray:
+        return np.arange(
+            ceil(self.begin, 2), ceil(self.end, 2), self.SAMPLING_PERIOD
+        )  # sampling points [ns]
+
+    def func(self, t: float) -> float:
+        return 0.0
+
+    def ufunc(self, t: float) -> np.ufunc:
+        return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
 
 
 class VirtualZ(Slot, ChannelMixin):
@@ -214,21 +304,28 @@ class VirtualZ(Slot, ChannelMixin):
 
 class RaisedCosFlatTop(SlotWithIQ, ChannelMixin):
     """
-    Raised Cosine FlatTopパルスを追加する.
-    ampl : 全体にかかる振幅
-    phase : 全体にかかる位相[rad]
-    rise_time: 立ち上がり・立ち下がり時間[ns]
+    Raised Cosine FlatTopパルス
+
+    Attributes
+    ----------
+    ampl : float
+        全体にかかる振幅
+    phase : float
+        全体にかかる位相[rad]
+    rise_time: float
+        立ち上がり・立ち下がり時間[ns]
     """
 
-    def __init__(self, ampl=1, phase=0 * RAD, rise_time=0 * nS, **kw):
+    def __init__(
+        self, ampl: float = 1, phase: float = 0 * RAD, rise_time: float = 0 * nS, **kw
+    ):
         self.ampl = ampl
         self.phase = phase
         self.rise_time = rise_time
 
         super().__init__(**kw)
 
-    def update_iq(self):
-        t = self.sampling_points_zero
+    def func(self, t: float) -> float:
         flattop_duration = self.duration - self.rise_time * 2
 
         t1 = 0
@@ -236,23 +333,20 @@ class RaisedCosFlatTop(SlotWithIQ, ChannelMixin):
         t3 = t2 + flattop_duration  # 立ち下がり開始時刻
         t4 = t3 + self.rise_time  # 立ち下がり完了時刻
 
-        cond12 = (t1 <= t) & (t < t2)  # 立ち上がり時間領域の条件ブール値
-        cond23 = (t2 <= t) & (t < t3)  # 一定値領域の条件ブール値
-        cond34 = (t3 <= t) & (t < t4)  # 立ち下がり時間領域の条件ブール値
+        if (t1 <= t) & (t < t2):  # 立ち上がり時間領域の条件ブール値
+            v = (1.0 - np.cos(np.pi * (t - t1) / self.rise_time)) / (
+                2.0 + 0.0j
+            )  # 立ち上がり時間領域
+        elif (t2 <= t) & (t < t3):  # 一定値領域の条件ブール値
+            v = 1.0 + 0.0j  # 一定値領域
+        elif (t3 <= t) & (t < t4):  # 立ち下がり時間領域の条件ブール値
+            v = (1.0 - np.cos(np.pi * (t4 - t) / self.rise_time)) / (
+                2.0 + 0.0j
+            )  # 立ち下がり時間領域
+        else:
+            v = 0.0 + 0.0j
 
-        t12 = t[cond12]  # 立ち上がり時間領域の時間リスト
-        t23 = t[cond23]  # 一定値領域の時間リスト
-        t34 = t[cond34]  # 立ち下がり時間領域の時間リスト
-
-        self.__iq__[cond12] = (1.0 - np.cos(np.pi * (t12 - t1) / self.rise_time)) / (
-            2.0 + 0.0j
-        )  # 立ち上がり時間領域
-        self.__iq__[cond23] = 1.0 + 0.0j  # 一定値領域
-        self.__iq__[cond34] = (1.0 - np.cos(np.pi * (t4 - t34) / self.rise_time)) / (
-            2.0 + 0.0j
-        )  # 立ち下がり時間領域
-
-        self.__iq__[:] *= self.ampl * np.exp(1j * self.phase)
+        return v * self.ampl * np.exp(1j * self.phase)
 
 
 class Rectangle(SlotWithIQ, ChannelMixin):
@@ -261,8 +355,8 @@ class Rectangle(SlotWithIQ, ChannelMixin):
         self.phase = phase
         super().__init__(**kw)
 
-    def update_iq(self):
-        self.__iq__[:] = self.ampl * np.exp(1j * self.phase)
+    def func(self, t):
+        return (1 + 0j) * self.ampl * np.exp(1j * self.phase)
 
 
 class DequeWithContext(deque):
@@ -316,14 +410,16 @@ class Sequence(DequeWithContext, HasFlatten):
         theta = {}
         for o in self.flatten():
             if isinstance(o, VirtualZ):
-                if o.ch not in theta:
-                    theta[o.ch] = o.theta
-                else:
-                    theta[o.ch] += o.theta
+                if hasattr(o, "ch"):
+                    if o.ch not in theta:
+                        theta[o.ch] = o.theta
+                    else:
+                        theta[o.ch] += o.theta
             if isinstance(o, SlotWithIQ):
-                if o.ch not in theta:
-                    theta[o.ch] = 0
-                o.virtual_z(theta[o.ch])
+                if hasattr(o, "ch"):
+                    if o.ch not in theta:
+                        theta[o.ch] = 0
+                    o.virtual_z(theta[o.ch])
 
     def __exit__(self, exception_type, exception_value, traceback):
         __rc__.contexts.pop()

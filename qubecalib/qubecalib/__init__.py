@@ -2,9 +2,9 @@
 
 __version__ = "2.1.0"
 
-# from . import backendqube, pulse, ui
+__all__ = ["Qube", "Send", "Recv", "backendqube", "pulse", "ui", "plot"]
 
-from . import qcbox, qcsys, rc
+from . import backendqube, plot, qcbox, qcsys, rc
 from .qcbox import ConfigPath, QcBoxFactory
 from .qcsys import QcSystem, QcWaveSubsystem
 
@@ -17,4 +17,6 @@ __all__ = [
     "qcbox",
     "QcSystem",
     "QcWaveSubsystem",
+    "backendqube",
+    "plot",
 ]

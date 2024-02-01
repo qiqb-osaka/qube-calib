@@ -1,9 +1,6 @@
 import os
-import socket
-import struct
 import subprocess
 import time
-from telnetlib import Telnet
 from typing import Final
 
 import ipywidgets as ipw
@@ -15,14 +12,21 @@ from . import qube as lib_qube
 MATPLOTLIB_PYPLOT = None
 
 
-def get_port_id(p: lib_qube.Port, q: lib_qube.QubeBase) -> int:
-    lst: list[str] = list(
-        filter(
-            lambda x: x is not None,
-            [k if v == p else None for k, v in q.ports.items()],
-        )
+def get_port_id(p, q):
+    return int(
+        list(
+            filter(
+                lambda x: x is not None,
+                [k if v == p else None for k, v in q.ports.items()],
+            )
+        )[0].replace("port", "")
     )
-    return int(lst[0].replace("port", ""))
+
+
+import socket
+import struct
+import time
+from telnetlib import Telnet
 
 
 class PDU(object):
@@ -220,10 +224,8 @@ def show_status(qube):
 
 def boot_fpga_from_rom(qube):
     os.environ["ADAPTER"] = qube.adapter_au50
-    ROOT = lib_qube.PATH_TO_ROOT
-    cmd = "vivado -mode batch -source {}/../qube_multi/qube_client/tools/reboot_from_rom.tcl".format(
-        ROOT
-    ).split(" ")
+    PATH = os.path.dirname(__file__) + "/tcl"
+    cmd = "vivado -mode batch -source {}/reboot_from_rom.tcl".format(PATH).split(" ")
     ret = subprocess.check_output(cmd, encoding="utf-8")
     return ret
 
@@ -528,7 +530,44 @@ class QubeControl(object):
                     for i in range(2)
                 ] == [True, True], "Link status is unusual."
 
+                # qube = c['qube']
+                # p = meas.CaptureParam()
+                # p.capture_delay = 100
+                # p.add_sum_section(num_words=1024, num_post_blank_words=1)
+                # p.num_integ_sections = 1
+                # p.num_integ_sections = 10000
+                # p.sel_dsp_units_to_enable(meas.e7awgsw.DspUnit.INTEGRATION)
+
                 plt, fig = plot_recv(qube, c)
+
+                # try:
+                #    p1, p12 = qube.port1, qube.port12
+                #    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                #    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                #    r1.start(timeout=0.5)
+                #    r12.start(timeout=0.5)
+                # except AttributeError:
+                #    p1, p12 = qube.port4, qube.port9
+                #    r1 = meas.Recv(qube.ipfpga, [p1.capt], [p])
+                #    r12 = meas.Recv(qube.ipfpga, [p12.capt], [p])
+                #    r1.start(timeout=0.5)
+                #    r12.start(timeout=0.5)
+                #
+                # p1 = qube.port4 if c['mon'].value.startswith('Monitor') else qube.port1
+                # p12 = qube.port9 if c['mon2'].value.startswith('Monitor') else qube.port12
+                # r = meas.Recv(qube.ipfpga, [p1.capt, p12.capt], 2*[p])
+                # r.start(timeout=0.5)
+                #
+                # plt = MATPLOTLIB_PYPLOT
+                # fig = plt.figure()
+                # ax = fig.add_subplot(211)
+                # ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                # ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p1.capt.id)[0]]))
+                # ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p1, qube)), transform=ax.transAxes)
+                # ax = fig.add_subplot(212)
+                # ax.plot(np.real(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                # ax.plot(np.imag(r.data.data[meas.CaptureModule.get_units(p12.capt.id)[0]]))
+                # ax.text(0.05, 0.1, 'port{}'.format(get_port_id(p12, qube)), transform=ax.transAxes)
 
                 wout.clear_output()
                 with wout:
@@ -558,7 +597,7 @@ class QubeControl(object):
                     "-mode",
                     "batch",
                     "-source",
-                    "{}/utils/config.tcl".format(lib_qube.PATH_TO_API),
+                    "{}/utils/config.tcl".format(lib_qube.PATH_TO_ADIAPIMOD),
                 ]
                 ret = subprocess.run(
                     commands, stdout=subprocess.PIPE, check=True
