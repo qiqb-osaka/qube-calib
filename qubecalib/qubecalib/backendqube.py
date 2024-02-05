@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import os
 import struct
@@ -6,6 +8,7 @@ import warnings
 from collections import deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
+from ipaddress import ip_address
 from typing import Union
 
 import e7awgsw
@@ -20,12 +23,16 @@ from e7awgsw import (
     IqWave,
     WaveSequence,
 )
+
+# from e7awgsw import AwgCtrl, CaptureCtrl, CaptureParam, CaptureModule, AWG
+# from qubecalib.qube import CPT
+# from qubecalib.meas import WaveSequenceFactory
+# from qubecalib.setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
-from .meas import WaveSequenceFactory
 from .neopulse import Blank, ContextNode, Range, Readout, Series, SlotWithIQ, body
 from .pulse import Arbit, Read
-from .qube import AWG, CPT, UNIT
+from .qube import AWG, CPT, UNIT, QubeBase
 from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
 
@@ -36,16 +43,36 @@ REPEAT_WAIT_SEC = int(REPEAT_WAIT_SEC * 125000000)  # 125Mcycles = 1sec
 CANCEL_STOP_PACKET = struct.pack(8 * "B", 0x2C, *(7 * [0]))
 
 
-def check_clock(*qubes, ipmaster="10.3.0.255"):
-    ipmulti = [q.ipmulti for q in qubes]
-    m = QuBEMasterClient(ipmaster, 16384)
-    s = [SequencerClient(ip, seqr_port=16384, synch_port=16385) for ip in ipmulti]
-    c = [o.read_time() for o in s]
+def check_clock(
+    *ipmulti: str,
+    ipmaster: str = "10.3.0.255",
+) -> list:
+    """同期用FPGA内部クロックの現在値を表示する．第二要素がクロックの値で，最後の要素がマスタークロックの値．
+
+    Args:
+        *ipmulti str: クロックを表示したい機体の sss_addr.
+        ipmaster (str, optional): MasterFPGA の ipaddr. Defaults to "10.3.0.255".
+
+    Returns:
+        list: (読み出しステータス, クロック値, sysrefの状態)
+    """
+    m = QuBEMasterClient(str(ip_address(ipmaster)), 16384)
+    s = [
+        SequencerClient(str(ip_address(ip)), seqr_port=16384, synch_port=16385)
+        for ip in ipmulti
+    ]
+    c = [o.read_clock() for o in s]
     c.append(m.read_clock())
     return c
 
 
-def kick(*qubes, delay=1):  # from QubeServer.py
+def kick(*qubes: QubeBase, delay: int = 1) -> None:  # from QubeServer.py
+    """各 Qube に対して波形出力開始を指示する．
+
+    Args:
+        *qubes QubeBase: 同期する機体の Qube オブジェクト.
+        delay (int, optional): 指示してから出力開始までの待ち時間. 短くしすぎると Qube がフリーズするので注意すること．意味がわからない場合はデフォルト値を変えてはならない．Defaults to 1.
+    """
     destinations = [q.ipmulti for q in qubes]
     DAQ_INITSDLY = delay
     cDAQ_SDLY_TAG = DAQ_INITSDLY
@@ -56,7 +83,7 @@ def kick(*qubes, delay=1):  # from QubeServer.py
     seq_cli = {
         a: SequencerClient(a, seqr_port=16384, synch_port=16385) for a in destinations
     }
-    clock = seq_cli[destinations[0]].read_time() + delay
+    clock = seq_cli[destinations[0]].read_clock() + delay
 
     for a in destinations:
         seq_cli[a].add_sequencer(16 * (clock // 16 + 1))
