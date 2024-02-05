@@ -13,8 +13,6 @@ import qubelsi.qube
 import yaml
 from e7awgsw import AwgCtrl
 
-from . import meas
-
 PATH_TO_CONFIG: Final[str] = os.environ["QUBECALIB_PATH_TO_CONFIG"]
 PATH_TO_ADIAPIMOD: Final[str] = qubelsi.__path__[0] + "/bin"
 PATH_TO_BITFILE: Final[str] = os.environ["QUBECALIB_PATH_TO_BITFILE"]
@@ -204,9 +202,9 @@ class AWG(AD9082):
             "nco": self.nco.status,
         }
 
-    def send(self, wave_seq):
-        o = meas.Send(self.ipfpga, [self], [wave_seq])
-        o.start()
+    # def send(self, wave_seq):
+    #     o = meas.Send(self.ipfpga, [self], [wave_seq])
+    #     o.start()
 
     def terminate(self):
         with AwgCtrl(self.ipfpga) as a:
@@ -255,11 +253,11 @@ class CPT(AD9082):
     def _status(self):
         return None
 
-    def recv(self, capt_param, timeout=5):
-        o = meas.Recv(self.ipfpga, self, capt_param)
-        o.start(timeout=timeout)
+    # def recv(self, capt_param, timeout=5):
+    #     o = meas.Recv(self.ipfpga, self, capt_param)
+    #     o.start(timeout=timeout)
 
-        return None
+    #     return None
 
     def modulation_frequency(self, mhz):
         port = self.port

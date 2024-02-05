@@ -1,31 +1,43 @@
 from __future__ import annotations
 
 import logging
-import os
+from os import PathLike
 from pathlib import Path
-from typing import Any, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 import numpy as np
 from e7awgsw import CaptureParam, DspUnit, WaveSequence
 from quel_ic_config_utils import CaptureReturnCode, Quel1WaveSubsystem
 from quel_ic_config_utils.e7resource_mapper import Quel1E7ResourceMapper
 
-from .qcbox import Channel, Dict, QcBox, QcBoxFactory, RxChannel, TxChannel
+from .qcbox import (
+    Channel,
+    Dict,
+    QcBoxFactory,
+    QubeOuTypeAQcBox,
+    QubeRikenTypeAQcBox,
+    RxChannel,
+    TxChannel,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class QcSystem:
     def __init__(
-        self, *config_paths: os.PathLike
+        self, *config_paths: str | PathLike
     ):  # TODO:生成時にできるチェックをここでする
-        self._boxes = {Path(k).stem: QcBoxFactory(k).produce() for k in config_paths}
+        self._boxes = {
+            Path(k).stem: QcBoxFactory(Path(k)).produce() for k in config_paths
+        }
 
     @property
-    def boxes(self) -> Dict[str, QcBox]:
+    def boxes(self) -> Dict[str, QubeOuTypeAQcBox | QubeRikenTypeAQcBox]:
         return self._boxes
 
-    box = boxes
+    @property
+    def box(self) -> Dict[str, QubeOuTypeAQcBox | QubeRikenTypeAQcBox]:
+        return self.boxes
 
 
 class QcWaveSubsystem:
@@ -33,7 +45,7 @@ class QcWaveSubsystem:
     def send_recv(
         cls,
         *setup: Sequence[Channel | WaveSequence | CaptureParam],
-        triggering_channel: Sequence[TxChannel] = [],
+        triggering_channel: Sequence[Optional[TxChannel]] = [],
         delay: int = 1,
         timeout: int = 30,
     ) -> Dict | CaptureReturnCode:
@@ -46,7 +58,7 @@ class QcWaveSubsystem:
                 k: None for k in wss_set
             }
         else:
-            wss_trigch = {o.wss: o for o in triggering_channel}
+            wss_trigch = {o.wss: o for o in triggering_channel if o is not None}
         if len(wss_set) == 1:
             wss = wss_set.pop()
             rmap = rmap_set.pop()

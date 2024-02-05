@@ -25,7 +25,6 @@ def get_port_id(p, q):
 
 import socket
 import struct
-import time
 from telnetlib import Telnet
 
 

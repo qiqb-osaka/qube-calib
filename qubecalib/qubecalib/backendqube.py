@@ -9,7 +9,8 @@ from collections import deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
 from ipaddress import ip_address
-from typing import Union
+from types import TracebackType
+from typing import Any, Optional, Type, Union
 
 import e7awgsw
 import matplotlib.patches as patches
@@ -30,10 +31,22 @@ from e7awgsw import (
 # from qubecalib.setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
-from .neopulse import Blank, ContextNode, Range, Readout, Series, SlotWithIQ, body
-from .pulse import Arbit, Read
+from .neopulse import (
+    Blank,
+    ContextNode,
+    Range,
+    Readout,
+    Sequence,
+    Series,
+    SlotWithIQ,
+    __rc__,
+    body,
+)
+
+# from .pulse import Arbit, Read
 from .qube import AWG, CPT, UNIT, QubeBase
-from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
+
+# from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
 
 PORT = 16384
@@ -83,7 +96,7 @@ def kick(*qubes: QubeBase, delay: int = 1) -> None:  # from QubeServer.py
     seq_cli = {
         a: SequencerClient(a, seqr_port=16384, synch_port=16385) for a in destinations
     }
-    clock = seq_cli[destinations[0]].read_clock() + delay
+    clock = seq_cli[destinations[0]].read_clock()[1] + delay
 
     for a in destinations:
         seq_cli[a].add_sequencer(16 * (clock // 16 + 1))
@@ -1183,7 +1196,9 @@ class SumSect(ContextNodeAlloc):
     pass
 
 
-def acquire_section(sequence, channel_map, section=None):
+def acquire_section(
+    sequence: Sequence, channel_map: ChannelMap, section: Optional[Sections] = None
+) -> Sections:
     if section is None:
         section = Sections()
 
@@ -1201,7 +1216,9 @@ def acquire_section(sequence, channel_map, section=None):
     return section
 
 
-def acquire_tx_section(sequence, channel_map, section=None):
+def acquire_tx_section(
+    sequence: Sequence, channel_map: ChannelMap, section: Optional[Sections] = None
+) -> Sections:
     if section is None:
         section = Sections()
 
@@ -1417,28 +1434,55 @@ def acquire_rx_section(sequence, channel_map, section=None):
 
 
 class DictWithContext(dict):
-    def __enter__(self):
-        __rc__.contexts.append(deque())
+    """
+    With文と使うと neopulse.__rc__.contexts に Sequence をスタックする．コンテクストを抜ける時にこれを pop する．
+    With文内部で class を生成すると Sequence にオプジェクトが追加されてゆく機構を実現する．
+    """
 
+    def __enter__(self) -> DictWithContext:
+        __rc__.contexts.append(deque())
         return self
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(
+        self,
+        exception_type: Optional[Type[BaseException]],
+        exception_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         __rc__.contexts.pop()
 
 
 class Sections(DictWithContext):
-    def __init__(self, *args, **kw):
+    """どの WaveSequence にどの Slot が対応するかを保持する Dict．ユーザーが手で編集したり定義したりできる様に Context に対応している．"""
+
+    def __init__(self, *args: Any, **kw: Any):
         super().__init__(**kw)
         for k in args:
             self[k] = None
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(
+        self,
+        exception_type: Optional[Type[BaseException]],
+        exception_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
+        """_summary_
+
+        Args:
+            exception_type (Optional[Type[BaseException]]): _description_
+            exception_value (Optional[BaseException]): _description_
+            traceback (Optional[TracebackType]): _description_
+
+        Raises:
+            ValueError: _description_
+            KeyError: _description_
+        """
         q = __rc__.contexts.pop()
         for k in self:
             if isinstance(q, Sections):
                 raise ValueError("Deep nesting is not allowed.")
             self[k] = q
-        if len(self):
+        if len(self):  # 何か登録されていたら
             __rc__.contexts[-1].append(self)
         else:
             for o in q:
@@ -1448,7 +1492,7 @@ class Sections(DictWithContext):
                     self[k] = v
         self.place()
 
-    def place(self):
+    def place(self) -> None:
         for k, v in self.items():
             if v:
                 v0 = v[0]

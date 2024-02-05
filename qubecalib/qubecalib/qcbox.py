@@ -47,6 +47,7 @@ Quel1AnyBoxConfigSubsystem = Union[
     # Quel1seRiken8ConfigSubsystem,
 ]
 
+
 YamlBoxTypeMapper = {
     "quel-1": {
         "A": Quel1BoxType.QuEL1_TypeA,
@@ -197,9 +198,9 @@ class QcBoxFactory:
     #     cls = QcBoxInfo
 
     def __init__(
-        self, config_path: os.PathLike
+        self, config_path: str | os.PathLike
     ):  # TODO:生成時にできるチェックをここでする
-        self.config_path = ConfigPath(config_path)
+        self.config_path = ConfigPath(Path(config_path))
         self.content = self.load_config(self.config_path)
 
     def load_config(self, config_path: ConfigPath) -> dict:

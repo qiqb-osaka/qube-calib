@@ -1,8 +1,3 @@
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
 def test_wave() -> None:
     import qubecalib as qc
     from e7awgsw import CaptureParam, WaveSequence
