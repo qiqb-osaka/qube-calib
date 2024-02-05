@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import weakref
 from dataclasses import dataclass
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
@@ -666,29 +667,32 @@ class RfPort(Port):
     def __init__(
         self,
         id: int,
-        css: Quel1AnyBoxConfigSubsystem,
-        wss: Quel1WaveSubsystem,
-        rmap: Quel1E7ResourceMapper,
+        box: QcBox,
         group: int,
     ):
         super().__init__(id)
-        self._css = css
-        self._wss = wss
-        self._rmap = rmap
+        self._box = weakref.ref(box)
         self._group = group
         self._add_channels_()
 
     @property
+    def box(self) -> QcBox:
+        box = self._box()
+        if box is None:
+            raise ValueError("box is missing.")
+        return box
+
+    @property
     def css(self) -> Quel1AnyBoxConfigSubsystem:
-        return self._css
+        return self.box._dev.css
 
     @property
     def wss(self) -> Quel1WaveSubsystem:
-        return self._wss
+        return self.box._dev.wss
 
     @property
     def rmap(self) -> Quel1WaveSubsystem:
-        return self._rmap
+        return self.box._dev.rmap
 
     @property
     def group(self) -> int:
@@ -709,14 +713,12 @@ class TxPortBase(RfPort):
     def __init__(
         self,
         id: int,
-        css: Quel1AnyBoxConfigSubsystem,
-        wss: Quel1WaveSubsystem,
-        rmap: Quel1E7ResourceMapper,
+        box: QcBox,
         group: int,
         line: int,
     ):
         self._line = line
-        super().__init__(id, css, wss, rmap, group)
+        super().__init__(id, box, group)
 
     @property
     def line(self) -> int:
@@ -758,16 +760,10 @@ class Channel:
     def __init__(
         self,
         id: int,
-        css: Quel1AnyBoxConfigSubsystem,
-        wss: Quel1WaveSubsystem,
-        rmap: Quel1E7ResourceMapper,
-        group: int,
+        port: RfPort,
     ):
         self._id = id
-        self._css = css
-        self._wss = wss
-        self._rmap = rmap
-        self._group = group
+        self._port = weakref.ref(port)
         self._add_channels_()
 
         self.freq = 10 * GHz
@@ -780,20 +776,27 @@ class Channel:
         return self._id
 
     @property
+    def port(self) -> RfPort:
+        port = self._port()
+        if port is None:
+            raise ValueError("port is missing.")
+        return port
+
+    @property
     def css(self) -> Quel1AnyBoxConfigSubsystem:
-        return self._css
+        return self.port.css
 
     @property
     def wss(self) -> Quel1WaveSubsystem:
-        return self._wss
+        return self.port.wss
 
     @property
     def rmap(self) -> Quel1WaveSubsystem:
-        return self._rmap
+        return self.port.rmap
 
     @property
     def group(self) -> int:
-        return self._group
+        return self.port.group
 
     @property
     def channel(self) -> int:
@@ -807,18 +810,20 @@ class TxChannel(Channel):
     def __init__(
         self,
         id: int,
-        css: Quel1AnyBoxConfigSubsystem,
-        wss: Quel1WaveSubsystem,
-        rmap: Quel1E7ResourceMapper,
-        group: int,
-        line: int,
+        port: RfPort,
     ):
-        super().__init__(id, css, wss, rmap, group)
-        self._line = line
+        self._line = id
+        super().__init__(id, port)
 
     @property
     def line(self) -> int:
         return self._line
+
+    def set(
+        self,
+        freq: Union[float, None] = None,
+    ) -> None:
+        pass
 
 
 class RxChannel(Channel):
@@ -844,21 +849,25 @@ class MoChannel(Channel):
 class QubeAnyTypeAQcBox(QcBox):
     class TxPortC1(TxPortBase):
         def _add_channels_(self) -> None:
-            self.channel = TxChannel(
-                0, self.css, self.wss, self.rmap, self.group, self.line
-            )
+            self.channel: TxChannel | None = None
+
+    class TxPortC2(TxPortBase):
+        def _add_channels_(self) -> None:
+            self.channel0: TxChannel | None = None
+            self.channel1: TxChannel | None = None
 
     class TxPortC3(TxPortBase):
         def _add_channels_(self) -> None:
-            self.channel0 = TxChannel(
-                0, self.css, self.wss, self.rmap, self.group, self.line
-            )
-            self.channel1 = TxChannel(
-                1, self.css, self.wss, self.rmap, self.group, self.line
-            )
-            self.channel2 = TxChannel(
-                2, self.css, self.wss, self.rmap, self.group, self.line
-            )
+            self.channel0: TxChannel | None = None
+            self.channel1: TxChannel | None = None
+            self.channel2: TxChannel | None = None
+
+    class TxPortC4(TxPortBase):
+        def _add_channels_(self) -> None:
+            self.channel0: TxChannel | None = None
+            self.channel1: TxChannel | None = None
+            self.channel2: TxChannel | None = None
+            self.channel3: TxChannel | None = None
 
     class RxPortC4(RxPortBase):
         def _add_channels_(self) -> None:
@@ -869,7 +878,7 @@ class QubeAnyTypeAQcBox(QcBox):
 
     class MoPortC1(MoPortBase):
         def _add_channels_(self) -> None:
-            self.channel = MoChannel(0, self.css, self.wss, self.rmap, self.group)
+            self.channel: MoChannel | None = None
 
 
 class QubeRikenTypeAQcBox(QubeAnyTypeAQcBox):
@@ -880,31 +889,59 @@ class QubeRikenTypeAQcBox(QubeAnyTypeAQcBox):
         rmap: Quel1E7ResourceMapper | None = None,
     ):
         super().__init__(css, wss, rmap)
-        self.port0 = self.TxPortC1(0, css, wss, rmap, 0, 0)
+        self.port0 = self.TxPortC1(0, self, 0, 0)
+        if True:
+            self.port0.channel = TxChannel(0, self.port0)
         # 他の部分もこの実装に寄せる（新しい構成への対応のため）
-        self.port1 = self.RxPortC4(1, css, wss, rmap, 0)
+        self.port1 = self.RxPortC4(1, self, 0)
         if True:
-            self.port1.channel0 = RxChannel(0, css, wss, rmap, 0)
-            self.port1.channel1 = RxChannel(1, css, wss, rmap, 0)
-            self.port1.channel2 = RxChannel(2, css, wss, rmap, 0)
-            self.port1.channel3 = RxChannel(3, css, wss, rmap, 0)
-        self.port2 = self.TxPortC1(2, css, wss, rmap, 0, 1)
+            self.port1.channel0 = RxChannel(0, self.port1)
+            self.port1.channel1 = RxChannel(1, self.port1)
+            self.port1.channel2 = RxChannel(2, self.port1)
+            self.port1.channel3 = RxChannel(3, self.port1)
+        self.port2 = self.TxPortC1(2, self, 0, 1)
+        if True:
+            self.port2.channel = TxChannel(0, self.port2)
         # self.port3 = self.TxPort(0, 0, 0)
-        self.port4 = self.MoPortC1(4, css, wss, rmap, 0)
-        self.port5 = self.TxPortC3(5, css, wss, rmap, 0, 2)
-        self.port6 = self.TxPortC3(6, css, wss, rmap, 0, 3)
-        self.port7 = self.TxPortC3(7, css, wss, rmap, 1, 3)
-        self.port8 = self.TxPortC3(8, css, wss, rmap, 1, 2)
-        self.port9 = self.MoPortC1(9, css, wss, rmap, 1)
-        # self.port10 = self.TxPort(0, 0, 0)
-        self.port11 = self.TxPortC1(11, css, wss, rmap, 1, 1)
-        self.port12 = self.RxPortC4(12, css, wss, rmap, 1)
+        self.port4 = self.MoPortC1(4, self, 0)
         if True:
-            self.port12.channel0 = RxChannel(0, css, wss, rmap, 1)
-            self.port12.channel1 = RxChannel(1, css, wss, rmap, 1)
-            self.port12.channel2 = RxChannel(2, css, wss, rmap, 1)
-            self.port12.channel3 = RxChannel(3, css, wss, rmap, 1)
-        self.port13 = self.TxPortC1(13, css, wss, rmap, 1, 0)
+            self.port4.channel = MoChannel(0, self.port4)
+        self.port5 = self.TxPortC3(5, self, 0, 2)
+        if True:
+            self.port5.channel0 = TxChannel(0, self.port5)
+            self.port5.channel1 = TxChannel(1, self.port5)
+            self.port5.channel2 = TxChannel(2, self.port5)
+        self.port6 = self.TxPortC3(6, self, 0, 3)
+        if True:
+            self.port6.channel0 = TxChannel(0, self.port6)
+            self.port6.channel1 = TxChannel(1, self.port6)
+            self.port6.channel2 = TxChannel(2, self.port6)
+        self.port7 = self.TxPortC3(7, self, 1, 3)
+        if True:
+            self.port7.channel0 = TxChannel(0, self.port7)
+            self.port7.channel1 = TxChannel(1, self.port7)
+            self.port7.channel2 = TxChannel(2, self.port7)
+        self.port8 = self.TxPortC3(8, self, 1, 2)
+        if True:
+            self.port8.channel0 = TxChannel(0, self.port8)
+            self.port8.channel1 = TxChannel(1, self.port8)
+            self.port8.channel2 = TxChannel(2, self.port8)
+        self.port9 = self.MoPortC1(9, self, 1)
+        if True:
+            self.port9.channel = MoChannel(0, self.port9)
+        # self.port10 = self.TxPort(0, 0, 0)
+        self.port11 = self.TxPortC1(11, self, 1, 1)
+        if True:
+            self.port11.channel = TxChannel(0, self.port11)
+        self.port12 = self.RxPortC4(12, self, 1)
+        if True:
+            self.port12.channel0 = RxChannel(0, self.port12)
+            self.port12.channel1 = RxChannel(1, self.port12)
+            self.port12.channel2 = RxChannel(2, self.port12)
+            self.port12.channel3 = RxChannel(3, self.port12)
+        self.port13 = self.TxPortC1(13, self, 1, 0)
+        if True:
+            self.port13.channel = TxChannel(0, self.port13)
         self.ports = [
             getattr(self, f"port{i}") for i in [0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13]
         ]
@@ -918,30 +955,54 @@ class QubeOuTypeAQcBox(QubeAnyTypeAQcBox):
         rmap: Quel1E7ResourceMapper | None = None,
     ):
         super().__init__(css, wss, rmap)
-        self.port0 = self.TxPortC1(0, css, wss, rmap, 0, 0)
-        self.port1 = self.RxPortC4(1, css, wss, rmap, 0)
+        self.port0 = self.TxPortC1(0, self, 0, 0)
         if True:
-            self.port1.channel0 = RxChannel(0, css, wss, rmap, 0)
-            self.port1.channel1 = RxChannel(1, css, wss, rmap, 0)
-            self.port1.channel2 = RxChannel(2, css, wss, rmap, 0)
-            self.port1.channel3 = RxChannel(3, css, wss, rmap, 0)
-        self.port2 = self.TxPortC1(2, css, wss, rmap, 0, 1)
+            self.port0.channel = TxChannel(0, self.port0)
+        self.port1 = self.RxPortC4(1, self, 0)
+        if True:
+            self.port1.channel0 = RxChannel(0, self.port1)
+            self.port1.channel1 = RxChannel(1, self.port1)
+            self.port1.channel2 = RxChannel(2, self.port1)
+            self.port1.channel3 = RxChannel(3, self.port1)
+        self.port2 = self.TxPortC1(2, self, 0, 1)
+        if True:
+            self.port2.channel = TxChannel(0, self.port2)
         # self.port3 = self.TxPort(0, 0, 0)
         # self.port4 = self.MoPort(css, wss, rmap, 4, 0)
-        self.port5 = self.TxPortC3(5, css, wss, rmap, 0, 2)
-        self.port6 = self.TxPortC3(6, css, wss, rmap, 0, 3)
-        self.port7 = self.TxPortC3(7, css, wss, rmap, 1, 3)
-        self.port8 = self.TxPortC3(8, css, wss, rmap, 1, 2)
+        self.port5 = self.TxPortC3(5, self, 0, 2)
+        if True:
+            self.port5.channel0 = TxChannel(0, self.port5)
+            self.port5.channel1 = TxChannel(1, self.port5)
+            self.port5.channel2 = TxChannel(2, self.port5)
+        self.port6 = self.TxPortC3(6, self, 0, 3)
+        if True:
+            self.port6.channel0 = TxChannel(0, self.port6)
+            self.port6.channel1 = TxChannel(1, self.port6)
+            self.port6.channel2 = TxChannel(2, self.port6)
+        self.port7 = self.TxPortC3(7, self, 1, 3)
+        if True:
+            self.port7.channel0 = TxChannel(0, self.port7)
+            self.port7.channel1 = TxChannel(1, self.port7)
+            self.port7.channel2 = TxChannel(2, self.port7)
+        self.port8 = self.TxPortC3(8, self, 1, 2)
+        if True:
+            self.port8.channel0 = TxChannel(0, self.port8)
+            self.port8.channel1 = TxChannel(1, self.port8)
+            self.port8.channel2 = TxChannel(2, self.port8)
         # self.port9 = self.MoPort(css, wss, rmap, 9, 1)
         # self.port10 = self.TxPort(0, 0, 0)
-        self.port11 = self.TxPortC1(11, css, wss, rmap, 1, 1)
-        self.port12 = self.RxPortC4(12, css, wss, rmap, 1)
+        self.port11 = self.TxPortC1(11, self, 1, 1)
         if True:
-            self.port12.channel0 = RxChannel(0, css, wss, rmap, 0)
-            self.port12.channel1 = RxChannel(1, css, wss, rmap, 0)
-            self.port12.channel2 = RxChannel(2, css, wss, rmap, 0)
-            self.port12.channel3 = RxChannel(3, css, wss, rmap, 0)
-        self.port13 = self.TxPortC1(13, css, wss, rmap, 1, 0)
+            self.port11.channel = TxChannel(0, self.port11)
+        self.port12 = self.RxPortC4(12, self, 1)
+        if True:
+            self.port12.channel0 = RxChannel(0, self.port12)
+            self.port12.channel1 = RxChannel(1, self.port12)
+            self.port12.channel2 = RxChannel(2, self.port12)
+            self.port12.channel3 = RxChannel(3, self.port12)
+        self.port13 = self.TxPortC1(13, self, 1, 0)
+        if True:
+            self.port13.channel = TxChannel(0, self.port13)
         self.ports = [
             getattr(self, f"port{i}") for i in [0, 1, 2, 5, 6, 7, 8, 11, 12, 13]
         ]
