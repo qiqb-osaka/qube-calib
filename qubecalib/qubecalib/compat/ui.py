@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 
-from . import qube as lib_qube
+from ..qcbox import QcBox, QcBoxFactory
 
 
 class QubeControl:
     def __init__(self, config_path: str | os.PathLike):
-        self._qube = lib_qube.Qube.create(config_path)
+        self._qube = QcBoxFactory.produce(config_path)
 
     @property
-    def qube(self) -> lib_qube.QubeBase:
+    def qube(self) -> QcBox:
         return self._qube
