@@ -7,11 +7,17 @@ import logging
 import os
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Collection, Dict
+from typing import Any, Collection, Dict
 
 import yaml
-from quel_ic_config import Quel1BoxType, Quel1ConfigOption
-from quel_ic_config_utils import create_box_objects
+from quel_ic_config import Quel1AnyConfigSubsystem, Quel1BoxType, Quel1ConfigOption
+from quel_ic_config_utils import (
+    LinkupFpgaMxfe,
+    Quel1E7ResourceMapper,
+    Quel1WaveSubsystem,
+    SimpleBoxIntrinsic,
+    create_box_objects,
+)
 
 from .rc import __running_config__ as rc
 
@@ -42,9 +48,37 @@ class QcBox:
             config_options,
             refer_by_port,
         )
+        box.init()
         self._box = box
         self._linkupper = linkupper
-        _ = ipaddr_sss
+        self._ipaddr_sss = ipaddr_sss
+
+    @property
+    def box(self) -> SimpleBoxIntrinsic:
+        return self._box
+
+    @property
+    def css(self) -> Quel1AnyConfigSubsystem:
+        return self.box.css
+
+    @property
+    def wss(self) -> Quel1WaveSubsystem:
+        return self.box.wss
+
+    @property
+    def rmap(self) -> Quel1E7ResourceMapper:
+        return self.box._dev.rmap
+
+    @property
+    def linkupper(self) -> LinkupFpgaMxfe:
+        return self._linkupper
+
+    def dump_config(self) -> dict[str, dict[str, Any]]:
+        return self.box.dump_config()
+
+    def dump_port_config(self, port: int) -> dict[str, Any]:
+        c = self.box.dump_config()
+        return c[f"port-#{port:02}"]
 
 
 class QcBoxFactory:
@@ -99,16 +133,27 @@ class QcBoxFactory:
         path = Path(config_path)
         c = cls.load(cls.get_absolute_path_to_config(path))
         d = cls.parse_config(path.name, c)
+        if d["boxtype"] in [
+            Quel1BoxType.QuBE_OU_TypeB,
+            Quel1BoxType.QuBE_RIKEN_TypeB,
+            Quel1BoxType.QuEL1_TypeB,
+        ]:
+            config_options = [
+                Quel1ConfigOption.USE_MONITOR_IN_MXFE0,
+                Quel1ConfigOption.USE_MONITOR_IN_MXFE1,
+            ]
+        else:
+            config_options = [
+                Quel1ConfigOption.USE_READ_IN_MXFE0,
+                Quel1ConfigOption.USE_READ_IN_MXFE1,
+            ]
         return QcBox(
             ipaddr_wss=str(d["ipaddr_wss"]),
             ipaddr_sss=str(d["ipaddr_sss"]),
             ipaddr_css=str(d["ipaddr_css"]),
             boxtype=d["boxtype"],
             config_root=None,
-            config_options=[
-                Quel1ConfigOption.USE_READ_IN_MXFE0,
-                Quel1ConfigOption.USE_READ_IN_MXFE1,
-            ],
+            config_options=config_options,
             refer_by_port=True,
         )
 
@@ -132,7 +177,6 @@ class QcBoxFactory:
 
     @classmethod
     def parse_config(cls, config_file_name: str | os.PathLike, content: dict) -> dict:
-        print(content)
         kwmapper = {
             "ipfpga": "ipaddr_wss",
             "iplsi": "ipaddr_css",
@@ -146,6 +190,5 @@ class QcBoxFactory:
         if "ipaddr_sss" not in kw:
             kw["ipaddr_sss"] = kw["ipaddr_wss"] + 0x10000
         s = cls.parse_qubecalib_series(str(config_file_name))
-        print(kw)
         kw["boxtype"] = cls._YAML_BOX_TYPE_MAPPER[s][content["type"]]
         return kw

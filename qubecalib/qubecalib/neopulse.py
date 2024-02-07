@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import weakref
-from collections import deque, namedtuple
+from collections import deque
 from contextlib import contextmanager
-from typing import Final
+from dataclasses import dataclass
+from typing import Any, Final, Optional
 
 import matplotlib.patches as patches
 import numpy as np
@@ -11,13 +14,12 @@ from .units import RAD, nS
 
 # The internal time and frequency units are [ns] and [GHz], respectively.
 
-RunningConfig = namedtuple(
-    "RunningConfig",
-    [
-        "contexts",
-    ],
-)
-RunningConfig.__new__.__defaults__ = (deque(),)
+
+@dataclass
+class RunningConfig:
+    contexts: deque = deque()
+
+
 __rc__: Final[RunningConfig] = RunningConfig()
 
 
@@ -45,7 +47,7 @@ def ceil(value: float, unit: float = 1) -> float:
 
 
 class Channel:
-    def __init__(self, frequency: float, *args, **kw):
+    def __init__(self, frequency: float, *args: Any, **kw: Any):
         self.frequency = frequency
 
 
@@ -58,7 +60,7 @@ class Readout(Channel):
 
 
 class ContextNode:
-    def __init__(self, **kw):
+    def __init__(self, **kw: Any):
         c = __rc__.contexts
         if len(c):
             c[-1].append(self)
@@ -69,38 +71,48 @@ class Slot(HasTraits, ContextNode):
     duration = Float(None, allow_none=True)
     end = Float(None, allow_none=True)
 
-    def __init__(self, begin=None, duration=None, end=None, **kw):
+    def __init__(
+        self,
+        begin: Optional[int | float] = None,
+        duration: Optional[int | float] = None,
+        end: Optional[int | float] = None,
+        **kw: Any,
+    ):
         self.__mute__ = False
 
-        if begin != None and duration != None and end != None:
+        if (begin is not None) and (duration is not None) and (end is not None):
             raise ValueError(
                 'Simultaneously setting "begin", "end" and "duration" is not possible.'
             )
-        if duration != None:
+        if duration is not None:
             self.duration = duration
-        if begin != None:
+        if begin is not None:
             self.begin = begin
-        if end != None:
+        if end is not None:
             self.end = end
 
         super().__init__(**kw)
 
-    def replace(self):
+    def replace(self) -> None:
         self.begin = None
         self.end = None
 
     @observe("begin")
-    def notify_begin_change(self, e):
-        if self.duration == None:
+    def notify_begin_change(self, e: Any) -> None:
+        if self.duration is None:
             raise ValueError("'duration' member valiable is not initialized.")
-        if e["new"] != None:
+        if self.begin is None:
+            raise ValueError("'begin' member valiable is not initialized.")
+        if e["new"] is not None:
             self.end = self.begin + self.duration
 
     @observe("end")
-    def notify_end_change(self, e):
-        if self.duration == None:
+    def notify_end_change(self, e: Any) -> None:
+        if self.duration is None:
             raise ValueError("'duration' member valiable is not initialized.")
-        if e["new"] != None:
+        if self.end is None:
+            raise ValueError("'end' member valiable is not initialized.")
+        if e["new"] is not None:
             self.begin = self.end - self.duration
 
 

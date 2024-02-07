@@ -24,6 +24,7 @@ from e7awgsw import (
     IqWave,
     WaveSequence,
 )
+from qcbox import QcBox
 
 # from e7awgsw import AwgCtrl, CaptureCtrl, CaptureParam, CaptureModule, AWG
 # from qubecalib.qube import CPT
@@ -31,6 +32,8 @@ from e7awgsw import (
 # from qubecalib.setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
+# from .pulse import Arbit, Read
+from .compat.qube import AWG, CPT, UNIT, QubeBase
 from .neopulse import (
     Blank,
     ContextNode,
@@ -42,9 +45,6 @@ from .neopulse import (
     __rc__,
     body,
 )
-
-# from .pulse import Arbit, Read
-from .qube import AWG, CPT, UNIT, QubeBase
 
 # from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
@@ -1732,6 +1732,7 @@ def sect2capt(section, period, repeats):
 
 
 def convert(sequence, section, channel_map, period, repeats=1, warn=False):
+    sequence = sequence.flatten()
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = r = sequence.slots
     a, c = split_awg_unit(channel_map)  # channel -> txport, rxport
@@ -1828,3 +1829,13 @@ def convert(sequence, section, channel_map, period, repeats=1, warn=False):
     capts = [(k, sect2capt(section[k], period, repeats)) for k in units if k in section]
 
     return Setup(*(wseqs + capts))
+
+
+# 必要?
+def convert_unit2boxportchannel(unit: UNIT) -> tuple[QcBox, int, str, int]:
+    return (unit.cpt.port.qube.qcbox, unit.cpt.port.id, "r", unit.id)
+
+
+# 必要？
+def convert_awg2boxportchannel(awg: AWG) -> tuple[QcBox, int, int]:
+    return (awg.port.qube.qcbox, awg.port.id, awg.id)
