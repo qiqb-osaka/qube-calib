@@ -2,15 +2,16 @@
 
 __version__ = "2.0.2"
 
-from . import backendqube, pulse, ui
+from . import backendqube, pulse, qube, ui
 from .meas import Recv, Send
 from .qube import Qube
 
 __all__ = [
-    "Qube",
+    "qube",
     "backendqube",
     "pulse",
     "ui",
+    "Qube",
     "Send",
     "Recv",
 ]
