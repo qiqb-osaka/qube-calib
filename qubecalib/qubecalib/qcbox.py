@@ -15,7 +15,7 @@ from quel_ic_config_utils import (
     LinkupFpgaMxfe,
     Quel1E7ResourceMapper,
     Quel1WaveSubsystem,
-    SimpleBoxIntrinsic,
+    SimpleBox,
     create_box_objects,
 )
 
@@ -37,7 +37,6 @@ class QcBox:
         boxtype: Quel1BoxType,
         config_root: Path | None,
         config_options: Collection[Quel1ConfigOption],
-        refer_by_port: bool = True,
     ):
         _, _, _, linkupper, box = create_box_objects(
             ipaddr_wss,
@@ -46,15 +45,16 @@ class QcBox:
             boxtype,
             config_root,
             config_options,
-            refer_by_port,
+            refer_by_port=True,
         )
         box.init()
         self._box = box
         self._linkupper = linkupper
-        self._ipaddr_sss = ipaddr_sss
+        self._ipaddr_sss = ip_address(ipaddr_sss)
+        self._config_options = config_options
 
     @property
-    def box(self) -> SimpleBoxIntrinsic:
+    def box(self) -> SimpleBox:
         return self._box
 
     @property
@@ -73,12 +73,40 @@ class QcBox:
     def linkupper(self) -> LinkupFpgaMxfe:
         return self._linkupper
 
+    @property
+    def boxtype(self) -> Quel1BoxType:
+        return self.box._boxtype
+
+    @property
+    def ipaddr_sss(self) -> str | IPv4Address | IPv6Address:
+        return self._ipaddr_sss
+
+    @property
+    def config_options(self) -> Collection[Quel1ConfigOption]:
+        return self._config_options
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}:{self.box.wss._wss_addr}>"
+
     def dump_config(self) -> dict[str, dict[str, Any]]:
         return self.box.dump_config()
 
     def dump_port_config(self, port: int) -> dict[str, Any]:
         c = self.box.dump_config()
         return c[f"port-#{port:02}"]
+
+    def get_awg_of_channel(self, port: int, channel: int) -> int:
+        group, line = self._convert_all_port(port)
+        return self.rmap.get_awg_of_channel(group, line, channel)
+
+    # def _convert_tx_port(self, port: int) -> Tuple[int, int]:
+    #     return self.box._convert_tx_port(port)
+
+    # def _convert_rx_port(self, port: int) -> Tuple[int, int]:
+    #     return self.box._convert_tx_port(port)
+
+    # def _convert_all_port(self, port: int) -> Tuple[int, int | str]:
+    #     return self.box._convert_all_port(port)
 
 
 class QcBoxFactory:
@@ -154,7 +182,6 @@ class QcBoxFactory:
             boxtype=d["boxtype"],
             config_root=None,
             config_options=config_options,
-            refer_by_port=True,
         )
 
     @classmethod

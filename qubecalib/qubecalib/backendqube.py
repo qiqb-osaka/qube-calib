@@ -24,7 +24,6 @@ from e7awgsw import (
     IqWave,
     WaveSequence,
 )
-from qcbox import QcBox
 
 # from e7awgsw import AwgCtrl, CaptureCtrl, CaptureParam, CaptureModule, AWG
 # from qubecalib.qube import CPT
@@ -45,6 +44,7 @@ from .neopulse import (
     __rc__,
     body,
 )
+from .qcbox import QcBox
 
 # from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
