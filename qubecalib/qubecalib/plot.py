@@ -45,7 +45,10 @@ def get_sampling_data(
     Returns:
         tuple[np.ndarray, np.ndarray]: オーバーサンプルした時系列と値系列の組
     """
-    s, r = flattened_sequence, oversampling_ratio
+    s, r = (
+        [_ for _ in flattened_sequence if hasattr(_, "sampling_points")],
+        oversampling_ratio,
+    )
     for si in s:
         oversample(si.sampling_points, si.begin, si.end, r)
     x0: list = [oversample(si.sampling_points, si.begin, si.end, r) for si in s]

@@ -524,8 +524,8 @@ class QcSystem:
         # cp.check_noise(show_graph=False)
         # boxpool.measure_timediff(cp)
 
-        pgs_by_boxname = self.get_pgs_by_boxname(pgs)
-        pcs_by_boxname = self.get_pcs_by_boxname(pcs)
+        pgs_by_boxname = self._get_pgs_by_boxname(pgs)
+        pcs_by_boxname = self._get_pcs_by_boxname(pcs)
 
         status, iqs = {}, {}
         future = {}
@@ -567,7 +567,7 @@ class QcSystem:
 
         return status, iqs
 
-    def get_pgs_by_boxname(self, pgs: Set[QcPulseGen]) -> Dict[str, Set[QcPulseGen]]:
+    def _get_pgs_by_boxname(self, pgs: Set[QcPulseGen]) -> Dict[str, Set[QcPulseGen]]:
         pgs_by_boxname: Dict[str, Set[QcPulseGen]] = {
             boxname: set() for boxname in self._boxpool._boxes
         }
@@ -578,7 +578,7 @@ class QcSystem:
             del pgs_by_boxname[boxname]
         return pgs_by_boxname
 
-    def get_pcs_by_boxname(self, pcs: Set[QcPulseCap]) -> Dict[str, Set[QcPulseCap]]:
+    def _get_pcs_by_boxname(self, pcs: Set[QcPulseCap]) -> Dict[str, Set[QcPulseCap]]:
         pcs_by_boxname: Dict[str, Set[QcPulseCap]] = {
             boxname: set() for boxname in self._boxpool._boxes
         }
@@ -588,6 +588,16 @@ class QcSystem:
         for boxname in removing_kws:
             del pcs_by_boxname[boxname]
         return pcs_by_boxname
+
+    def get_channel(
+        self, boxname: str, port: int, channel: int
+    ) -> Tuple[str, int, int | str, int | None]:
+        group, line = self.qcbox[boxname].box._convert_all_port(port)
+        return (boxname, group, line, channel)
+
+    def get_port(self, boxname: str, port: int) -> Tuple[str, int, int | str]:
+        group, line = self.qcbox[boxname].box._convert_all_port(port)
+        return (boxname, group, line)
 
 
 @dataclass

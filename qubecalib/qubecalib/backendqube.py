@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import datetime
 import os
-import struct
 import time
 import warnings
 from collections import deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
-from ipaddress import ip_address
+from enum import Enum, auto
 from types import TracebackType
-from typing import Any, Optional, Type, Union
+from typing import Any, Dict, List, MutableSequence, Optional, Tuple, Type, Union
 
 import e7awgsw
 import matplotlib.patches as patches
 import numpy as np
+import numpy.typing as npt
 from e7awgsw import (
     AwgCtrl,
     CaptureCtrl,
@@ -32,111 +32,251 @@ from e7awgsw import (
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
 # from .pulse import Arbit, Read
-from .compat.qube import AWG, CPT, UNIT, QubeBase
+from .compat.qube import AWG, CPT, UNIT
 from .neopulse import (
     Blank,
     ContextNode,
     Range,
-    Readout,
     Sequence,
     Series,
+    Slot,
     SlotWithIQ,
     __rc__,
     body,
 )
 from .qcbox import QcBox
+from .qcsys import QcPulseCapSetting, QcPulseGenSetting
 
 # from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
 
-PORT = 16384
-IPADDR = "10.3.0.255"
-REPEAT_WAIT_SEC = 0.1
-REPEAT_WAIT_SEC = int(REPEAT_WAIT_SEC * 125000000)  # 125Mcycles = 1sec
-CANCEL_STOP_PACKET = struct.pack(8 * "B", 0x2C, *(7 * [0]))
+# PORT = 16384
+# IPADDR = "10.3.0.255"
+# REPEAT_WAIT_SEC = 0.1
+# REPEAT_WAIT_SEC = int(REPEAT_WAIT_SEC * 125000000)  # 125Mcycles = 1sec
+# CANCEL_STOP_PACKET = struct.pack(8 * "B", 0x2C, *(7 * [0]))
 
 
-def check_clock(
-    *ipmulti: str,
-    ipmaster: str = "10.3.0.255",
-) -> list:
-    """同期用FPGA内部クロックの現在値を表示する．第二要素がクロックの値で，最後の要素がマスタークロックの値．
-
-    Args:
-        *ipmulti str: クロックを表示したい機体の sss_addr.
-        ipmaster (str, optional): MasterFPGA の ipaddr. Defaults to "10.3.0.255".
-
-    Returns:
-        list: (読み出しステータス, クロック値, sysrefの状態)
-    """
-    m = QuBEMasterClient(str(ip_address(ipmaster)), 16384)
-    s = [
-        SequencerClient(str(ip_address(ip)), seqr_port=16384, synch_port=16385)
-        for ip in ipmulti
-    ]
-    c = [o.read_clock() for o in s]
-    c.append(m.read_clock())
-    return c
+class Direction(Enum):
+    FROM_TARGET = auto()
+    TO_TARGET = auto()
 
 
-def kick(*qubes: QubeBase, delay: int = 1) -> None:  # from QubeServer.py
-    """各 Qube に対して波形出力開始を指示する．
+class PhyChannel:
+    def __init__(
+        self, qcboxes: Dict[str, QcBox], boxname: str, port: int, channel: int
+    ):
+        self._box = qcboxes[boxname]
+        self._boxname = boxname
+        self._port = port
+        self._channel = channel
 
-    Args:
-        *qubes QubeBase: 同期する機体の Qube オブジェクト.
-        delay (int, optional): 指示してから出力開始までの待ち時間. 短くしすぎると Qube がフリーズするので注意すること．意味がわからない場合はデフォルト値を変えてはならない．Defaults to 1.
-    """
-    destinations = [q.ipmulti for q in qubes]
-    DAQ_INITSDLY = delay
-    cDAQ_SDLY_TAG = DAQ_INITSDLY
-    SYNC_CLOCK = 125_000_000  # 125Mcycles = 1sec
+    @property
+    def name_port_channel(self) -> Tuple[str, int, int]:
+        return (self.boxname, self.port, self.channel)
 
-    delay = int(cDAQ_SDLY_TAG * SYNC_CLOCK + 0.5)
+    @property
+    def name_group_line_channel(self) -> Tuple[str, int, int | str, int]:
+        group, line = self.box.get_port(self.port)
+        return (self.boxname, group, line, self.channel)
 
-    seq_cli = {
-        a: SequencerClient(a, seqr_port=16384, synch_port=16385) for a in destinations
-    }
-    clock = seq_cli[destinations[0]].read_clock()[1] + delay
+    @property
+    def box(self) -> QcBox:
+        return self._box
 
-    for a in destinations:
-        seq_cli[a].add_sequencer(16 * (clock // 16 + 1))
+    @property
+    def boxname(self) -> str:
+        return self._boxname
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def channel(self) -> int:
+        return self._channel
+
+    @property
+    def group(self) -> int:
+        group, _ = self.box.get_port(self.port)
+        return group
+
+    @property
+    def line(self) -> int | str:
+        _, line = self.box.get_port(self.port)
+        return line
+
+    @property
+    def direction(self) -> Direction:
+        _, line = self.box.get_port(self.port)
+        if isinstance(line, int):
+            return Direction.TO_TARGET
+        elif isinstance(line, str):
+            return Direction.FROM_TARGET
+        else:
+            raise ValueError("invalid line type")
+
+    def dump_config(self) -> Dict[str, float | str | MutableSequence[Dict[str, float]]]:
+        # if isinstance(
+        #     self.box.css,
+        #     (
+        #         Quel1SeProto11ConfigSubsystem,
+        #         Quel1SeProtoAddaConfigSubsystem,
+        #     ),
+        # ):
+        #     raise ValueError(f"{self.box.css.__class__.__name__} is not suppored")
+        if isinstance(self.line, int):
+            retval = self.box.box._dev._css.dump_line(self.group, self.line)
+        elif isinstance(self.line, str):
+            retval = self.box.box._dev._css.dump_rline(self.group, self.line)
+
+        return retval
+
+    def calc_modulation_frequency(self, mhz: float) -> float:
+        if isinstance(self.line, str):
+            raise ValueError("invalid line type")
+        retval = self.dump_config()
+
+        if not isinstance(retval["lo_hz"], (float, int)):
+            raise ValueError()
+        lo_hz = retval["lo_hz"]
+
+        if not isinstance(retval["channels"], list):
+            raise ValueError()
+        fnco_hz = retval["channels"][self.channel]["fnco_hz"]
+        if_hz = retval["cnco_hz"] + fnco_hz
+        rf_hz = mhz * 1e9
+
+        if retval["sideband"] == "U":
+            diff_hz = rf_hz - lo_hz - if_hz
+        elif retval["sideband"] == "L":
+            diff_hz = lo_hz - if_hz - rf_hz
+        else:
+            raise ValueError("invalid ssb mode.")
+
+        return diff_hz * 1e-9
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}:{self.direction},port={self.port}>"
 
 
-def search_qube(o):
-    return (
-        o.port.qube
-        if isinstance(o, AWG)
-        else o.capt.port.qube
-        if isinstance(o, UNIT)
-        else None
-    )
+class RxChannel(PhyChannel):
+    def __init__(
+        self,
+        qcboxes: Dict[str, QcBox],
+        boxname: str,
+        port: int,
+        channel: int,
+        delay: int = 0,
+    ):
+        super().__init__(qcboxes, boxname, port, channel)
+        self._delay = delay
+
+    @property
+    def delay(self) -> int:
+        return self._delay
 
 
-def extract_qubes(*setup):
-    return tuple(set([search_qube(o1) for o1, o2 in setup]))
+class TxChannel(PhyChannel):
+    pass
 
 
-def split_qube(*setup):
-    rslt = {q: [] for q in extract_qubes(*setup)}
-    for o1, o2 in setup:
-        rslt[search_qube(o1)].append((o1, o2))
-    return rslt
+class LogiChannel:
+    def __init__(self, frequency: float, *args: Any, **kw: Any):
+        self.frequency = frequency
 
 
-def split_send_recv(*setup):
-    send = tuple((o1, o2) for o1, o2 in setup if isinstance(o1, AWG))
-    recv = tuple((o1, o2) for o1, o2 in setup if isinstance(o1, UNIT))
-    return send, recv
+class Control(LogiChannel):
+    pass
+
+
+class Readout(LogiChannel):
+    pass
+
+
+# def check_clock(
+#     *ipmulti: str,
+#     ipmaster: str = "10.3.0.255",
+# ) -> list:
+#     """同期用FPGA内部クロックの現在値を表示する．第二要素がクロックの値で，最後の要素がマスタークロックの値．
+
+#     Args:
+#         *ipmulti str: クロックを表示したい機体の sss_addr.
+#         ipmaster (str, optional): MasterFPGA の ipaddr. Defaults to "10.3.0.255".
+
+#     Returns:
+#         list: (読み出しステータス, クロック値, sysrefの状態)
+#     """
+#     m = QuBEMasterClient(str(ip_address(ipmaster)), 16384)
+#     s = [
+#         SequencerClient(str(ip_address(ip)), seqr_port=16384, synch_port=16385)
+#         for ip in ipmulti
+#     ]
+#     c = [o.read_clock() for o in s]
+#     c.append(m.read_clock())
+#     return c
+
+
+# def kick(*qubes: QubeBase, delay: int = 1) -> None:  # from QubeServer.py
+#     """各 Qube に対して波形出力開始を指示する．
+
+#     Args:
+#         *qubes QubeBase: 同期する機体の Qube オブジェクト.
+#         delay (int, optional): 指示してから出力開始までの待ち時間. 短くしすぎると Qube がフリーズするので注意すること．意味がわからない場合はデフォルト値を変えてはならない．Defaults to 1.
+#     """
+#     destinations = [q.ipmulti for q in qubes]
+#     DAQ_INITSDLY = delay
+#     cDAQ_SDLY_TAG = DAQ_INITSDLY
+#     SYNC_CLOCK = 125_000_000  # 125Mcycles = 1sec
+
+#     delay = int(cDAQ_SDLY_TAG * SYNC_CLOCK + 0.5)
+
+#     seq_cli = {
+#         a: SequencerClient(a, seqr_port=16384, synch_port=16385) for a in destinations
+#     }
+#     clock = seq_cli[destinations[0]].read_clock()[1] + delay
+
+#     for a in destinations:
+#         seq_cli[a].add_sequencer(16 * (clock // 16 + 1))
+
+
+# def search_qube(o):
+#     return (
+#         o.port.qube
+#         if isinstance(o, AWG)
+#         else o.capt.port.qube
+#         if isinstance(o, UNIT)
+#         else None
+#     )
+
+
+# def extract_qubes(*setup):
+#     return tuple(set([search_qube(o1) for o1, o2 in setup]))
+
+
+# def split_qube(*setup):
+#     rslt = {q: [] for q in extract_qubes(*setup)}
+#     for o1, o2 in setup:
+#         rslt[search_qube(o1)].append((o1, o2))
+#     return rslt
+
+
+# def split_send_recv(*setup):
+#     send = tuple((o1, o2) for o1, o2 in setup if isinstance(o1, AWG))
+#     recv = tuple((o1, o2) for o1, o2 in setup if isinstance(o1, UNIT))
+#     return send, recv
 
 
 class ChannelMap(dict):
-    def __enter__(self):
+    def __enter__(self) -> ChannelMap:
         return self
 
-    def __exit__(self, exception_type, exception_value, traceback):
+    def __exit__(
+        self, exception_type: Any, exception_value: Any, traceback: Any
+    ) -> None:
         pass
 
-    def map(self, physical, *logical):
+    def map(self, physical: PhyChannel, *logical: LogiChannel) -> None:
         if isinstance(physical, UNIT):
             if len(logical) != 1:
                 raise ValueError(
@@ -146,8 +286,8 @@ class ChannelMap(dict):
         self[physical] = logical
 
     @property
-    def physical(self):
-        rslt = {}
+    def physical(self) -> Dict[LogiChannel, List[PhyChannel]]:
+        rslt: Dict[LogiChannel, List[PhyChannel]] = {}
         for k, v in self.items():
             for o in v:
                 if o not in rslt:
@@ -158,7 +298,7 @@ class ChannelMap(dict):
         return rslt
 
     @property
-    def logical(self):
+    def logical(self) -> Dict[PhyChannel, LogiChannel]:
         return {k: v for k, v in self.items()}
 
 
@@ -894,49 +1034,49 @@ def sync_send_recv(*setup, trig=None, timeout=30):
     return d
 
 
-def send_recv(*setup, trigs={}, delay=1, timeout=30):
-    setup_qube = split_qube(*setup)
-    if len(setup_qube.keys()) == 1:  # standalone mode
-        send, recv = split_send_recv(*setup)
-        if send and recv:
-            q = list(setup_qube.keys())[0]
-            if q in trigs:
-                trig = trigs[q]
-            else:
-                trig, _ = send[0]
-            rslt = standalone_send_recv(*setup, trig=trig, timeout=timeout)
-        elif send and not recv:
-            rslt = standalone_send(*setup)
-        elif not send and recv:
-            rslt = standalone_recv(*setup, timeout=timeout)
-        else:
-            raise Exception("Invalid setup.")
-        return rslt
-    elif len(setup_qube.keys()) == 0:
-        raise Exception("Invalid setup.")
+# def send_recv(*setup, trigs={}, delay=1, timeout=30):
+#     setup_qube = split_qube(*setup)
+#     if len(setup_qube.keys()) == 1:  # standalone mode
+#         send, recv = split_send_recv(*setup)
+#         if send and recv:
+#             q = list(setup_qube.keys())[0]
+#             if q in trigs:
+#                 trig = trigs[q]
+#             else:
+#                 trig, _ = send[0]
+#             rslt = standalone_send_recv(*setup, trig=trig, timeout=timeout)
+#         elif send and not recv:
+#             rslt = standalone_send(*setup)
+#         elif not send and recv:
+#             rslt = standalone_recv(*setup, timeout=timeout)
+#         else:
+#             raise Exception("Invalid setup.")
+#         return rslt
+#     elif len(setup_qube.keys()) == 0:
+#         raise Exception("Invalid setup.")
 
-    with ThreadPoolExecutor() as e:
-        threads = []
-        for q, s in setup_qube.items():
-            send, recv = split_send_recv(*s)
-            if not recv:
-                threads.append(e.submit(lambda: sync_send(*send)))
-            else:
-                if q in trigs:
-                    trig = trigs[q]
-                else:
-                    trig, _ = send[0]
-                threads.append(
-                    e.submit(lambda: sync_send_recv(*s, trig=trig, timeout=timeout))
-                )
+#     with ThreadPoolExecutor() as e:
+#         threads = []
+#         for q, s in setup_qube.items():
+#             send, recv = split_send_recv(*s)
+#             if not recv:
+#                 threads.append(e.submit(lambda: sync_send(*send)))
+#             else:
+#                 if q in trigs:
+#                     trig = trigs[q]
+#                 else:
+#                     trig, _ = send[0]
+#                 threads.append(
+#                     e.submit(lambda: sync_send_recv(*s, trig=trig, timeout=timeout))
+#                 )
 
-        kick(*tuple(setup_qube.keys()), delay=delay)
+#         kick(*tuple(setup_qube.keys()), delay=delay)
 
-        dct = {}
-        for d in [o for o in [t.result() for t in threads] if o is not None]:
-            dct = dct | d
+#         dct = {}
+#         for d in [o for o in [t.result() for t in threads] if o is not None]:
+#             dct = dct | d
 
-    return dct
+#     return dct
 
 
 def quantize_sequence_duration(sequence_duration, constrain=10_240 * nS):
@@ -1107,22 +1247,6 @@ class Setup(list):
             return self
 
         def __next__(self):
-            # while True:
-
-            #     try:
-            #         logical_channel = l = self.logical_channels[self.current_idx]
-            #     except IndexError:
-            #         raise StopIteration()
-
-            #     self.current_idx += 1
-
-            #     try:
-            #         self.channel_map.physical[l]
-            #     except KeyError:
-            #         pass
-            #     else:
-            #         break
-
             try:
                 logical_channel = l = self.logical_channels[self.current_idx]
             except IndexError:
@@ -1134,7 +1258,7 @@ class Setup(list):
 
             return self.setup.get(u), u, l
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any):
         super().__init__(args)
 
     def get(self, arg):
@@ -1224,10 +1348,10 @@ def acquire_tx_section(
 
     logch = [k for k in sequence.flatten().slots if k is not None]
     phych = [
-        k
-        for k in channel_map
-        for l in logch
-        if l in channel_map[k] and isinstance(k, AWG)
+        phych
+        for phych in channel_map
+        for _ in logch
+        if _ in channel_map[phych] and phych.direction == Direction.TO_TARGET
     ]
 
     is_multi_chunk = np.array([isinstance(o, Series) for o in sequence]).prod()
@@ -1240,47 +1364,49 @@ def acquire_tx_section(
         ]
     ).prod()
 
-    if is_multi_chunk:
-        for phychi in phych:
-            section[phychi] = deque()
+    # TODO: ここは multi_chunk 対応でレアなのであと回し．新しいスキームで作り直し．
+    # if is_multi_chunk:
+    #     for phychi in phych:
+    #         section[phychi] = deque()
 
-            wait = 0
-            series = [v for o in sequence if isinstance(o, Series) for v in o]
-            for o in [v for o in sequence if isinstance(o, (Series, Blank)) for v in o]:
-                if isinstance(o, Blank):
-                    wait += o.duration
+    #         wait = 0
+    #         series = [v for o in sequence if isinstance(o, Series) for v in o]
+    #         for o in [v for o in sequence if isinstance(o, (Series, Blank)) for v in o]:
+    #             if isinstance(o, Blank):
+    #                 wait += o.duration
 
-                elif isinstance(o, Series):
-                    d = (o.end - o.begin) / o.repeats
+    #             elif isinstance(o, Series):
+    #                 d = (o.end - o.begin) / o.repeats
 
-                    if o is not series[-1]:
-                        blank = d % BLOCK
-                        if blank:
-                            u = [
-                                v
-                                for v in o.bodies.flatten()
-                                if not isinstance(v, (Range, Blank))
-                            ]
-                            b = min([v.begin for v in u])
-                            e = max([v.end for v in u])
-                            if o.end / o.repeats - e < blank:
-                                raise ValueError("duration is wrong")
-                        d = d // BLOCK * BLOCK
-                        section[phychi].append(
-                            TxSection(
-                                wait=wait, duration=d, blank=blank, repeats=o.repeats
-                            )
-                        )
+    #                 if o is not series[-1]:
+    #                     blank = d % BLOCK
+    #                     if blank:
+    #                         u = [
+    #                             v
+    #                             for v in o.bodies.flatten()
+    #                             if not isinstance(v, (Range, Blank))
+    #                         ]
+    #                         b = min([v.begin for v in u])
+    #                         e = max([v.end for v in u])
+    #                         if o.end / o.repeats - e < blank:
+    #                             raise ValueError("duration is wrong")
+    #                     d = d // BLOCK * BLOCK
+    #                     section[phychi].append(
+    #                         TxSection(
+    #                             wait=wait, duration=d, blank=blank, repeats=o.repeats
+    #                         )
+    #                     )
 
-                    else:
-                        d = d // BLOCK * BLOCK + BLOCK
-                        section[phychi].append(
-                            TxSection(wait=wait, duration=d, blank=0, repeats=o.repeats)
-                        )
+    #                 else:
+    #                     d = d // BLOCK * BLOCK + BLOCK
+    #                     section[phychi].append(
+    #                         TxSection(wait=wait, duration=d, blank=0, repeats=o.repeats)
+    #                     )
 
-                    wait = 0
+    #                 wait = 0
 
-    else:
+    # else:
+    if True:
         # print('Single Chunk Mode')
         for phychi in phych:
             section[phychi] = deque()
@@ -1293,96 +1419,19 @@ def acquire_tx_section(
 
     return section
 
-    # # log2phy = {o: k for k,v in channel_map.items() if isinstance(k,AWG) for o in v}
-    # log2phy = {k: [o for o in v if isinstance(o,AWG)][0] for k, v in channel_map.logical.items()}
-    # logch = [k for k in sequence.flatten().slots if k is not None]
-    # phych = [k for k in channel_map for l in logch if l in channel_map[k] and isinstance(k,AWG)]
 
-    # # AWG と Series の対応辞書を作る
-    # series = find_sequence(sequence, Series)
-    # awg2series = d = dict()
-    # for p in phych:
-    #     d[p] = deque()
-    #     for s in series:
-    #         if p in [log2phy[k] for k in s.flatten().slots.keys() if k is not None]:
-    #             d[p].append(s)
-
-    # # 重複した Series を削除する
-    # for k, v in awg2series.items():
-    #     item = lambda x: (x.begin, (x.end - x.begin) / x.repeats, x)
-    #     rng = r = sorted([item(o) for o in v], key=lambda x:x[1], reverse=True)
-    #     buffer = b = Sequence()
-    #     isout = lambda x, y: (y[0] + y[1] < x[0]) + (x[0] + x[1] < y[0])
-    #     isin = lambda x, y: (x[0] < y[0]) * (y[0] + y[1] < x[0] + x[1])
-    #     for i, o in enumerate(rng[:-1]):
-    #         skip = False
-    #         for m in rng[i+1:]:
-    #             if skip:
-    #                 continue
-    #             if isin(o, m):
-    #                 skip = True
-    #                 continue
-    #             b.append(o[2])
-    #     awg2series[k] = buffer
-
-    # # AWG と Slots の対応辞書を作る
-    # awg2slots = dict()
-    # slots = sequence.flatten().slots
-    # for phychi in phych:
-    #     for k, v in slots.items():
-    #         if phychi is log2phy[k] if k is not None else None:
-    #             awg2slots[phychi] = deque()
-    #             for o in v:
-    #                 if isinstance(body(o),SlotWithIQ):
-    #                     if o not in awg2series[phychi].flatten():
-    #                         awg2slots[phychi].append(o)
-
-    # 最も浅い repeats 付きの Series を参考にして Chunk をつくる
-
-    # if section is None:
-    #     section = Sections()
-
-    # for phychi in phych:
-
-    #     print(phychi, awg2series[phychi])
-    #     slots = np.array([(s.begin,(s.end-s.begin)/s.repeats,s.end,s.repeats) for s in awg2series[phychi] if isinstance(s,Series)])
-    #     print(phychi, slots)
-    #     if not slots:
-    #         if not awg2slots[phychi]:
-    #             continue
-    #         begin = min([o.begin for o in awg2slots[phychi]])
-    #         end = max([o.end for o in awg2slots[phychi]])
-    #         if begin % int(WORD):
-    #             print(phychi, begin)
-    #             raise ValueError('begin is not aligned')
-    #         if (end - begin) % int(BLOCK):
-    #             raise ValueError('durations is not aligned')
-    #         section[phychi] = deque()
-    #         section[phychi].append(TxSection(wait=begin,duration=end-begin,blank=0,repeats=1))
-    #         continue
-    #     slots = slots[np.argsort(slots[:,0])]
-
-    #     section[phychi] = deque()
-
-    #     begin, duration, end, repeats = slots[0]
-    #     section[phychi].append(TxSection(wait=begin,duration=duration,blank=0,repeats=int(repeats)))
-    #     for i in range(1,slots.shape[0]):
-    #         begin, duration, end, repeats = slots[i,0], slots[i,1], slots[i-1,2], slots[i,3]
-    #         section[phychi].append(TxSection(wait=begin-end,duration=duration,blank=0,repeats=int(repeats)))
-
-    # return section
-
-
-def acquire_rx_section(sequence, channel_map, section=None):
+def acquire_rx_section(
+    sequence: Sequence, channel_map: ChannelMap, section: Optional[Sections] = None
+) -> Sections:
     if section is None:
         section = Sections()
 
     logch = [k for k in sequence.slots if isinstance(k, Readout)]
     phych = [
-        k
-        for k in channel_map
-        for l in logch
-        if l in channel_map[k] and isinstance(k, UNIT)
+        phych
+        for phych in channel_map
+        for _ in logch
+        if _ in channel_map[phych] and phych.direction == Direction.FROM_TARGET
     ]
 
     for phychi in phych:
@@ -1393,7 +1442,11 @@ def acquire_rx_section(sequence, channel_map, section=None):
                 if isinstance(body(s), Range) and s.ch in channel_map[phychi]
             ]
         )
-        slots = slots[np.argsort(slots[:, 0])]
+        try:
+            slots = slots[np.argsort(slots[:, 0])]
+        except IndexError:
+            section[phychi] = deque()
+            continue
 
         # duration % WORD == 0, blank % WORD == 0
         # begin が条件を満たすように Range を前に offset する
@@ -1417,7 +1470,7 @@ def acquire_rx_section(sequence, channel_map, section=None):
             slots[i + 1, :] = [begin, duration, end]
 
         for i, _ in enumerate(slots[:-1]):
-            b, d, e = slots[i + 1][0], slots[i + 1][1], slots[i][2]
+            b, _, e = slots[i + 1][0], slots[i + 1][1], slots[i][2]
             if b - e < 0:
                 raise ValueError("Sumsections are overlapped.")
         section[phychi] = deque()
@@ -1455,7 +1508,9 @@ class DictWithContext(dict):
 class Sections(DictWithContext):
     """どの WaveSequence にどの Slot が対応するかを保持する Dict．ユーザーが手で編集したり定義したりできる様に Context に対応している．"""
 
-    def __init__(self, *args: Any, **kw: Any):
+    def __init__(
+        self, *args: PhyChannel, **kw: Dict[PhyChannel, TxSection | RxSection]
+    ):
         super().__init__(**kw)
         for k in args:
             self[k] = None
@@ -1537,17 +1592,21 @@ def plot_send_recv(fig, data, mag=False):
     return rslt
 
 
-def plot_setup(fig, setup, capture_delay=0):
-    for i, tpl in enumerate(setup):
-        k, v = tpl
+def plot_setup(
+    fig: Any,
+    setup: Dict[str, QcPulseGenSetting | QcPulseCapSetting],
+    capture_delay: int = 0,
+) -> None:
+    for i, setting in enumerate(setup.values()):
         if i == 0:
             ax = ax1 = fig.add_subplot(len(setup), 1, i + 1)
         else:
             ax = fig.add_subplot(len(setup), 1, i + 1, sharex=ax1)
-        if isinstance(k, AWG):
-            blank = [o.num_blank_words * int(WORDs) for o in v.chunk_list]
-            begin = v.num_wait_words * int(WORDs)
-            for cc, bb in zip(v.chunk_list, blank):
+        if isinstance(setting, QcPulseGenSetting):
+            wseq = setting.wave
+            blank = [o.num_blank_words * int(WORDs) for o in wseq.chunk_list]
+            begin = wseq.num_wait_words * int(WORDs)
+            for cc, bb in zip(wseq.chunk_list, blank):
                 iq = np.array(cc.wave_data.samples)
                 t = begin + np.arange(len(iq)) * 2
                 for _ in range(cc.num_repeats - 1):
@@ -1560,9 +1619,10 @@ def plot_setup(fig, setup, capture_delay=0):
                 ax.set_ylim(-32767 * 1.2, 32767 * 1.2)
                 begin = t[-1] + bb
         else:
-            blank = [o[1] * int(WORDs) for o in v.sum_section_list]
-            begin = (v.capture_delay - capture_delay) * int(WORDs)
-            for s, b in zip(v.sum_section_list, blank):
+            cprm = setting.captparam
+            blank = [o[1] * int(WORDs) for o in cprm.sum_section_list]
+            begin = (cprm.capture_delay - capture_delay) * int(WORDs)
+            for s, b in zip(cprm.sum_section_list, blank):
                 duration = int(s[0]) * int(WORDs)
                 ax.add_patch(
                     patches.Rectangle(
@@ -1603,7 +1663,13 @@ def new_section():
 
 
 class SectionBase(ContextNode):
-    def __init__(self, prior=0, duration=BLOCK, post=0, repeats=1):
+    def __init__(
+        self,
+        prior: float = 0,
+        duration: float = BLOCK,
+        post: float = 0,
+        repeats: int = 1,
+    ):
         super().__init__()
         self.prior = prior
         self.duration = duration
@@ -1611,40 +1677,56 @@ class SectionBase(ContextNode):
         self.repeats = repeats
 
     @property
-    def total(self):
+    def total(self) -> float:
         return self.prior + self.duration + self.post
 
 
 class TxSection(SectionBase):
-    def __init__(self, wait=0, duration=BLOCK, blank=0, repeats=1):
+    def __init__(
+        self,
+        wait: float = 0,
+        duration: float = BLOCK,
+        blank: float = 0,
+        repeats: int = 1,
+    ):
         super().__init__(wait, duration, blank, repeats)
-        self._iq = None
+        self._iq: Optional[npt.NDArray[np.complex]] = None
 
     @property
-    def iq(self):
+    def iq(self) -> npt.NDArray[np.complex]:
         if self._iq is None:
             n = int(self.duration // 2)
             self._iq = np.zeros(n).astype(complex)
         return self._iq
 
     @property
-    def sampling_points(self):
-        return np.arange(len(self.iq)) * 2 + self.begin
+    def sampling_points(self) -> npt.NDArray[np.float]:
+        return np.arange(len(self.iq)) * 2 + self.prior
 
 
 class RxSection(SectionBase):
-    def __init__(self, delay=0, duration=BLOCK, blank=0, repeats=1):
+    def __init__(
+        self,
+        delay: float = 0,
+        duration: float = BLOCK,
+        blank: float = 0,
+        repeats: int = 1,
+    ):
         super().__init__(delay, duration, blank, repeats)
 
 
-def split_awg_unit(channel_map):
+def split_awg_unit(
+    channel_map: ChannelMap,
+) -> Tuple[Dict[LogiChannel, PhyChannel], Dict[LogiChannel, PhyChannel]]:
     a, c = {}, {}
     for k, v in channel_map.items():
         for vv in v:
-            if isinstance(k, UNIT):
+            if k.direction == Direction.FROM_TARGET:
                 c[vv] = k
-            else:
+            elif k.direction == Direction.TO_TARGET:
                 a[vv] = k
+            else:
+                raise ValueError("type of phy channel is invalid")
     return a, c
 
 
@@ -1703,27 +1785,21 @@ def chunks2wseq(chunks, period, repeats):
     return w
 
 
-def sect2capt(section, period, repeats):
+def sect2capt(section: Sections, period: float, repeats: int) -> CaptureParam:
     s = section
-    p = e7awgsw.CaptureParam()
+    p = CaptureParam()
     p.num_integ_sections = repeats
 
     if int(s[0].prior) % int(2 * WORD):
-        raise ("The capture_delay must be an integer multiple of ()ns.".format())
+        raise ValueError(
+            f"The capture_delay must be an integer multiple of {int(2*WORD)}ns."
+        )
     p.capture_delay = int(s[0].prior) // int(WORD)
 
     for j in range(len(s) - 1):
-        # for i in range(s[j].repeats-1):
-        #     duration = int(s[j].duration) // int(WORD)
-        #     blank = int(s[j].post + s[j].prior) // int(WORD)
-        #     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
         duration = int(s[j].duration) // int(WORD)
         blank = int(s[j].post + s[j + 1].prior) // int(WORD)
         p.add_sum_section(num_words=duration, num_post_blank_words=blank)
-    # for i in range(s[-1].repeats-1):
-    #     duration = int(s[-1].duration) // int(WORD)
-    #     blank = int(s[-1].post + s[-1].prior) // int(WORD)
-    #     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
     duration = int(s[-1].duration) // int(WORD)
     blank = int(period - s[-1].end + s[0].prior) // int(WORD)
     p.add_sum_section(num_words=duration, num_post_blank_words=blank)
@@ -1731,80 +1807,80 @@ def sect2capt(section, period, repeats):
     return p
 
 
-def convert(sequence, section, channel_map, period, repeats=1, warn=False):
+def convert(
+    sequence: Sequence,
+    section: Sections,
+    channel_map: ChannelMap,
+    period: float,
+    repeats: int = 1,
+    warn: bool = False,
+) -> Dict[str, QcPulseGenSetting | QcPulseCapSetting]:
     sequence = sequence.flatten()
     # channel2slot = r = organize_slots(sequence) # channel -> slot
-    channel2slot = r = sequence.slots
+    channel2slot = sequence.slots
     a, c = split_awg_unit(channel_map)  # channel -> txport, rxport
 
     # Tx チャネルはデータ変調
     for k in a:
-        if k not in r:
+        if k not in channel2slot:
             with warnings.catch_warnings():
                 if not warn:
                     warnings.simplefilter("ignore")
                 warnings.warn("Channel {} is Iqnored.".format(k))
             continue
-        for v in r[k]:
+        for v in channel2slot[k]:
             if isinstance(body(v), SlotWithIQ):
-                m = a[k].modulation_frequency(mhz=k.frequency * 1e3) * MHz
+                m = a[k].calc_modulation_frequency(mhz=k.frequency)
                 t = v.sampling_points
                 v.miq = v.iq * np.exp(1j * 2 * np.pi * (m * t))
             # 位相合わせについては後日
 
     # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
-    section2slots = {}
+    section2slots: Dict[Sections, MutableSequence[Slot]] = {}
     for k, v in section.items():  # k:AWG,v:List[TxSection] or k:UNIT,v:List[RxSection]
         for vv in v:  # vv:Union[TxSection,RxSection]
             if vv not in section2slots:
                 section2slots[vv] = deque([])
-            if k not in channel_map:  # k:Union[AWG,UNIT]
+            if k not in channel_map:
                 with warnings.catch_warnings():
                     if not warn:
                         warnings.simplefilter("ignore")
-                    warnings.warn("AWG|UNIT {} is Iqnored.".format(k))
+                    warnings.warn(f"PhyChannel {k} is Iqnored.")
                 continue
             for c in channel_map[k]:  # c:Channel
-                if c not in r:  # sequence の定義内で使っていない論理チャネルがあり得る
+                if (
+                    c not in channel2slot
+                ):  # sequence の定義内で使っていない論理チャネルがあり得る
                     with warnings.catch_warnings():
                         if not warn:
                             warnings.simplefilter("ignore")
-                        warnings.warn("Channel {} is Iqnored.".format(c))
+                        warnings.warn(f"Logical Channel {c} is Iqnored.")
                     continue
-                # for s in r[c]:
-                #     for i in range(vv.repeats):
-                #         print(vv, s, vv.begin + i * vv.total, s.begin, s.begin + s.duration, vv.end + i * vv.total)
-                #         if vv.begin + i * vv.total <= s.begin and s.begin + s.duration <= vv.end + i * vv.total:
-                #             bawg = isinstance(k,AWG) and isinstance(s,SlotWithIQ)
-                #             bunit = isinstance(k,UNIT) and isinstance(body(s),Range)
-                #             if bawg:
-                #                 section2slots[vv].append(s)
-                #             if bunit:
-                #                 section2slots[vv].append(s)
-                for s in r[c]:
+                for s in channel2slot[c]:
                     if vv.repeats == 1:
-                        bawg = isinstance(k, AWG) and isinstance(body(s), SlotWithIQ)
+                        bawg = (k.direction == Direction.TO_TARGET) and isinstance(
+                            body(s), SlotWithIQ
+                        )
                     else:
-                        bawg = isinstance(k, AWG) and isinstance(s, SlotWithIQ)
-                    bunit = isinstance(k, UNIT) and isinstance(body(s), Range)
+                        bawg = (k.direction == Direction.TO_TARGET) and isinstance(
+                            s, SlotWithIQ
+                        )
+                    bunit = (k.direction == Direction.FROM_TARGET) and isinstance(
+                        body(s), Range
+                    )
                     if bawg:
-                        # print(vv, s, vv.begin, s.begin, s.begin + s.duration, vv.end)
                         if vv.begin <= s.begin and s.begin <= vv.end:
                             section2slots[vv].append(s)
                     elif bunit:
                         for i in range(vv.repeats):
-                            # print(vv, s, vv.begin + i * vv.total, s.begin, s.begin + s.duration, vv.end + i * vv.total)
                             if (
                                 vv.begin + i * vv.total <= s.begin
                                 and s.begin + s.duration <= vv.end + i * vv.total
                             ):
                                 section2slots[vv].append(s)
 
-    # for k,v in section2slots.items():
-    #     print(k,v)
-
     # 各セクション毎に Chunk を合成する
-    awgs = [k for k in channel_map if isinstance(k, AWG)]
+    awgs = [k for k in channel_map if k.direction == Direction.TO_TARGET]
     for i, k in enumerate(awgs):
         if k in section:
             for s in section[k]:
@@ -1819,23 +1895,26 @@ def convert(sequence, section, channel_map, period, repeats=1, warn=False):
 
     # # 束ねるチャネルを WaveSequence に変換
     awgs = [
-        k for k in channel_map if isinstance(k, AWG)
+        k for k in channel_map if k.direction == Direction.TO_TARGET
     ]  # channel_map から AWG 関連だけ抜き出す
     wseqs = [
         (k, chunks2wseq(section[k], period, repeats)) for k in awgs if k in section
     ]  # chunk obj を wseq へ変換する
 
-    units = [k for k in channel_map if isinstance(k, UNIT)]
+    units = [k for k in channel_map if k.direction == Direction.FROM_TARGET]
     capts = [(k, sect2capt(section[k], period, repeats)) for k in units if k in section]
 
-    return Setup(*(wseqs + capts))
+    sender = {
+        f"SENDER{i}": QcPulseGenSetting(
+            boxname=c.boxname, port=c.port, channel=c.channel, wave=w
+        )
+        for i, (c, w) in enumerate([(c, w) for c, w in wseqs])
+    }
+    capturer = {
+        f"CAPTURER{i}": QcPulseCapSetting(
+            boxname=c.boxname, port=c.port, channel=c.channel, captparam=p
+        )
+        for i, (c, p) in enumerate([(c, p) for c, p in capts])
+    }
 
-
-# 必要?
-def convert_unit2boxportchannel(unit: UNIT) -> tuple[QcBox, int, str, int]:
-    return (unit.cpt.port.qube.qcbox, unit.cpt.port.id, "r", unit.id)
-
-
-# 必要？
-def convert_awg2boxportchannel(awg: AWG) -> tuple[QcBox, int, int]:
-    return (awg.port.qube.qcbox, awg.port.id, awg.id)
+    return sender | capturer

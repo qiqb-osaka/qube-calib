@@ -46,19 +46,6 @@ def ceil(value: float, unit: float = 1) -> float:
         return int((value // unit) * unit) / MAGNIFIER
 
 
-class Channel:
-    def __init__(self, frequency: float, *args: Any, **kw: Any):
-        self.frequency = frequency
-
-
-class Control(Channel):
-    pass
-
-
-class Readout(Channel):
-    pass
-
-
 class ContextNode:
     def __init__(self, **kw: Any):
         c = __rc__.contexts
@@ -295,8 +282,12 @@ class Blank(Slot):
 
     @property
     def sampling_points(self) -> np.ndarray:
+        if self.begin is None or self.duration is None:
+            raise ValueError(f"{self.__class__.__name__}: position is not calculated")
         return np.arange(
-            ceil(self.begin, 2), ceil(self.end, 2), self.SAMPLING_PERIOD
+            ceil(self.begin, 2),
+            ceil(self.begin + self.duration, 2),
+            self.SAMPLING_PERIOD,
         )  # sampling points [ns]
 
     def func(self, t: float) -> float:
@@ -307,7 +298,13 @@ class Blank(Slot):
 
 
 class VirtualZ(Slot, ChannelMixin):
-    def __init__(self, theta=0, begin=None, end=None, **kw):
+    def __init__(
+        self,
+        theta: float = 0,
+        begin: Optional[float] = None,
+        end: Optional[float] = None,
+        **kw: Any,
+    ):
         self.theta = theta
 
         super().__init__(begin, 0, end, **kw)
