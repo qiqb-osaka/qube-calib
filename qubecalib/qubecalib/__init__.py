@@ -1,6 +1,6 @@
 """Calibration package for QuBE"""
 
-__version__ = "2.0.4"
+__version__ = "2.0.5"
 
 from . import backendqube, pulse, qube, ui
 from .meas import Recv, Send
