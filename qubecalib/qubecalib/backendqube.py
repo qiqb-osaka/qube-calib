@@ -25,9 +25,6 @@ from e7awgsw import AwgCtrl, CaptureCtrl, DspUnit, DspUnit
 # from qubecalib.qube import CPT
 # from qubecalib.meas import WaveSequenceFactory
 # from qubecalib.setupqube import _conv_to_e7awgsw, _conv_channel_for_e7awgsw
-<<<<<<< HEAD
-from quel_clock_master import QuBEMasterClient, SequencerClient
-=======
 from quel_clock_master.qubemasterclient import QuBEMasterClient
 from quel_clock_master.sequencerclient import SequencerClient
 # from quel_clock_master.software.readclock import QuBEMonitor
@@ -58,7 +55,6 @@ class QuBEMonitor( object ):
         data = struct.pack('BBBB', 0x00, 0x00, 0x00, 0x04)
         ret,addr = self.send_recv(data)
         return struct.unpack('>Q', ret[4:12])[0]    
->>>>>>> Changed to refer to quel_clock_master.
 
 
 PORT = 16384
@@ -71,8 +67,9 @@ CANCEL_STOP_PACKET = struct.pack(8*'B', 0x2c, *(7*[0]))
 def check_clock(*qubes, ipmaster='10.3.0.255'):
     ipmulti = [q.ipmulti for q in qubes]
     m = QuBEMasterClient(ipmaster,16384)
-    s = [SequencerClient(ip, seqr_port=16384, synch_port=16385) for ip in ipmulti]
-    c = [o.read_time() for o in s]
+    s = [SequencerClient(ip, 16384) for ip in ipmulti]
+    n = [QuBEMonitor(ip, 16385) for ip in ipmulti]
+    c = [o.read_time() for o in n]
     c.append(m.read_clock())
     return c
 
@@ -84,8 +81,9 @@ def kick(*qubes, delay=1): # from QubeServer.py
 
     delay = int(cDAQ_SDLY_TAG * SYNC_CLOCK + 0.5)
 
-    seq_cli = {a:SequencerClient(a, seqr_port=16384, synch_port=16385) for a in destinations}
-    clock = seq_cli[destinations[0]].read_time() + delay
+    seq_cli = {a:SequencerClient(a, 16384) for a in destinations}
+    mon = QuBEMonitor(destinations[0], 16385)
+    clock = mon.read_time() + delay
 
     for a in destinations:
         seq_cli[a].add_sequencer(16*(clock//16+1))
