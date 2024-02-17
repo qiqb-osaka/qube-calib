@@ -7,6 +7,7 @@ import warnings
 from collections import deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
+from dataclasses import dataclass
 from enum import Enum, auto
 from types import TracebackType
 from typing import Any, Dict, List, MutableSequence, Optional, Tuple, Type, Union
@@ -32,7 +33,7 @@ from e7awgsw import (
 from quel_clock_master import QuBEMasterClient, SequencerClient
 
 # from .pulse import Arbit, Read
-from .compat.qube import AWG, CPT, UNIT
+# from .compat.qube import AWG, CPT, UNIT
 from .neopulse import (
     Blank,
     ContextNode,
@@ -44,8 +45,7 @@ from .neopulse import (
     __rc__,
     body,
 )
-from .qcbox import QcBox
-from .qcsys import QcPulseCapSetting, QcPulseGenSetting
+from .qcbox import QcBox, Sideband
 
 # from .setupqube import _conv_channel_for_e7awgsw, _conv_to_e7awgsw
 from .units import BLOCK, WORD, MHz, WORDs, nS
@@ -60,6 +60,24 @@ from .units import BLOCK, WORD, MHz, WORDs, nS
 class Direction(Enum):
     FROM_TARGET = auto()
     TO_TARGET = auto()
+
+
+@dataclass
+class QcPulseGenSetting:
+    boxname: str
+    port: int
+    channel: int
+    wave: WaveSequence = None
+    lo_freq: Optional[float] = None
+    cnco_freq: Optional[float] = None
+
+
+@dataclass
+class QcPulseCapSetting:
+    boxname: str
+    port: int
+    channel: int
+    captparam: CaptureParam = None
 
 
 class PhyChannel:
@@ -132,32 +150,8 @@ class PhyChannel:
 
         return retval
 
-    def calc_modulation_frequency(self, mhz: float) -> float:
-        if isinstance(self.line, str):
-            raise ValueError("invalid line type")
-        retval = self.dump_config()
-
-        if not isinstance(retval["lo_hz"], (float, int)):
-            raise ValueError()
-        lo_hz = retval["lo_hz"]
-
-        if not isinstance(retval["channels"], list):
-            raise ValueError()
-        fnco_hz = retval["channels"][self.channel]["fnco_hz"]
-        if_hz = retval["cnco_hz"] + fnco_hz
-        rf_hz = mhz * 1e9
-
-        if retval["sideband"] == "U":
-            diff_hz = rf_hz - lo_hz - if_hz
-        elif retval["sideband"] == "L":
-            diff_hz = lo_hz - if_hz - rf_hz
-        else:
-            raise ValueError("invalid ssb mode.")
-
-        return diff_hz * 1e-9
-
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}:{self.direction},port={self.port}>"
+        return f"<{self.__class__.__name__}:{self.direction},port={self.port},channel={self.channel}>"
 
 
 class RxChannel(PhyChannel):
@@ -167,18 +161,127 @@ class RxChannel(PhyChannel):
         boxname: str,
         port: int,
         channel: int,
-        delay: int = 0,
     ):
         super().__init__(qcboxes, boxname, port, channel)
-        self._delay = delay
+        self.sideband = Sideband.UpperSideBand
+        self._delay = 0
 
     @property
     def delay(self) -> int:
         return self._delay
 
+    def config_port(
+        self,
+        *,
+        lo_freq: Optional[float] = None,
+        cnco_freq: Optional[float] = None,
+        vatt: Optional[float] = None,
+        sideband: Optional[Sideband] = None,
+    ) -> None:
+        if sideband is not None:
+            self.sideband = sideband
+        group, rline = self.box.box._convert_all_port(self.port)
+        if isinstance(rline, int):
+            raise ValueError(f"{self.__class__.__name__} only accept rx port")
+        lo_freq_hz = lo_freq * 1e9 if lo_freq is not None else None
+        cnco_freq_hz = cnco_freq * 1e9 if cnco_freq is not None else None
+        self.box._dev.config_rline(
+            group,
+            rline,
+            lo_freq=lo_freq_hz,
+            cnco_freq=cnco_freq_hz,
+        )
+
+    def calc_modulation_frequency(self, rf_freq: float) -> float:
+        # frequency is normalized as GHz
+        if isinstance(self.line, int):
+            raise ValueError("invalid line type")
+        retval = self.dump_config()
+
+        if not isinstance(retval["lo_hz"], (float, int)):
+            raise ValueError()
+        lo_hz = float(retval["lo_hz"])
+
+        if not isinstance(retval["cnco_hz"], (float, int)):
+            raise ValueError()
+        if_hz = retval["cnco_hz"]
+        rf_hz = rf_freq * 1e9
+
+        if self.sideband == Sideband.UpperSideBand:
+            diff_hz = rf_hz - lo_hz - if_hz
+        elif self.sideband == Sideband.LowerSideBand:
+            diff_hz = lo_hz - if_hz - rf_hz
+        else:
+            raise ValueError("invalid ssb mode.")
+
+        return diff_hz * 1e-9  # return value is normalized as GHz
+
 
 class TxChannel(PhyChannel):
-    pass
+    def config_port(
+        self,
+        *,
+        lo_freq: Optional[float] = None,
+        cnco_freq: Optional[float] = None,
+        vatt: Optional[float] = None,
+        sideband: Optional[Sideband] = None,
+    ) -> None:
+        group, line = self.box.box._convert_all_port(self.port)
+        if isinstance(line, str):
+            raise ValueError(f"{self.__class__.__name__} only accept tx port")
+        lo_freq_hz = lo_freq * 1e9 if lo_freq is not None else None
+        cnco_freq_hz = cnco_freq * 1e9 if cnco_freq is not None else None
+        self.box._dev.config_line(
+            group,
+            line,
+            lo_freq=lo_freq_hz,
+            cnco_freq=cnco_freq_hz,
+            vatt=vatt,
+            sideband=sideband.value if sideband is not None else None,
+        )
+
+    def config_channel(
+        self,
+        *,
+        fnco_freq: Optional[float] = None,
+    ) -> None:
+        group, line = self.box.box._convert_all_port(self.port)
+        if isinstance(line, str):
+            raise ValueError(f"{self.__class__.__name__} only accept tx port")
+        fnco_freq_hz = fnco_freq * 1e9 if fnco_freq is not None else None
+        self.box._dev.config_channel(
+            group,
+            line,
+            self.channel,
+            fnco_freq=fnco_freq_hz,
+        )
+
+    def calc_modulation_frequency(self, rf_freq: float) -> float:
+        # frequency is normalized as GHz
+        if isinstance(self.line, str):
+            raise ValueError("invalid line type")
+
+        retval = self.dump_config()
+        if not isinstance(retval["lo_hz"], (float, int)):
+            raise ValueError()
+        if not isinstance(retval["cnco_hz"], (float, int)):
+            raise ValueError()
+        if not isinstance(retval["channels"], list):
+            raise ValueError()
+
+        lo_hz = retval["lo_hz"]
+        fnco_hz = retval["channels"][self.channel]["fnco_hz"]
+        if_hz = retval["cnco_hz"] + fnco_hz
+        rf_hz = rf_freq * 1e9
+
+        if retval["sideband"] == Sideband.UpperSideBand.value:
+            diff_hz = rf_hz - lo_hz - if_hz
+        elif retval["sideband"] == Sideband.LowerSideBand.value:
+            diff_hz = lo_hz - if_hz - rf_hz
+        else:
+            raise ValueError("invalid ssb mode.")
+
+        return diff_hz * 1e-9  # return value is normalized as GHz
 
 
 class LogiChannel:
@@ -277,7 +380,7 @@ class ChannelMap(dict):
         pass
 
     def map(self, physical: PhyChannel, *logical: LogiChannel) -> None:
-        if isinstance(physical, UNIT):
+        if physical.direction == Direction.FROM_TARGET:
             if len(logical) != 1:
                 raise ValueError(
                     "Only one logical channel can be mapped to a capture unit."
@@ -1183,35 +1286,41 @@ def acquisition_fir_coefficient(bb_frequency):
 
 # CaptureParam.capture_delay に num_capture_delay_word を追加する
 # パルスシーケンスに必要な delay に追加する際に用いる
-def captparam_add_capture_delay(captparam, num_capture_delay_word):
+def captparam_add_capture_delay(
+    captparam: CaptureParam, num_capture_delay_word: int
+) -> None:
     captparam.capture_delay += num_capture_delay_word
 
 
-def captparam_enable_dspunit(captparam, dspunit):
+def captparam_enable_dspunit(captparam: CaptureParam, dspunit: DspUnit) -> None:
     dspunits = captparam.dsp_units_enabled
     dspunits.append(dspunit)
     captparam.sel_dsp_units_to_enable(*dspunits)
 
 
-def captparam_enable_integration(captparam):
+def captparam_enable_integration(captparam: CaptureParam) -> None:
     captparam_enable_dspunit(
-        captparam, e7awgsw.DspUnit.INTEGRATION
+        captparam, DspUnit.INTEGRATION
     )  # DSPの積算測定モジュールを有効化. 積算回数はrepeatsで設定.
 
 
-def captparam_enable_sum(captparam):
-    captparam_enable_dspunit(captparam, e7awgsw.DspUnit.SUM)
+def captparam_enable_sum(captparam: CaptureParam) -> None:
+    captparam_enable_dspunit(captparam, DspUnit.SUM)
 
 
-def captparam_enable_classification(captparam):
-    captparam_enable_dspunit(captparam, e7awgsw.DspUnit.CLASSIFICATION)
+def captparam_enable_classification(captparam: CaptureParam) -> None:
+    captparam_enable_dspunit(captparam, DspUnit.CLASSIFICATION)
 
 
-def captparam_enable_demodulation(captparam, physical_channel, logical_channel):
+def captparam_enable_demodulation(
+    captparam: CaptureParam,
+    physical_channel: RxChannel,
+    logical_channel: Readout,
+) -> None:
     p, u, o = captparam, physical_channel, logical_channel
     # DSP で周波数変換する複素窓関数を設定
     t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2 * nS
-    m = u.capt.modulation_frequency(mhz=o.frequency / MHz) * MHz
+    m = u.calc_modulation_frequency(rf_freq=o.frequency)
     p.complex_window_coefs = list(
         np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
     )
@@ -1224,49 +1333,6 @@ def captparam_enable_demodulation(captparam, physical_channel, logical_channel):
     # dspunits.append(e7awgsw.DspUnit.REAL_FIR)
     dspunits.append(e7awgsw.DspUnit.COMPLEX_WINDOW)  # 複素窓関数を有効化
     p.sel_dsp_units_to_enable(*dspunits)
-
-
-class Setup(list):
-    class CaptParamsIter(object):
-        def __init__(self, setup, channel_map, *logical_channels):
-            self.setup = setup
-            self.channel_map = channel_map
-            if logical_channels:
-                self.logical_channels = logical_channels
-            else:
-                self.logical_channels = tuple(
-                    [
-                        channel_map.logical[u][0]
-                        for u, c in setup
-                        if isinstance(u, UNIT) and u in channel_map.logical
-                    ]
-                )
-            self.current_idx = 0
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            try:
-                logical_channel = l = self.logical_channels[self.current_idx]
-            except IndexError:
-                raise StopIteration()
-
-            u = [o for o in self.channel_map.physical[l] if isinstance(o, UNIT)][0]
-
-            self.current_idx += 1
-
-            return self.setup.get(u), u, l
-
-    def __init__(self, *args: Any):
-        super().__init__(args)
-
-    def get(self, arg):
-        keys = [k for k, v in self]
-        return self[keys.index(arg)][1]
-
-    def captparams(self, channel_map, *logical_channels):
-        return Setup.CaptParamsIter(self, channel_map, *logical_channels)
 
 
 class ContextNodeAlloc(object):
@@ -1717,7 +1783,7 @@ class RxSection(SectionBase):
 
 def split_awg_unit(
     channel_map: ChannelMap,
-) -> Tuple[Dict[LogiChannel, PhyChannel], Dict[LogiChannel, PhyChannel]]:
+) -> Tuple[Dict[LogiChannel, TxChannel], Dict[LogiChannel, RxChannel]]:
     a, c = {}, {}
     for k, v in channel_map.items():
         for vv in v:
@@ -1830,10 +1896,11 @@ def convert(
             continue
         for v in channel2slot[k]:
             if isinstance(body(v), SlotWithIQ):
-                m = a[k].calc_modulation_frequency(mhz=k.frequency)
+                # print(f"awg: {k.frequency}")
+                m = a[k].calc_modulation_frequency(rf_freq=k.frequency)
+                # print(f"awg: rf {k.frequency} mod {m} GHz")
                 t = v.sampling_points
                 v.miq = v.iq * np.exp(1j * 2 * np.pi * (m * t))
-            # 位相合わせについては後日
 
     # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
     section2slots: Dict[Sections, MutableSequence[Slot]] = {}
@@ -1917,4 +1984,47 @@ def convert(
         for i, (c, p) in enumerate([(c, p) for c, p in capts])
     }
 
-    return sender | capturer
+    return QcSetup((sender | capturer))
+
+
+class QcSetup(dict):
+    class CaptParamsIter:
+        def __init__(self, setup: QcSetup, channel_map: ChannelMap, *logical_channels):
+            self.setup = setup
+            self.channel_map = channel_map
+            if logical_channels:
+                self.logical_channels = logical_channels
+            else:
+                self.logical_channels = tuple(
+                    [
+                        channel_map.logical[u][0]
+                        for u, c in setup
+                        if isinstance(u, UNIT) and u in channel_map.logical
+                    ]
+                )
+            self.current_idx = 0
+
+        def __iter__(self) -> QcSetup.CaptParamsIter:
+            return self
+
+        def __next__(self):
+            try:
+                logical_channel = l = self.logical_channels[self.current_idx]
+            except IndexError:
+                raise StopIteration()
+
+            u = [o for o in self.channel_map.physical[l] if isinstance(o, UNIT)][0]
+
+            self.current_idx += 1
+
+            return self.setup.get(u), u, l
+
+    def __init__(self, kw: Dict[str, QcPulseGenSetting | QcPulseCapSetting]):
+        super().__init__(kw)
+
+    # def get(self, arg):
+    #     keys = [k for k, v in self]
+    #     return self[keys.index(arg)][1]
+
+    def captparams(self, channel_map, *logical_channels):
+        return self.CaptParamsIter(self, channel_map, *logical_channels)

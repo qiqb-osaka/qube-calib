@@ -7,6 +7,7 @@ import logging
 import os
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
+from os import PathLike
 from pathlib import Path
 from typing import Any, Collection, Dict, Optional, Sequence, Tuple
 
@@ -17,6 +18,7 @@ from quel_ic_config_utils import (
     Quel1E7ResourceMapper,
     Quel1WaveSubsystem,
     SimpleBox,
+    SimpleBoxIntrinsic,
     create_box_objects,
 )
 
@@ -37,12 +39,14 @@ class QcBox:
 
     def __init__(
         self,
+        *,
         ipaddr_wss: str | IPv4Address | IPv6Address,
         ipaddr_sss: str | IPv4Address | IPv6Address,
         ipaddr_css: str | IPv4Address | IPv6Address,
         boxtype: Quel1BoxType,
         config_root: Path | None,
         config_options: Collection[Quel1ConfigOption],
+        auto_init: bool = True,
     ):
         _, _, _, linkupper, box = create_box_objects(
             ipaddr_wss,
@@ -53,11 +57,18 @@ class QcBox:
             config_options,
             refer_by_port=True,
         )
-        box.init()
+        if auto_init:
+            box.init()
         self._box = box
         self._linkupper = linkupper
         self._ipaddr_sss = ip_address(ipaddr_sss)
         self._config_options = config_options
+        # TODO: workaround
+        for port in [0, 5, 6, 7, 8, 13]:
+            try:
+                self.box.config_port(port, vatt=0x800)
+            except ValueError:
+                continue
 
     @property
     def box(self) -> SimpleBox:
@@ -90,6 +101,10 @@ class QcBox:
     @property
     def config_options(self) -> Collection[Quel1ConfigOption]:
         return self._config_options
+
+    @property
+    def _dev(self) -> SimpleBoxIntrinsic:
+        return self.box._dev
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}:{self.box.wss._wss_addr}>"
@@ -197,7 +212,16 @@ class QcBox:
         return linkup_ok
 
 
-class QcBoxFactory:
+class QubeYamlFiles(dict):
+    def __init__(self, *config_paths: str | PathLike):
+        d = {
+            Path(k).stem.replace("qube_", ""): QubeYamlFile(Path(k))
+            for k in config_paths
+        }
+        super().__init__(d)
+
+
+class QubeYamlFile(dict):
     _QUBECALIB_SERIES_MAPPER: Dict[str, str | Dict[str, str]] = {
         "quel-1": "quel-1",
         "qube": {
@@ -220,8 +244,40 @@ class QcBoxFactory:
         },
     }
 
-    @classmethod
-    def get_absolute_path_to_config(cls, config_path: Path) -> Path:
+    def __init__(self, config_path: str | PathLike):
+        path = Path(config_path)
+        config_path = self.get_absolute_path_to_config(path)
+        yaml = self.load(config_path)
+
+        d = self.parse_config(config_path.name, yaml)
+        d["ipaddr_wss"] = str(d["ipaddr_wss"])
+        d["ipaddr_sss"] = str(d["ipaddr_sss"])
+        d["ipaddr_css"] = str(d["ipaddr_css"])
+        d["config_root"] = None
+        if d["boxtype"] in [
+            Quel1BoxType.QuBE_OU_TypeB,
+            Quel1BoxType.QuBE_RIKEN_TypeB,
+            Quel1BoxType.QuEL1_TypeB,
+        ]:
+            config_options = [
+                Quel1ConfigOption.USE_MONITOR_IN_MXFE0,
+                Quel1ConfigOption.USE_MONITOR_IN_MXFE1,
+            ]
+        else:
+            config_options = [
+                Quel1ConfigOption.USE_READ_IN_MXFE0,
+                Quel1ConfigOption.USE_READ_IN_MXFE1,
+            ]
+        d["config_options"] = config_options
+
+        super().__init__(d)
+
+    def load(self, config_path: str | os.PathLike) -> Dict:
+        with open(config_path, "rb") as f:
+            c = yaml.safe_load(f)
+        return c
+
+    def get_absolute_path_to_config(self, config_path: Path) -> Path:
         """basename で指定されたファイルのフルパスを返す. ipynbを実行したディレクトリに
         basename のファイルが存在すればそのフルパスを，そうでなければ dir 内に
         存在するかを確認してそのフルパスを，存在しなければ FileNotFoundError を raise する.
@@ -244,54 +300,7 @@ class QcBoxFactory:
             raise FileNotFoundError(f"File {absolute} not found")
         return absolute
 
-    @classmethod
-    def produce(cls, config_path: str | os.PathLike) -> QcBox:
-        path = Path(config_path)
-        c = cls.load(cls.get_absolute_path_to_config(path))
-        d = cls.parse_config(path.name, c)
-        if d["boxtype"] in [
-            Quel1BoxType.QuBE_OU_TypeB,
-            Quel1BoxType.QuBE_RIKEN_TypeB,
-            Quel1BoxType.QuEL1_TypeB,
-        ]:
-            config_options = [
-                Quel1ConfigOption.USE_MONITOR_IN_MXFE0,
-                Quel1ConfigOption.USE_MONITOR_IN_MXFE1,
-            ]
-        else:
-            config_options = [
-                Quel1ConfigOption.USE_READ_IN_MXFE0,
-                Quel1ConfigOption.USE_READ_IN_MXFE1,
-            ]
-        return QcBox(
-            ipaddr_wss=str(d["ipaddr_wss"]),
-            ipaddr_sss=str(d["ipaddr_sss"]),
-            ipaddr_css=str(d["ipaddr_css"]),
-            boxtype=d["boxtype"],
-            config_root=None,
-            config_options=config_options,
-        )
-
-    @classmethod
-    def parse_qubecalib_series(cls, config_file_name: str) -> str:
-        m = cls._QUBECALIB_SERIES_MAPPER
-        s = config_file_name.split("_")
-        n = m[s[0]]
-        if isinstance(n, dict):
-            if isinstance(n[s[1]], str):
-                return n[s[1]]
-        elif isinstance(n, str):
-            return n
-        raise ValueError(f"{config_file_name} is not supported.")
-
-    @classmethod
-    def load(cls, config_path: str | os.PathLike) -> Dict:
-        with open(config_path, "rb") as f:
-            c = yaml.safe_load(f)
-        return c
-
-    @classmethod
-    def parse_config(cls, config_file_name: str | os.PathLike, content: dict) -> dict:
+    def parse_config(self, config_file_name: str | os.PathLike, content: dict) -> dict:
         kwmapper = {
             "ipfpga": "ipaddr_wss",
             "iplsi": "ipaddr_css",
@@ -304,6 +313,31 @@ class QcBoxFactory:
         }
         if "ipaddr_sss" not in kw:
             kw["ipaddr_sss"] = kw["ipaddr_wss"] + 0x10000
-        s = cls.parse_qubecalib_series(str(config_file_name))
-        kw["boxtype"] = cls._YAML_BOX_TYPE_MAPPER[s][content["type"]]
+        s = self.parse_qubecalib_series(str(config_file_name))
+        kw["boxtype"] = self._YAML_BOX_TYPE_MAPPER[s][content["type"]]
         return kw
+
+    def parse_qubecalib_series(self, config_file_name: str) -> str:
+        m = self._QUBECALIB_SERIES_MAPPER
+        s = config_file_name.split("_")
+        n = m[s[0]]
+        if isinstance(n, dict):
+            if isinstance(n[s[1]], str):
+                return n[s[1]]
+        elif isinstance(n, str):
+            return n
+        raise ValueError(f"{config_file_name} is not supported.")
+
+    @classmethod
+    def list_configfiles(cls) -> list[str]:
+        """ClassicQube の yml ファイル
+
+        Returns:
+            list[str]: 使用可能な yml ファイル名
+        """
+        # TODO: os.getcwd() の中にある yaml もロードチェック後にリストに加えるように機能強化したい
+        return [
+            f
+            for f in os.listdir(rc.path_to_config)
+            if os.path.isfile(os.path.join(rc.path_to_config, f))
+        ]

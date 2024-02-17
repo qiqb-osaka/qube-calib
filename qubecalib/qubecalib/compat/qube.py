@@ -9,7 +9,7 @@ from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Any, Dict
 
-from ..qcbox import QcBox, QcBoxFactory
+from ..qcbox import QcBox, QubeYamlFile
 
 # from tqdm import tqdm
 
@@ -286,4 +286,4 @@ class Nco(Peripheral):
 class Qube:
     @classmethod
     def create(cls, config_path: str | os.PathLike) -> ClassicQube:
-        return ClassicQube(QcBoxFactory.produce(config_path))
+        return ClassicQube(QcBox(**QubeYamlFile(config_path).asdict()))

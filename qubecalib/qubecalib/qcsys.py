@@ -1,21 +1,43 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
+import socket
 from concurrent.futures import Future
 from dataclasses import asdict, dataclass
+from enum import EnumMeta
 from os import PathLike
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Dict,
+    List,
+    Mapping,
+    MutableSequence,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import SequencerClient
+from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1ConfigOption
 from quel_ic_config_utils import CaptureReturnCode, SimpleBoxIntrinsic
 
 from qubecalib.temp.general_looptest_common import PulseCap, PulseGen
 
-from .qcbox import QcBox, QcBoxFactory
+from .backendqube import (
+    PhyChannel,
+    QcPulseCapSetting,
+    QcPulseGenSetting,
+    RxChannel,
+    TxChannel,
+)
+from .qcbox import QcBox, Sideband
 from .temp.general_looptest_common import BoxPool
 from .temp.quel1_wave_subsystem_mod import Quel1WaveSubsystemTools
 
@@ -161,13 +183,13 @@ class QcPulseGen(PulseGen):
     def __init__(
         self,
         name: str,
+        boxpool: QcBoxPool,
         boxname: str,
         port: int,
         channel: int,
-        wave: WaveSequence,
-        lo_freq: Optional[float],
-        cnco_freq: Optional[float],
-        boxpool: QcBoxPool,
+        wave: Optional[WaveSequence] = None,
+        lo_freq: Optional[float] = None,
+        cnco_freq: Optional[float] = None,
     ):
         box_status, qcbox, sqc = boxpool.get_box(boxname)
         if not box_status:
@@ -201,6 +223,34 @@ class QcPulseGen(PulseGen):
     def init_wave(self) -> None:
         Quel1WaveSubsystemTools.set_wave(self.box.wss, self.awg, self.wave)
 
+    def config_line(
+        self,
+        *,
+        lo_freq: Optional[float] = None,
+        cnco_freq: Optional[float] = None,
+        vatt: Optional[float] = None,
+        sideband: Optional[Sideband] = None,
+    ) -> None:
+        self.box.config_line(
+            group=self.group,
+            line=self.line,
+            lo_freq=lo_freq,
+            cnco_freq=cnco_freq,
+            vatt=vatt,
+            sideband=sideband.value if sideband is not None else None,
+        )
+
+    def config_channel(
+        self,
+        *,
+        fnco_freq: Optional[float] = None,
+    ) -> None:
+        self.box.config_channel(
+            group=self.group,
+            line=self.line,
+            fnco_freq=fnco_freq,
+        )
+
 
 class QcPulseCap:
     # capture_now で 開始
@@ -226,13 +276,15 @@ class QcPulseCap:
         self.boxname = boxname
         self.box = qcbox
         self.port = port
+        group, rline = qcbox.box._convert_all_port(port)
+        if isinstance(rline, int):
+            raise ValueError(f"{self.__class__.__name__} only accept tx port")
+        self.group = group
+        self.line = rline
         self.channel = channel
         self.capprm = captparam
         self.boxpool = boxpool
 
-        group, rline = qcbox.box._convert_all_port(port)
-        if isinstance(rline, int):
-            raise ValueError(f"{self.__class__.__name__} only accept rx port")
         self._pulsecap = PulseCap(
             name,
             boxname,
@@ -255,19 +307,66 @@ class QcPulseCap:
         # self.box.open_rfswitch(group=self.group, line=self.rline)
         pass
 
+    def config_rline(
+        self,
+        *,
+        lo_freq: Optional[float] = None,
+        cnco_freq: Optional[float] = None,
+        vatt: Optional[float] = None,
+        sideband: Optional[Sideband] = None,
+    ) -> None:
+        self.box.config_line(
+            group=self.group,
+            line=self.line,
+            lo_freq=lo_freq,
+            cnco_freq=cnco_freq,
+            vatt=vatt,
+            sideband=sideband.value if sideband is not None else None,
+        )
+
+
+class QcBoxSet(dict):
+    def __init__(
+        self,
+        config_path: str | PathLike,
+        excludes: Tuple = tuple(),
+    ):  # TODO: 候補を検索する様にする．いまのところ notebook と同じ階層のファイルを仮定．
+        with open(Path(os.getcwd()) / config_path, "r") as f:
+            d = json.load(f)
+        self._json = d
+        for _ in excludes:
+            del d["setting_boxes"][_]
+        for _, setting in d["setting_boxes"].items():
+            setting["boxtype"] = QUEL1_BOXTYPE_ALIAS[setting["boxtype"]]
+            setting["config_options"] = [
+                self._value_of(Quel1ConfigOption, _) for _ in setting["config_options"]
+            ]
+        super().__init__(d["setting_boxes"])
+
+    def _value_of(self, enum: EnumMeta, target: str) -> EnumMeta:
+        if target not in [_.value for _ in enum]:
+            raise ValueError(f"{target} is invalid")
+        return [_ for _ in enum if _.value == target][0]
+
+    def list_boxes(self) -> MutableSequence[str]:
+        d = self._json
+        return [_ for _ in d["setting_boxes"]]
+
 
 class QcSystem:
-    def __init__(self, *config_paths: str | PathLike):
-        self._qcboxes = {
-            Path(k).stem: QcBoxFactory.produce(Path(k)) for k in config_paths
-        }
+    def __init__(self, boxset_settings: Dict[str, Dict[str, Any]]):
         # init 内容を微調整したいので BoxPool.init はここにオーバーライドした
-        # SimpleBoxIntrinsic は init() 済みのすでに定義されたものを使いたいので BOX{i} 要素は空で渡して後で追加
-        # ここでは path.stem を key とする
-        for k, v in self._qcboxes.items():
-            DEVICE_SETTINGS[f"BOX{k}"] = {"qcbox": v}
-        bp = self._boxpool = QcBoxPool(DEVICE_SETTINGS)
-        bp.init(resync=False)
+        # SimpleBoxIntrinsic はすでに生成されたものを使いたいので BOX{i} 要素は空で渡して後で追加
+        self._qcboxes = {}
+        for k, _ in boxset_settings.items():
+            try:
+                self._qcboxes[k] = QcBox(**_, auto_init=False)
+            except socket.timeout:
+                raise TimeoutError(f"timeout {k}")
+        for k, _ in self._qcboxes.items():
+            DEVICE_SETTINGS[f"BOX{k}"] = {"qcbox": _}
+        self._boxpool = QcBoxPool(DEVICE_SETTINGS)
+        self._boxpool.init(resync=False)
 
     def resync_box(self, *qcbox_name: str) -> None:
         """resync したい機体だけを個別に resync する"""
@@ -589,6 +688,16 @@ class QcSystem:
             del pcs_by_boxname[boxname]
         return pcs_by_boxname
 
+    def get_phy_channel(self, boxname: str, port: int, channel: int) -> PhyChannel:
+        box = self.qcboxes[boxname]
+        _, line = box.get_port(port)
+        if isinstance(line, int):
+            return TxChannel(self.qcboxes, boxname, port, channel)
+        elif isinstance(line, str):
+            return RxChannel(self.qcboxes, boxname, port, channel)
+        else:
+            raise ValueError("invalid line type")
+
     def get_channel(
         self, boxname: str, port: int, channel: int
     ) -> Tuple[str, int, int | str, int | None]:
@@ -598,24 +707,6 @@ class QcSystem:
     def get_port(self, boxname: str, port: int) -> Tuple[str, int, int | str]:
         group, line = self.qcbox[boxname].box._convert_all_port(port)
         return (boxname, group, line)
-
-
-@dataclass
-class QcPulseGenSetting:
-    boxname: str
-    port: int
-    channel: int
-    wave: WaveSequence = None
-    lo_freq: Optional[float] = None
-    cnco_freq: Optional[float] = None
-
-
-@dataclass
-class QcPulseCapSetting:
-    boxname: str
-    port: int
-    channel: int
-    captparam: CaptureParam = None
 
 
 @dataclass

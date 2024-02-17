@@ -3,8 +3,9 @@
 __version__ = "2.1.0"
 
 from . import backendqube, neopulse, plot, qcbox, qcsys
-from .compat import qube, ui
-from .qcbox import QcBoxFactory
+from .compat import ui
+from .qcbox import QcBox, QubeYamlFile, QubeYamlFiles
+from .qcsys import QcBoxSet, QcSystem
 
 # from .temp import general_looptest_common as glc
 
@@ -22,5 +23,10 @@ __all__ = [
     # "QcWaveSubsystem",
     "qube",
     "ui",
-    "QcBoxFactory",
+    "QcBox",
+    "QubeYamlFile",
+    "QcBoxSystem",
+    "QcSystem",
+    "QcBoxSet",
+    "QubeYamlFiles",
 ]

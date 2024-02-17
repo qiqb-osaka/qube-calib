@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future
-from typing import Collection, Dict, List, Optional, Tuple
+from typing import Collection, Dict, MutableSequence, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
-from e7awgsw import CaptureParam, WaveSequence
+from e7awgsw import CaptureParam, DspUnit, WaveSequence
 from quel_ic_config_utils import CaptureReturnCode, Quel1WaveSubsystem
 
 logger = logging.getLogger(__name__)
@@ -40,14 +40,21 @@ class Quel1WaveSubsystemTools:
         cls,
         wss: Quel1WaveSubsystem,
         cuhwxs: Dict[int, Tuple[int, int]],
+        capprm_by_cuhwx: Dict[int, CaptureParam],
         num_expected_words: Dict[int, int],
-    ) -> Tuple[CaptureReturnCode, Dict[Tuple[int, int], npt.NDArray[np.complex64]]]:
-        data: Dict[Tuple[int, int], npt.NDArray[np.complex64]] = {}
+    ) -> Tuple[
+        CaptureReturnCode,
+        Dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+    ]:
+        data: Dict[
+            Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
+        ] = {}
         status: CaptureReturnCode = CaptureReturnCode.SUCCESS
         with wss._capctrl_lock:
             for cuhwx, capunit in cuhwxs.items():
                 n_sample_captured = wss._capctrl.num_captured_samples(cuhwx)
                 # n_sample_expected = num_expected_words[cuhwx] * 4
+                # TODO: n_sample_expected を capprm から計算する
                 n_sample_expected = n_sample_captured
                 if n_sample_captured == n_sample_expected:
                     logger.info(
@@ -60,11 +67,46 @@ class Quel1WaveSubsystemTools:
                         f"should be {n_sample_expected} samples"
                     )
                     status = CaptureReturnCode.BROKEN_DATA
-                data_in_assq: List[Tuple[float, float]] = wss._capctrl.get_capture_data(
-                    cuhwx, n_sample_captured
-                )
-                tmp = np.array(data_in_assq, dtype=np.float32)
-                data[capunit] = tmp[:, 0] + tmp[:, 1] * 1j
+
+                capprm = capprm_by_cuhwx[cuhwx]
+                if DspUnit.CLASSIFICATION in capprm.dsp_units_enabled:
+                    d = np.array(
+                        list(
+                            wss._capctrl.get_classification_results(
+                                cuhwx,
+                                n_sample_captured,
+                            )
+                        ),
+                        dtype=np.int16,
+                    )
+                else:
+                    c = np.array(
+                        wss._capctrl.get_capture_data(
+                            cuhwx,
+                            n_sample_captured,
+                        ),
+                        dtype=np.float32,
+                    )
+                    d = c[:, 0] + c[:, 1] * 1j
+
+                if DspUnit.INTEGRATION in capprm.dsp_units_enabled:
+                    _d = d.reshape(1, -1)
+                else:
+                    _d = d.reshape(capprm.num_integ_sections, -1)
+
+                if DspUnit.SUM in capprm.dsp_units_enabled:
+                    __d = np.hsplit(_d, list(range(len(capprm.sum_section_list))[1:]))
+                else:
+                    _c = np.hsplit(
+                        _d,
+                        np.cumsum(
+                            np.array([w for w, _ in capprm.sum_section_list[:-1]])
+                        )
+                        * capprm.NUM_SAMPLES_IN_ADC_WORD,
+                    )
+                    __d = [di.transpose() for di in _c]
+
+                data[capunit] = __d
         return status, data
 
     @classmethod
@@ -72,16 +114,25 @@ class Quel1WaveSubsystemTools:
         cls,
         wss: Quel1WaveSubsystem,
         cuhwxs: Dict[int, Tuple[int, int]],
+        cuhwx_capprm: Dict[int, CaptureParam],
         num_expected_words: Dict[int, int],
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
-    ) -> Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]:
+    ) -> Tuple[
+        CaptureReturnCode,
+        Dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+    ]:
         ready: bool = wss._wait_for_capture_data(cuhwxs, timeout)
         if not ready:
             return CaptureReturnCode.CAPTURE_TIMEOUT, {}
         if wss._check_capture_error(cuhwxs):
             return CaptureReturnCode.CAPTURE_ERROR, {}
 
-        retcode, iqs = cls._retrieve_capture_data(wss, cuhwxs, num_expected_words)
+        retcode, iqs = cls._retrieve_capture_data(
+            wss,
+            cuhwxs,
+            cuhwx_capprm,
+            num_expected_words,
+        )
         return retcode, {runit: iq for (_, runit), iq in iqs.items()}
 
     @classmethod
@@ -109,7 +160,12 @@ class Quel1WaveSubsystemTools:
 
         cls._setup_capture_units(wss, capmod, cuhwxs, cuhwx_capprm, triggering_awg)
         return wss._executor.submit(
-            cls._simple_capture_thread_main, wss, cuhwxs, num_expected_words, timeout
+            cls._simple_capture_thread_main,
+            wss,
+            cuhwxs,
+            cuhwx_capprm,
+            num_expected_words,
+            timeout,
         )
 
     @classmethod
