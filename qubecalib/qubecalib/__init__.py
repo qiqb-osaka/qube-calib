@@ -6,6 +6,7 @@ from . import backendqube, neopulse, plot, qcbox, qcsys
 from .compat import ui
 from .qcbox import QcBox, QubeYamlFile, QubeYamlFiles
 from .qcsys import QcBoxSet, QcSystem
+from .qubecalib import QubeCalib
 
 # from .temp import general_looptest_common as glc
 
@@ -23,6 +24,7 @@ __all__ = [
     # "QcWaveSubsystem",
     "qube",
     "ui",
+    "QubeCalib",
     "QcBox",
     "QubeYamlFile",
     "QcBoxSystem",
