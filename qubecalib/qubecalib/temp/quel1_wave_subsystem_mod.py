@@ -12,7 +12,7 @@ from quel_ic_config_utils import CaptureReturnCode, Quel1WaveSubsystem
 logger = logging.getLogger(__name__)
 
 
-class Quel1WaveSubsystemTools:
+class Quel1WaveSubsystemMod:
     # simple_capture_start は改修
     # capture_start は改修
     @classmethod

@@ -39,7 +39,7 @@ from .backendqube import (
 )
 from .qcbox import QcBox, Sideband
 from .temp.general_looptest_common import BoxPool
-from .temp.quel1_wave_subsystem_mod import Quel1WaveSubsystemTools
+from .temp.quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ class QcPulseGen(PulseGen):
         pass
 
     def init_wave(self) -> None:
-        Quel1WaveSubsystemTools.set_wave(self.box.wss, self.awg, self.wave)
+        Quel1WaveSubsystemMod.set_wave(self.box.wss, self.awg, self.wave)
 
     def config_line(
         self,
@@ -448,7 +448,7 @@ class QcSystem:
         capu_capprm = {pc.channel: pc.capprm for pc in pcs}
         capunits = tuple(capu_capprm.keys())
         num_expected_words = {capu: 0 for capu in capu_capprm.keys()}
-        thunk = Quel1WaveSubsystemTools.simple_capture_start(
+        thunk = Quel1WaveSubsystemMod.simple_capture_start(
             wss,
             capmod,
             capunits,
@@ -492,7 +492,7 @@ class QcSystem:
         capu_capprm = {pc.channel: pc.capprm for pc in pcs}
         capunits = tuple(capu_capprm.keys())
         num_expected_words = {capu: 0 for capu in capu_capprm.keys()}
-        future = Quel1WaveSubsystemTools.simple_capture_start(
+        future = Quel1WaveSubsystemMod.simple_capture_start(
             wss,
             capmod,
             capunits,
