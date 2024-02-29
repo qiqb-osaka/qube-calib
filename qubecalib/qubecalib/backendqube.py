@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import time
 import warnings
 from collections import deque, namedtuple
@@ -284,9 +285,25 @@ class TxChannel(PhyChannel):
         return diff_hz * 1e-9  # return value is normalized as GHz
 
 
-class LogiChannel:
-    def __init__(self, frequency: float, *args: Any, **kw: Any):
+class Target:
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        frequency: Optional[float] = None,
+        *args: Any,
+        **kw: Any,
+    ):
+        self.name = name
         self.frequency = frequency
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__}:name={self.name},frequency={self.frequency}>"
+        )
+
+
+class LogiChannel(Target):
+    pass
 
 
 class Control(LogiChannel):
@@ -379,7 +396,7 @@ class ChannelMap(dict):
     ) -> None:
         pass
 
-    def map(self, physical: PhyChannel, *logical: LogiChannel) -> None:
+    def map(self, physical: PhyChannel, *logical: Target) -> None:
         if physical.direction == Direction.FROM_TARGET:
             if len(logical) != 1:
                 raise ValueError(
@@ -389,8 +406,8 @@ class ChannelMap(dict):
         self[physical] = logical
 
     @property
-    def physical(self) -> Dict[LogiChannel, List[PhyChannel]]:
-        rslt: Dict[LogiChannel, List[PhyChannel]] = {}
+    def physical(self) -> Dict[Target, List[PhyChannel]]:
+        rslt: Dict[Target, List[PhyChannel]] = {}
         for k, v in self.items():
             for o in v:
                 if o not in rslt:
@@ -401,7 +418,7 @@ class ChannelMap(dict):
         return rslt
 
     @property
-    def logical(self) -> Dict[PhyChannel, LogiChannel]:
+    def logical(self) -> Dict[PhyChannel, Target]:
         return {k: v for k, v in self.items()}
 
 
@@ -1392,6 +1409,19 @@ def acquire_section(
     if section is None:
         section = Sections()
 
+    # targets = [k for k in sequence.flatten().slots if k is not None]
+    # bands = [band for band in channel_map]
+
+    # is_multi_chunk = np.array([isinstance(o, Series) for o in sequence]).prod()
+    # is_multi_chunk *= np.array(
+    #     [
+    #         isinstance(v, (Series, Blank))
+    #         for o in sequence
+    #         if isinstance(o, Series)
+    #         for v in o
+    #     ]
+    # ).prod()
+
     tx = acquire_tx_section(sequence, channel_map)
     rx = acquire_rx_section(sequence.flatten(), channel_map)
 
@@ -1412,13 +1442,16 @@ def acquire_tx_section(
     if section is None:
         section = Sections()
 
-    logch = [k for k in sequence.flatten().slots if k is not None]
-    phych = [
+    logch = {
+        k for k in sequence.flatten().slots if k is not None
+    }  # sequence に含まれる logch を抽出
+    phych = {
         phych
         for phych in channel_map
         for _ in logch
-        if _ in channel_map[phych] and phych.direction == Direction.TO_TARGET
-    ]
+        if _ in [_.name for _ in channel_map[phych]]
+        and re.match("^MUX.*CAP.*$", phych) is None
+    }  # channel_map から sequence に含まれかつ CAP 型以外の band を抽出 #TODO
 
     is_multi_chunk = np.array([isinstance(o, Series) for o in sequence]).prod()
     is_multi_chunk *= np.array(
@@ -1492,20 +1525,35 @@ def acquire_rx_section(
     if section is None:
         section = Sections()
 
-    logch = [k for k in sequence.slots if isinstance(k, Readout)]
-    phych = [
+    logch = {
+        k for k in sequence.flatten().slots if k is not None
+    }  # sequence に含まれる logch を抽出
+    phych = {
         phych
         for phych in channel_map
         for _ in logch
-        if _ in channel_map[phych] and phych.direction == Direction.FROM_TARGET
-    ]
+        if _ in [_.name for _ in channel_map[phych]]
+        and re.match("^MUX.*CAP.*$", phych) is not None
+    }  # channel_map から sequence に含まれかつ CAP 型の band を抽出 #TODO
+
+    # logch = [k for k in sequence.slots if isinstance(k, Readout)]
+    # phych = [
+    #     phych
+    #     for phych in channel_map
+    #     for _ in logch
+    #     if _ in channel_map[phych] and phych.direction == Direction.FROM_TARGET
+    # ]
 
     for phychi in phych:
         slots = np.array(
             [
                 (s.begin, s.duration, s.end)
                 for s in sequence
-                if isinstance(body(s), Range) and s.ch in channel_map[phychi]
+                if isinstance(body(s), Range)
+                and s.ch
+                in [
+                    _.name for _ in channel_map[phychi]
+                ]  # TODO Target object を参照するのをやめて name 参照でもいいのでは？
             ]
         )
         try:
@@ -1781,19 +1829,39 @@ class RxSection(SectionBase):
         super().__init__(delay, duration, blank, repeats)
 
 
+# TODO 不要候補
 def split_awg_unit(
     channel_map: ChannelMap,
 ) -> Tuple[Dict[LogiChannel, TxChannel], Dict[LogiChannel, RxChannel]]:
+    # TODO ここは sequence の中身をみて改修する？
     a, c = {}, {}
-    for k, v in channel_map.items():
-        for vv in v:
-            if k.direction == Direction.FROM_TARGET:
-                c[vv] = k
-            elif k.direction == Direction.TO_TARGET:
-                a[vv] = k
+    for band, targets in channel_map.items():
+        for target in targets:
+            if re.match("^MUX(\d+)CAPB(\d)", band) is None:
+                a[target] = band
             else:
-                raise ValueError("type of phy channel is invalid")
+                c[target] = band
+            # if band.direction == Direction.FROM_TARGET:
+            #     c[target] = band
+            # elif band.direction == Direction.TO_TARGET:
+            #     a[target] = band
+            # else:
+            #     raise ValueError("type of phy channel is invalid")
     return a, c
+
+
+def split_gen_cap(
+    channel_map: ChannelMap,
+) -> Tuple[Dict[Target, str], Dict[Target, str]]:
+    # TODO ここは sequence の中身をみて改修する？
+    gen, cap = {}, {}
+    for band, targets in channel_map.items():
+        for target in targets:
+            if re.match("^MUX(\d+)CAPB(\d)", band) is None:
+                gen[target] = band
+            else:
+                cap[target] = band
+    return gen, cap
 
 
 def __acquire_chunk__(chunk, repeats=1, blank=0):
@@ -1806,7 +1874,8 @@ def __acquire_chunk__(chunk, repeats=1, blank=0):
     return {"iq_samples": s, "num_blank_words": b // int(WORD), "num_repeats": repeats}
 
 
-def chunks2wseq(chunks, period, repeats):
+# TODO ここ大事
+def chunks2wseq(chunks, period: float, repeats: int):
     # c = chunks
     # if int(c[0].begin) % WORD:
     #     raise('The wait duration must be an integer multiple of ()ns.'.format(int(WORD)))
@@ -1884,7 +1953,10 @@ def convert(
     sequence = sequence.flatten()
     # channel2slot = r = organize_slots(sequence) # channel -> slot
     channel2slot = sequence.slots
-    a, c = split_awg_unit(channel_map)  # channel -> txport, rxport
+    a, c = split_gen_cap(channel_map)  # channel -> txport, rxport
+    print("channel2slot", channel2slot)
+    print("gen", a)
+    print("cap", c)
 
     # Tx チャネルはデータ変調
     for k in a:

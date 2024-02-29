@@ -66,6 +66,7 @@ class Slot(HasTraits, ContextNode):
         **kw: Any,
     ):
         self.__mute__ = False
+        self.miq: Any = None
 
         if (begin is not None) and (duration is not None) and (end is not None):
             raise ValueError(
@@ -101,6 +102,11 @@ class Slot(HasTraits, ContextNode):
             raise ValueError("'end' member valiable is not initialized.")
         if e["new"] is not None:
             self.begin = self.end - self.duration
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__}:begin={self.begin},duration={self.duration}>"
+        )
 
 
 class ChannelMixin(object):

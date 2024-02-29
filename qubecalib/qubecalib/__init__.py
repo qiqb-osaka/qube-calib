@@ -7,6 +7,7 @@ from .compat import ui
 from .qcbox import QcBox, QubeYamlFile, QubeYamlFiles
 from .qcsys import QcBoxSet, QcSystem
 from .qubecalib import QubeCalib
+from .temp.general_looptest_common_mod import BoxPoolMod
 
 # from .temp import general_looptest_common as glc
 
@@ -31,4 +32,5 @@ __all__ = [
     "QcSystem",
     "QcBoxSet",
     "QubeYamlFiles",
+    "BoxPoolMod",
 ]

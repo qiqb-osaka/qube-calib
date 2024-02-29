@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import deque
+import re
+import warnings
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import EnumMeta
 from ipaddress import IPv4Address, IPv6Address, ip_address
@@ -10,22 +12,39 @@ from pathlib import Path
 from typing import (
     Any,
     Collection,
+    Dict,
+    Final,
     MutableMapping,
     MutableSequence,
     Optional,
     Sequence,
+    Set,
+    Tuple,
 )
 
 import json5
+import numpy as np
+import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
+from quel_clock_master import SequencerClient
 from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1BoxType, Quel1ConfigOption
-from quel_ic_config_utils import SimpleBox
+from quel_ic_config_utils import (
+    CaptureReturnCode,
+    SimpleBoxIntrinsic,
+    create_box_objects,
+)
 from quel_ic_config_utils.linkupper import LinkupFpgaMxfe
 
 from . import backendqube as backend
 from . import neopulse as pulse
+from .backendqube import Sections, Sideband
 from .temp.general_looptest_common import BoxPool, PulseCap, PulseGen
-from .temp.general_looptest_common_mod import BoxPoolMod
+from .temp.general_looptest_common_mod import (
+    BoxPoolMod,
+    PulseCapSinglebox,
+    PulseGenSinglebox,
+)
+from .temp.quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
 
 PulseGen, PulseCap, CaptureParam
 
@@ -38,42 +57,6 @@ def _value_of(enum: EnumMeta, target: str) -> EnumMeta:
     return [_ for _ in enum if _.value == target][0]
 
 
-# class SettingsForBox:
-#     def __init__(self, dct: dict[str, Any]):
-#         self._aliases: Mapping[str, str] = dict()
-#         self._contents = dct
-#         for v in self._contents.values():
-#             v["boxtype"] = QUEL1_BOXTYPE_ALIAS[v["boxtype"]]
-#             v["config_options"] = [
-#                 self._value_of(Quel1ConfigOption, _) for _ in v["config_options"]
-#             ]
-
-#     def _value_of(self, enum: EnumMeta, target: str) -> EnumMeta:
-#         if target not in [_.value for _ in enum]:
-#             raise ValueError(f"{target} is invalid")
-#         return [_ for _ in enum if _.value == target][0]
-
-#     @property
-#     def aliases(self) -> Mapping[str, str]:
-#         return self._aliases
-
-#     @aliases.setter
-#     def aliases(self, aliases: Mapping[str, str]) -> None:
-#         self._aliases = aliases
-
-#     def get_boxname(self, boxname_or_alias: str) -> str:
-#         if boxname_or_alias in self.aliases:
-#             return self.aliases[boxname_or_alias]
-#         elif boxname_or_alias in self._contents:
-#             return boxname_or_alias
-#         else:
-#             raise ValueError(f"boxname_or_alias: {boxname_or_alias} is not found")
-
-#     def __getitem__(self, key: Any) -> Any:
-#         _key = self.get_boxname(key)
-#         return self._contents[_key]
-
-
 class BoxSettings:
     def __init__(
         self,
@@ -83,11 +66,6 @@ class BoxSettings:
         self._contents: dict[str, BoxSetting] = dict()
         for k, v in dct.items():
             self.add_box_setting_dict(k, v)
-            # v["boxtype"] = QUEL1_BOXTYPE_ALIAS[v["boxtype"]]
-            # v["config_options"] = [
-            #     self._value_of(Quel1ConfigOption, _) for _ in v["config_options"]
-            # ]
-            # self._contents[k] = BoxSetting(**v)
 
     def add_box_setting_dict(
         self,
@@ -156,11 +134,14 @@ class QubeCalib:
         path_for_setting_file_of_boxes: Optional[str | os.PathLike] = None,
         settings: dict[str, Any] = {},
     ):
+        self._boxpool: Optional[BoxPool] = None
         self._command_queue: MutableSequence = deque()
         self._clockmaster_setting: Optional[ClockMasterSetting] = None
         self._box_settings: BoxSettings = BoxSettings({})
         self._port_settings: dict[str, dict[str, str | int]] = {}
+        self._target_settings: Final[dict[str, dict[str, str | Optional[float]]]] = {}
         self._default_exclude_boxnames: tuple = ()
+        self._sequencer_setting = None
         if path_for_setting_file_of_boxes:
             self._load(path_for_setting_file_of_boxes)
         elif settings is not None:
@@ -177,13 +158,9 @@ class QubeCalib:
             if "port_settings" in settings:
                 for k, _ in settings["port_settings"].items():
                     self._port_settings[k] = _
-        # else:
-        #     self._clockmaster_setting: Optional[ClockMasterSetting] = None
-        #     self._box_settings: BoxSettings = BoxSettings({})
-        #     # self._settings_for_box = SettingsForBox({})
-        #     self._default_exclude_boxnames: tuple = ()
-        #     self._port_settings: dict[str, dict[str, str | int]] = {}
-        #     # self._setting_for_clockmaster = {"ipaddr": "10.3.0.255", "reset": True}
+            if "band_by_target" in settings:
+                for k, _ in settings["band_by_target"].items():
+                    self._band_by_target[k] = _
 
     def _load(
         self,
@@ -201,25 +178,231 @@ class QubeCalib:
                 self._box_settings = BoxSettings(jsn["box_settings"])
             if "box_aliases" in jsn:
                 self._box_settings.aliases = jsn["box_aliases"]
-            # if "settings_for_box" in jsn:
-            #     self._settings_for_box = SettingsForBox(jsn["settings_for_box"])
-            # if "aliases_of_boxname" in jsn:
-            #     self._settings_for_box.aliases = jsn["aliases_of_boxname"]
             if "port_settings" in jsn:
                 self._port_settings = jsn["port_settings"]
+            if "band_by_target" in jsn:
+                self._band_by_target = jsn["band_by_target"]
+
+    @property
+    def boxname_by_ipaddrwss(self) -> dict[str, str]:
+        return {
+            str(self._box_settings[_].ipaddr_wss): _
+            for _ in self._box_settings._contents
+        }
+
+    def get_defined_targets(self) -> dict[str, str]:
+        return {_: _ for _ in self._band_by_target}
 
     def get_box_type(self, box_name_or_alias: str) -> Quel1BoxType:
         box_setting = self._box_settings[box_name_or_alias]
         return box_setting.boxtype
 
-    def _convert_all_port(
-        self, box_name_or_alias: str, port: int
-    ) -> tuple[int, int | str]:
-        # TODO: Fix abuse API
-        boxtype = self.get_box_type(box_name_or_alias)
-        if port not in SimpleBox._PORT2LINE[boxtype]:
-            raise ValueError(f"invalid port: {port}")
-        return SimpleBox._PORT2LINE[boxtype][port]
+    def get_num_channels_of_port(self, box_name_or_alias: str, port: int) -> int:
+        boxname = self._box_settings.get_boxname(box_name_or_alias)
+        _, _, box, _ = self._create_box(boxname)
+        group, line = self._convert_all_port(boxname, port)
+        if isinstance(line, int):
+            return box.css.get_num_channels_of_line(group, line)
+        elif isinstance(line, str):
+            return box.css.get_num_rchannels_of_rline(group, line)
+        else:
+            raise ValueError("invalid line value")
+
+    def get_port_type(self, box_name_or_alias: str, port: int) -> str:
+        boxname = self._box_settings.get_boxname(box_name_or_alias)
+        _, _, box, _ = self._create_box(boxname)
+        group, line = self._convert_all_port(boxname, port)
+        if isinstance(line, int):
+            return "gen"
+        elif isinstance(line, str):
+            return "cap"
+
+    def _convert_all_port(self, box_name_or_alias: str, port: int) -> tuple[int, int]:
+        settings = self._box_settings[box_name_or_alias].asdict()
+        _, _, _, _, box = create_box_objects(refer_by_port=True, **settings)
+        group, line = box._convert_all_port(port)
+        return group, line
+
+    # def connect(self):
+    #     pass
+
+    # def disconnect(self):
+    #     pass
+
+    def config_sequencer(self, duration: float, repeats: int = 1) -> None:
+        self._sequencer_setting = SequencerSetting(duration, repeats)
+
+    def convert_sequence(
+        self, sequence: backend.Sequence
+    ) -> list[tuple[str, WaveSequence | CaptureParam]]:
+        if self._sequencer_setting is None:
+            raise ValueError("exec QubeCalib.config_sequencer() is required")
+        cmap = self.create_channelmap()
+        section = backend.acquire_section(sequence, cmap)
+        period = backend.quantize_sequence_duration(self._sequencer_setting.duration)
+        sequence_setting = self.convert(
+            sequence.flatten(),
+            section,
+            cmap,
+            period,
+            self._sequencer_setting.repeats,
+        )
+        return sequence_setting
+
+    def parse_bandname(self, band_name: str) -> tuple[str, int]:
+        r = re.match("^(MUX|Q)(\d+)(GEN|CAP)?B(\d)$", band_name)
+        if r is None:
+            raise ValueError(f"invalid bandname:{band_name}")
+        port_name, channel = (
+            r.group(1) + r.group(2) + (r.group(3) if r.group(3) is not None else ""),
+            int(r.group(4)),
+        )
+        return port_name, channel
+
+    def create_pulsegen_setting(self, band_name: str, waveseq: WaveSequence) -> dict:
+        port_name, channel = self.parse_bandname(band_name)
+        s = self._port_settings[port_name]
+        port = int(s["port"])
+        box_name_or_alias = str(s["box_name_or_alias"])
+        group, line = self._convert_all_port(box_name_or_alias, port)
+
+        setting = {
+            "name": band_name,
+            "port": port,
+            "group": group,
+            "line": line,
+            "channel": channel,
+            "waveseq": waveseq,
+            # TODO ポート設定については後で考える
+            # "lo_freq": s["lo_freq"],
+            # "cnco_freq": s["cnco_freq"],
+            # "sideband": s["sideband"],
+            # "vatt": s["vatt"],
+            # "fnco_freq": s["band"][channel],
+        }
+        return setting
+
+    def create_pulsecap_setting(self, band_name: str, cptprm: CaptureParam) -> dict:
+        port_name, channel = self.parse_bandname(band_name)
+        s = self._port_settings[port_name]
+        port = int(s["port"])
+        box_name_or_alias = str(s["box_name_or_alias"])
+        group, rline = self._convert_all_port(box_name_or_alias, port)
+        setting = {
+            "name": band_name,
+            "port": port,
+            "group": group,
+            "rline": rline,
+            "channel": channel,
+            "capprm": cptprm,
+            # TODO ポート設定については後で考える
+            # "lo_freq": s["lo_freq"],
+            # "cnco_freq": s["cnco_freq"],
+            # "sideband": s["sideband"],
+            # "fnco_freq": s["band"][0],
+        }
+        return setting
+
+    def invoke_sequencer(self, sequence: backend.Sequence) -> None:
+        settings: dict[str, Any] = {}
+        sequence_setting = self.convert_sequence(sequence)
+        box_settings = {
+            "BOX" + self._box_settings.get_boxname(_): self._box_settings[_].asdict()
+            for _ in {
+                self._port_settings[port_name]["box_name_or_alias"]
+                for port_name in {band_name[:-2] for band_name, _ in sequence_setting}
+            }
+        }
+        pulsegen_settings = {
+            band_name: self.create_pulsegen_setting(band_name, _)
+            for band_name, _ in sequence_setting
+            if isinstance(_, WaveSequence)
+        }
+        pulsecap_settings = {
+            band_name: self.create_pulsecap_setting(band_name, _)
+            for band_name, _ in sequence_setting
+            if isinstance(_, CaptureParam)
+        }
+        if len(box_settings) == 1:
+            settings = {
+                "box_settings": box_settings,
+                "pulsegen_settings": pulsegen_settings,
+                "pulsecap_settings": pulsecap_settings,
+            }
+            InvokeSequencerSinglebox(settings).execute()
+            return
+        # print(len(box_settings), box_settings)
+        if self._clockmaster_setting is None:
+            raise ValueError("clockmaster setting is not defined")
+        settings = {
+            "clockmaster_setting": self._clockmaster_setting.asdict(),
+            "box_settings": box_settings,
+        }
+        InvokeSequencer(settings).execute()
+        return
+
+    # def invoke_sequencer_singlebox(
+    #     self,
+    #     sequence_setting: list[tuple[str, WaveSequence | CaptureParam]],
+    #     box_settings: dict[str, Any],
+    # ) -> None:
+    #     settings = {
+    #         "box_settings": box_settings,
+    #     }
+    #     c = InvokeSequencerSinglebox(settings)
+    #     c.execute()
+
+    def dump_config(
+        self,
+        box_name_or_alias: str,
+        port: Optional[int] = None,
+    ) -> (
+        dict[str, dict[int, dict[int | str, dict[str, Any]]]]
+        | dict[int, dict[int | str, dict[str, Any]]]
+    ):
+        settings = self._box_settings[box_name_or_alias].asdict()
+        css, wss, rmap, linkupper, box = create_box_objects(
+            refer_by_port=True, **settings
+        )
+        box_dump_config = box.dump_config()
+        if port is None:
+            return box_dump_config
+        else:
+            return box_dump_config[f"port-#{port:02}"]
+
+    def connect(
+        self,
+        *targets: str,
+    ) -> None:
+        if not targets:
+            boxpool = self._create_all_boxes()
+            for box, _ in boxpool._boxes.values():
+                box.init()
+        else:
+            ports = {
+                _[:-2] for _ in sum([self._band_by_target[_] for _ in targets], [])
+            }
+            box_names_or_aliases = {
+                self._port_settings[_]["box_name_or_alias"] for _ in ports
+            }
+            boxnames = {self._box_settings.get_boxname(_) for _ in box_names_or_aliases}
+            self._boxpool, b_and_s = self._create_boxes(*boxnames)
+            for box, _ in b_and_s.values():
+                box.init()
+
+    def disconnect(self) -> None:
+        self._boxpool = None
+
+    # def _convert_all_port(
+    #     self,
+    #     box_name_or_alias: str,
+    #     port: int,
+    # ) -> tuple[int, int | str]:
+    #     # TODO: Fix abuse API
+    #     boxtype = self.get_box_type(box_name_or_alias)
+    #     if port not in SimpleBox._PORT2LINE[boxtype]:
+    #         raise ValueError(f"invalid port: {port}")
+    #     return SimpleBox._PORT2LINE[boxtype][port]
 
     def set_clockmaster_setting(self, ipaddr: str | IPv4Address | IPv6Address) -> None:
         if isinstance(ipaddr, str):
@@ -260,22 +443,22 @@ class QubeCalib:
             [self._box_settings.get_boxname(_) for _ in default + boxnames_or_aliases]
         )
 
-    def convert_sequence_to_setting(
-        self,
-        sequence: pulse.Sequence,
-        channel_map: backend.ChannelMap,
-        sequence_duration: int,
-        repeats: int,
-    ) -> Any:
-        section = backend.acquire_section(sequence, channel_map)
-        period = backend.quantize_sequence_duration(sequence_duration)
-        setup = backend.convert(
-            sequence.flatten(), section, channel_map, period, repeats
-        )
-        return ()
+    # def convert_sequence_to_setting(
+    #     self,
+    #     sequence: pulse.Sequence,
+    #     channel_map: backend.ChannelMap,
+    #     sequence_duration: int,
+    #     repeats: int,
+    # ) -> Any:
+    #     section = backend.acquire_section(sequence, channel_map)
+    #     period = backend.quantize_sequence_duration(sequence_duration)
+    #     setup = backend.convert(
+    #         sequence.flatten(), section, channel_map, period, repeats
+    #     )
+    #     return ()
 
-    def exec(self, pulse: pulse.Sequence) -> tuple[dict[str, Any]]:
-        return ({"": None},)
+    # def exec(self, pulse: pulse.Sequence) -> tuple[dict[str, Any]]:
+    #     return ({"": None},)
 
     @classmethod
     def _create_channel(
@@ -301,55 +484,45 @@ class QubeCalib:
             "CLOCK_MASTER": _clockmaster_setting,
         }
 
-    # def _create_boxpool(self, exclude_boxnames_or_aliases: tuple = tuple()) -> BoxPool:
-    #     if isinstance(self._clockmaster_setting, ClockMasterSetting):
-    #         _clockmaster_setting = self._clockmaster_setting.asdict()
-    #     settings = {
-    #         "clockmaster_setting": _clockmaster_setting,
-    #     }
-    #     for _ in self._get_boxname_all():
-    #         settings["BOX" + _] = self._box_settings
-
-    #     # return BoxPoolMod.create_boxpool(settings=setting.asdict())
-    #     return BoxPoolMod(settings)
-
     def _create_box(
         self,
-        # boxpool: BoxPool,
-        boxname_or_alias: str,
-    ) -> tuple[BoxPool, str]:
+        box_name_or_alias: str,
+    ) -> tuple[BoxPool, str, SimpleBoxIntrinsic, SequencerClient]:
         _settings = self._create_clockmaster_setting()
-        boxname = self._box_settings.get_boxname(boxname_or_alias)
+        boxname = self._box_settings.get_boxname(box_name_or_alias)
 
-        # if "BOX" + boxname in boxpool._boxes:
-        #     raise ValueError(f"box: {boxname} is alreaddy created")
         __settings = dict()
         __settings["BOX" + boxname] = self._box_settings[boxname].asdict()
 
         boxpool = BoxPool(_settings | __settings)
-        #     BoxPoolMod.add_box(boxpool, settings=settings)
-        return boxpool, boxname
+        box, sc = BoxPoolMod.get_box(boxpool, boxname)
+        # box.init()
+        return boxpool, boxname, box, sc
+
+    def _create_boxes(
+        self,
+        *box_names_or_aliases: str,
+    ) -> tuple[BoxPool, dict[str, tuple[SimpleBoxIntrinsic, SequencerClient]]]:
+        _settings = self._create_clockmaster_setting()
+        box_names = [self._box_settings.get_boxname(_) for _ in box_names_or_aliases]
+        __settings = {"BOX" + _: self._box_settings[_].asdict() for _ in box_names}
+
+        boxpool = BoxPool(_settings | __settings)
+        boxes_and_seqctrls = {_: BoxPoolMod.get_box(boxpool, _) for _ in box_names}
+        # box.init()
+        return boxpool, boxes_and_seqctrls
 
     def _create_all_boxes(
         self,
         exclude_boxnames_or_aliases: tuple = tuple(),
     ) -> BoxPool:
-        # exclude_boxnames: list[str] = [
-        #     self._settings_for_box.get_boxname(_) for _ in exclude_boxnames_or_aliases
-        # ]
-        # excludes = exclude_boxnames + list(self.exclude_boxnames)
-        # boxnames = [_ for _ in self._settings_for_box._contents if _ not in excludes]
         settings = self._create_clockmaster_setting()
         for _ in self._get_boxname_all(exclude_boxnames_or_aliases):
             settings["BOX" + _] = self._box_settings[_].asdict()
-
-        # boxpool = self._create_boxpool()
-        # for _ in boxnames:
-        #     self._create_box(boxpool, _)
-        # settings = {boxname: self._settings_for_box[boxname] for boxname in boxnames}
-        # BoxPoolMod._parse_settings(boxpool, settings=settings)
-
-        return BoxPool(settings)
+        boxpool = BoxPool(settings)
+        # for k, (box, _) in boxpool._boxes.items():
+        #     box.init()
+        return boxpool
 
     def _show_clock(
         self,
@@ -377,8 +550,6 @@ class QubeCalib:
         tuple[tuple[bool, int], dict[str, tuple[bool, int, int]]]
             _description_
         """
-        # if exclude_boxnames_or_aliases is tuple():
-        #     exclude_boxnames_or_aliases = self.exclude_boxnames_or_aliases
         boxpool = self._create_all_boxes(exclude_boxnames_or_aliases)
 
         boxnames = list(BoxPoolMod.get_boxnames(boxpool))
@@ -398,8 +569,7 @@ class QubeCalib:
         # name, box, sc = self._create_box(
         #     boxpool=boxpool, boxname_or_alias=boxname_or_alias
         # )
-        boxpool, boxname = self._create_box(boxname_or_alias)
-        box, sc = BoxPoolMod.get_box(boxpool, boxname)
+        boxpool, _, _, sc = self._create_box(boxname_or_alias)
         boxpool._clock_master.kick_clock_synch((sc.ipaddress,))
 
     def linkup(
@@ -411,8 +581,7 @@ class QubeCalib:
     ) -> dict[int, bool]:
         # boxpool = self._create_boxpool()
         # _, box, _ = self._create_box(boxpool, boxname_or_alias)
-        boxpool, boxname = self._create_box(boxname_or_alias)
-        box, _ = BoxPoolMod.get_box(boxpool, boxname)
+        _, _, box, _ = self._create_box(boxname_or_alias)
         linkupper = LinkupFpgaMxfe(box.css, box.wss, box.rmap)
 
         mxfe_list: Sequence[int] = (0, 1)
@@ -458,25 +627,362 @@ class QubeCalib:
 
         return linkup_ok
 
-    def port_config(self) -> None:
-        pass
+    # def get_port_property(
+    #     self,
+    #     box_name_or_alias: str,
+    #     port: Optional[int],
+    # ) -> None:
+    #     s = self.dump_config(box_name_or_alias, port)
+
+    def create_target(
+        self,
+        target_name: str,
+        frequency: Optional[float] = None,
+    ) -> None:
+        if target_name in self._target_settings:
+            raise ValueError(f"{target_name} has already been created.")
+        self._target_settings[target_name] = {"frequency": frequency}
+
+    def edit_target(
+        self,
+        target_name: str,
+        frequency: float,
+    ) -> None:
+        if target_name not in self._target_settings:
+            raise ValueError(f"{target_name} is not found.")
+        self._target_settings[target_name]["frequency"] = frequency
+
+    @property
+    def all_defined_targets(self) -> set[str]:
+        return {_ for _ in self._band_by_target}
+
+    def create_channelmap(self) -> backend.ChannelMap:
+        # create inverse dict
+        targets_by_band: dict[str, set[str]] = defaultdict(set)
+        for target, bands in self._band_by_target.items():
+            for _ in bands:
+                targets_by_band[_].add(target)
+
+        m = backend.ChannelMap()
+        for band, targets in targets_by_band.items():
+            m[band] = [
+                backend.Target(
+                    name=_,
+                    frequency=self._target_settings[_]["frequency"],
+                )
+                for _ in targets
+            ]
+        return m
+
+    def descide_direction_from_band_name(
+        self,
+        band_name: str,
+    ) -> backend.Direction:  # TODO 外に出してもいい
+        r = re.match("(Q\d+)B(\d)", band_name)
+        if r is not None:
+            return backend.Direction.TO_TARGET
+        r = re.match("(MUX\d+GEN)B(\d)", band_name)
+        if r is not None:
+            return backend.Direction.TO_TARGET
+        r = re.match("(MUX\d+CAP)B(\d)", band_name)
+        if r is not None:
+            return backend.Direction.FROM_TARGET
+        raise ValueError("format is invalid")
+
+    def convert(
+        self,
+        sequence: pulse.Sequence,
+        section: Sections,
+        channel_map: backend.ChannelMap,  # ここは周波数設定を内部に保持しないといけない
+        period: float,
+        repeats: int = 1,
+        warn: bool = False,
+    ) -> list[tuple[str, WaveSequence | CaptureParam]]:
+        # channel_map = self.get_cannelmap()
+        sequence = sequence.flatten()
+        # channel2slot = r = organize_slots(sequence) # target -> slot
+        channel2slot = sequence.slots
+        a, c = backend.split_gen_cap(channel_map)  # target -> gen_port, cap_port
+        # print("channel2slot", channel2slot)
+        # print("gen", a)
+        # print("cap", c)
+
+        # Tx チャネルはデータ変調
+        for target in a:
+            if target.name not in channel2slot:
+                with warnings.catch_warnings():
+                    if not warn:
+                        warnings.simplefilter("ignore")
+                    warnings.warn(f"Channel {target} is Iqnored.")
+                continue
+            for slot in channel2slot[target.name]:
+                if isinstance(backend.body(slot), pulse.SlotWithIQ):
+                    # print(f"awg: {k.frequency}")
+                    if target.frequency is None:
+                        raise ValueError("frequency is None")
+                    # print(a[target], self._port_settings)
+
+                    if a[target].startswith("MUX"):
+                        r = re.match("^(MUX\d+GEN)B(\d)$", a[target])
+                        if r is None:
+                            raise ValueError("Invalid port label")
+                        port_name, band = r.group(1), int(r.group(2))
+                    else:
+                        r = re.match("^(Q\d+)B(\d)$", a[target])
+                        if r is None:
+                            raise ValueError("invalid port name")
+                        port_name, band = r.group(1), int(r.group(2))
+
+                    mp = {
+                        "lo_freq": "lo",
+                        "cnco_freq": "cnco",
+                        "sideband": "sideband",
+                    }
+                    _ = {
+                        mp[k]: v
+                        for k, v in self._port_settings[port_name].items()
+                        if k in ["lo_freq", "cnco_freq", "sideband"]
+                    }
+                    _["fnco"] = self._port_settings[port_name]["band"][band]
+                    _["rf"] = target.frequency
+                    m = calc_modulation_frequency(**_)
+
+                    # print(f"awg: rf {target.frequency} mod {m} Hz")
+                    t = slot.sampling_points
+                    slot.miq = slot.iq * np.exp(1j * 2 * np.pi * (m * t))
+
+        # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
+        section2slots: dict[Sections, MutableSequence[pulse.Slot]] = {}
+        for (
+            band_name,
+            sections,
+        ) in section.items():  # k:band_name, v: List[TxSection] | List[RxSection]
+            for vv in sections:  # vv: TxSection | RxSection
+                if vv not in section2slots:
+                    section2slots[vv] = deque([])
+                if band_name not in channel_map:
+                    with warnings.catch_warnings():
+                        if not warn:
+                            warnings.simplefilter("ignore")
+                        warnings.warn(f"PhyChannel {band_name} is Iqnored.")
+                    continue
+                for target in channel_map[band_name]:  # c:Channel
+                    if (
+                        target.name not in channel2slot
+                    ):  # sequence の定義内で使っていない論理チャネルがあり得る
+                        with warnings.catch_warnings():
+                            if not warn:
+                                warnings.simplefilter("ignore")
+                            warnings.warn(f"Logical Channel {c} is Iqnored.")
+                        continue
+                    for s in channel2slot[target.name]:
+                        if vv.repeats == 1:
+                            bawg = (
+                                self.descide_direction_from_band_name(band_name)
+                                == backend.Direction.TO_TARGET
+                            ) and isinstance(backend.body(s), pulse.SlotWithIQ)
+                        else:
+                            bawg = (
+                                self.descide_direction_from_band_name(band_name)
+                                == backend.Direction.TO_TARGET
+                            ) and isinstance(s, pulse.SlotWithIQ)
+                        bunit = (
+                            self.descide_direction_from_band_name(band_name)
+                            == backend.Direction.FROM_TARGET
+                        ) and isinstance(backend.body(s), pulse.Range)
+                        if bawg:
+                            if vv.begin <= s.begin and s.begin <= vv.end:
+                                section2slots[vv].append(s)
+                        elif bunit:
+                            for i in range(vv.repeats):
+                                if (
+                                    vv.begin + i * vv.total <= s.begin
+                                    and s.begin + s.duration <= vv.end + i * vv.total
+                                ):
+                                    section2slots[vv].append(s)
+
+        # 各セクション毎に Chunk を合成する
+        awgs = [
+            band_name
+            for band_name in channel_map
+            if self.descide_direction_from_band_name(band_name)
+            == backend.Direction.TO_TARGET
+        ]
+        for i, k in enumerate(awgs):
+            if k in section:
+                for s in section[k]:
+                    t = s.sampling_points
+                    s.iq[:] = 0
+                    ss = section2slots[s]
+                    for v in ss:
+                        rng = (v.begin <= t) * (t < v.end)
+                        s.iq[rng] += v.miq  # / len(ss)
+                    if (
+                        max(abs(np.real(s.iq))) > 32767
+                        or max(abs(np.imag(s.iq))) > 32767
+                    ):
+                        raise ValueError("Exceeds the maximum allowable output.")
+        # 束ねるチャネルを WaveSequence に変換
+        awgs = [
+            bname
+            for bname in channel_map
+            if self.descide_direction_from_band_name(bname)
+            == backend.Direction.TO_TARGET
+        ]  # channel_map から AWG 関連だけ抜き出す
+        wseqs = [
+            (k, backend.chunks2wseq(section[k], period, repeats))
+            for k in awgs
+            if k in section
+        ]  # chunk obj を wseq へ変換する
+        # return [(k, section[k]) for k in awgs if k in section]
+
+        units = [
+            bname
+            for bname in channel_map
+            if self.descide_direction_from_band_name(bname)
+            == backend.Direction.FROM_TARGET
+        ]
+        capts = [
+            (k, backend.sect2capt(section[k], period, repeats))
+            for k in units
+            if k in section
+        ]
+
+        # print(wseqs, capts)
+        return wseqs + capts
+
+        # sender = {
+        #     f"SENDER{i}": QcPulseGenSetting(
+        #         boxname=c.boxname, port=c.port, channel=c.channel, wave=w
+        #     )
+        #     for i, (c, w) in enumerate([(c, w) for c, w in wseqs])
+        # }
+        # capturer = {
+        #     f"CAPTURER{i}": QcPulseCapSetting(
+        #         boxname=c.boxname, port=c.port, channel=c.channel, captparam=p
+        #     )
+        #     for i, (c, p) in enumerate([(c, p) for c, p in capts])
+        # }
+
+        # return QcSetup((sender | capturer))
+
+
+def calc_modulation_frequency(
+    lo: int,
+    cnco: float,
+    rf: float,
+    sideband: str,
+    fnco: Optional[float] = None,
+) -> float:
+    if fnco is None:
+        return calc_cap_modulation_frequency(lo, cnco, rf, sideband)
+    else:
+        return calc_gen_modulation_frequency(lo, cnco, rf, sideband, fnco)
+
+
+def calc_cap_modulation_frequency(
+    lo: int,
+    cnco: float,
+    rf: float,
+    sideband: str,
+) -> float:
+    # frequency is normalized as GHz
+    # if isinstance(self.line, int):
+    #     raise ValueError("invalid line type")
+    # retval = self.dump_config()
+
+    # if not isinstance(retval["lo_hz"], (float, int)):
+    #     raise ValueError()
+    # lo_hz = float(retval["lo_hz"])
+    lo_hz = lo
+
+    # if not isinstance(retval["cnco_hz"], (float, int)):
+    #     raise ValueError()
+    # if_hz = retval["cnco_hz"]
+    # rf_hz = rf_freq * 1e9
+    if_hz = cnco
+    rf_hz = rf  # * 1e9
+
+    if sideband == Sideband.UpperSideBand.value:
+        diff_hz = rf_hz - lo_hz - if_hz
+    elif sideband == Sideband.LowerSideBand.value:
+        diff_hz = lo_hz - if_hz - rf_hz
+    else:
+        raise ValueError("invalid ssb mode.")
+
+    return diff_hz  # * 1e-9  # return value is normalized as GHz
+
+
+def calc_gen_modulation_frequency(
+    lo: int,
+    cnco: float,
+    rf: float,
+    sideband: str,
+    fnco: float,
+) -> float:
+    # frequency is normalized as GHz
+    # if isinstance(self.line, str):
+    #     raise ValueError("invalid line type")
+
+    # retval = self.dump_config()
+    # if not isinstance(retval["lo_hz"], (float, int)):
+    #     raise ValueError()
+    # if not isinstance(retval["cnco_hz"], (float, int)):
+    #     raise ValueError()
+    # if not isinstance(retval["channels"], list):
+    #     raise ValueError()
+
+    # lo_hz = retval["lo_hz"]
+    # fnco_hz = retval["channels"][self.channel]["fnco_hz"]
+    # if_hz = retval["cnco_hz"] + fnco_hz
+    # rf_hz = rf_freq * 1e9
+    lo_hz = lo
+    if_hz = cnco + fnco
+    rf_hz = rf  # * 1e9
+
+    if sideband == Sideband.UpperSideBand.value:
+        diff_hz = rf_hz - lo_hz - if_hz
+    elif sideband == Sideband.LowerSideBand.value:
+        diff_hz = lo_hz - if_hz - rf_hz
+    else:
+        raise ValueError("invalid ssb mode.")
+
+    return diff_hz  # * 1e-9  # return value is normalized as GHz
 
 
 @dataclass
-class PortConfig:
-    name: str
+class PulseGenSetting:
     boxname: str
+    port: int
+    channel: int
+    wave: WaveSequence = None
+    lo_freq: Optional[float] = None
+    cnco_freq: Optional[float] = None
+
+
+@dataclass
+class PulseCapSetting:
+    boxname: str
+    port: int
+    channel: int
+    captparam: CaptureParam = None
+
+
+@dataclass
+class PortSetting:
+    alias: str
+    box_name_or_alias: str
     port: int
     lo_freq: float = -1
     cnco_freq: float = -1
     sideband: str = ""
     vatt: int = -1
-    fnco_freq: tuple = tuple()
-    boxpool: Optional[BoxPool] = None
+    band: tuple = tuple()
+    # boxpool: Optional[BoxPool] = None
 
-    def __post_init__(self) -> None:
-        if self.boxpool is None:
-            raise ValueError("boxpool is needed")
+    # def __post_init__(self) -> None:
+    #     if self.boxpool is None:
+    #         raise ValueError("boxpool is needed")
 
 
 @dataclass
@@ -546,6 +1052,9 @@ class BoxSetting:
             "config_options": self.config_options,
         }
 
+    def asjson(self) -> dict[str, Any]:
+        pass
+
 
 @dataclass
 class Channel:
@@ -570,3 +1079,198 @@ class TxChannel(Channel):
 class RxChannel(Channel):
     cprm: Optional[CaptureParam] = None
     pulsecap: PulseCap = field(init=False)
+
+
+@dataclass
+class SequencerSetting:
+    duration: float
+    repeats: int
+
+
+class CommandBase:
+    def execute(self) -> None:
+        pass
+
+
+class InvokeSequencerSinglebox(CommandBase):
+    def __init__(self, settings: dict[str, Any]):
+        self._settings = settings
+
+    def execute(self) -> None:
+        box_setting = self._settings["box_settings"]
+        box_name = {_ for _ in box_setting}.pop()
+        # TODO dump box するためだけにこれしてた
+        # _, _, _, _, box = create_box_objects(
+        #     refer_by_port=True,
+        #     **box_setting[box_name],
+        # )
+        # self._box_name = box_name
+        # self._box = box
+        # self._linkstatus = False
+        # self.init()
+        # dump_box = box.dump_config()
+
+        _, _, _, _, box = create_box_objects(
+            refer_by_port=False,
+            **box_setting[box_name],
+        )
+        if not isinstance(box, SimpleBoxIntrinsic):
+            raise ValueError(f"unsupported boxtype: {box_setting[box_name]['boxtype']}")
+        self._box_name = box_name
+        self._box = box
+        self._linkstatus = False
+
+        self.init()
+
+        # pgs = self.create_pulsegens(self._settings["pulsegen_settings"], dump_box)
+        pgs = self.create_pulsegens(self._settings["pulsegen_settings"])
+        pcs = self.create_pulsecaps(self._settings["pulsecap_settings"])
+
+        if not len(pgs) and not len(pcs):
+            raise ValueError("no pulse setting")
+
+        # 品質検査で重要だが，後で検討する．とりあえず無効化
+        # cp.check_noise(show_graph=False)
+        # boxpool.measure_timediff(cp)
+
+        # if len(pcs) and not len(pgs):
+        results = self.capture_now(pcs)
+        print(results)
+
+        status, iqs = {}, {}
+        future = {}
+
+    def init(self) -> None:
+        box, name = self._box, self._box_name
+        link_status: bool = True
+        if not box.init().values():
+            print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
+            if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
+                logger.warning(f"crc error has been detected on MxFEs of {name}")
+            else:
+                logger.error(f"datalink between MxFE and FPGA of {name} is not working")
+                link_status = False
+        self._linkstatus = link_status
+
+        self.reset_awg()
+
+    def reset_awg(self) -> None:
+        if self._linkstatus:
+            self._box.easy_stop_all(control_port_rfswitch=True)
+            self._box.wss.initialize_all_awgs()
+
+    def create_pulsegens(
+        self,
+        pulsegen_settings: dict[str, Any],
+        # dump_box: dict[str, Any],
+    ) -> dict[str, PulseGenSinglebox]:
+        pgs: dict[str, PulseGenSinglebox] = {}
+        for pulsegen_name, pulsegen_setting in pulsegen_settings.items():
+            # port_id = int(pulsegen_setting["port"])
+            # channel_id = int(pulsegen_setting["channel"])
+            # dump = dump_box[f"port-#{port_id:02}"]
+            # print(dump)
+            # for d, s in (
+            #     ("lo_hz", "lo_freq"),
+            #     ("cnco_hz", "cnco_freq"),
+            # ):
+            #     if float(dump[d]) == float(pulsegen_setting[s]):
+            #         del pulsegen_setting[s]
+            # if dump["sideband"] == pulsegen_setting["sideband"]:
+            #     del pulsegen_setting["sideband"]
+            # if float(dump["channels"][channel_id]["fnco_hz"]) == float(
+            #     pulsegen_setting["fnco_freq"]
+            # ):
+            #     del pulsegen_setting["fnco_freq"]
+            del pulsegen_setting["port"]
+            # print(pulsegen_setting)
+            pgs[pulsegen_name] = PulseGenSinglebox(
+                box_status=self._linkstatus,
+                box=self._box,
+                **pulsegen_setting,
+            )
+            pgs[pulsegen_name].init()
+        return pgs
+
+    def create_pulsecaps(
+        self,
+        pulsecap_settings: dict[str, Any],
+        # dump_box: dict[str, Any],
+    ) -> dict[str, PulseCapSinglebox]:
+        pcs: dict[str, PulseCapSinglebox] = {}
+        for pulsecap_name, pulsecap_setting in pulsecap_settings.items():
+            # port_id = int(pulsecap_setting["port"])
+            del pulsecap_setting["port"]
+            pcs[pulsecap_name] = PulseCapSinglebox(
+                box_status=self._linkstatus,
+                box=self._box,
+                **pulsecap_setting,
+            )
+            pcs[pulsecap_name].init()
+        return pcs
+
+    def capture_now(
+        self,
+        pcs: Dict[str, PulseCapSinglebox],
+    ) -> Dict[
+        Tuple[str, int], Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]
+    ]:
+        capmods = {pc.capmod for pc in pcs.values()}
+        if len(capmods) != 1:
+            raise ValueError("single capmod is estimated")
+        wss = next(iter({pc.box.wss for pc in pcs.values()}))
+        capmod = next(iter(capmods))
+        capu_capprm = {pc.channel: pc.capprm for pc in pcs.values()}
+        capunits = tuple(capu_capprm.keys())
+        num_expected_words = {capu: 0 for capu in capu_capprm.keys()}
+        thunk = Quel1WaveSubsystemMod.simple_capture_start(
+            wss,
+            capmod,
+            capunits,
+            capu_capprm,
+            num_expected_words=num_expected_words,
+            triggering_awg=None,
+        )
+        status, iqs = thunk.result()
+        print(status, iqs)
+        return status, iqs
+
+    def emit_now(self, pgs: Set[PulseGen]) -> None:
+        """単体のボックスで複数のポートから PulseGen に従ったパルスを出射する．パルスは同期して出射される．"""
+        if len(pgs) == 0:
+            logger.warn("no pulse generator to activate")
+
+        self._box.wss.start_emission([_.awg for _ in pgs])
+
+    def stop_now(self, pgs: Set[PulseGen]) -> None:
+        """PulseGen で指定された awg のバルスを停止する．"""
+        if len(pgs) == 0:
+            logger.warn("no pulse generator to activate")
+
+        self._box.wss.start_emission([_.awg for _ in pgs])
+
+
+class InvokeSequencer(CommandBase):
+    def __init__(self, settings: dict[str, Any]):
+        self._settings = settings
+
+    def execute(self) -> None:
+        boxpool_setting = {
+            "CLOCK_MASTER": self._settings["clockmaster_setting"],
+        } | {
+            box_name: box_setting
+            for box_name, box_setting in self._settings["box_settings"].items()
+        }
+        print(boxpool_setting)
+        boxpool = BoxPool(boxpool_setting)
+        print([v for k, v in boxpool._boxes.items()])
+
+    # def _create_pulsegens(self, settings) -> None:
+    #     pgs = {PulseGen(name, boxpool)}
+
+    # def _create_pulsecaps(self, settings) -> None:
+    #     pass
+
+
+class RetrieveCaptureResults(CommandBase):
+    pass
