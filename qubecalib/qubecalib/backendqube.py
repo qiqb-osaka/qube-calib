@@ -1870,7 +1870,6 @@ def __acquire_chunk__(chunk, repeats=1, blank=0):
     s = IqWave.convert_to_iq_format(i, q, n)
 
     b = max(int(blank), 0)
-
     return {"iq_samples": s, "num_blank_words": b // int(WORD), "num_repeats": repeats}
 
 
@@ -1895,6 +1894,7 @@ def chunks2wseq(chunks, period: float, repeats: int):
     w = e7awgsw.WaveSequence(
         num_wait_words=int(c[0].prior) // int(WORD), num_repeats=repeats
     )
+    # w = e7awgsw.WaveSequence(num_wait_words=16, num_repeats=repeats)
 
     # print(c)
 
@@ -1930,6 +1930,7 @@ def sect2capt(section: Sections, period: float, repeats: int) -> CaptureParam:
             f"The capture_delay must be an integer multiple of {int(2*WORD)}ns."
         )
     p.capture_delay = int(s[0].prior) // int(WORD)
+    # p.capture_delay = 16
 
     for j in range(len(s) - 1):
         duration = int(s[j].duration) // int(WORD)

@@ -215,7 +215,8 @@ class PulseCapSinglebox:
         #     fnco_freq=self.fnco_freq,
         # )
         # Notes: receive signal from input_port, not rather than internal loop-back.
-        self.box.open_rfswitch(group=self.group, line=self.rline)
+        # self.box.open_rfswitch(group=self.group, line=self.rline)
+        self.box.close_rfswitch(group=self.group, line=self.rline)
 
 
 class PulseGenMod:
@@ -248,9 +249,10 @@ class PulseGenMod:
         if pg.fnco_freq != -1:
             kwargs["fnco_freq"] = pg.fnco_freq
         pg.box.config_channel(**kwargs)
-        pg.box.open_rfswitch(pg.group, pg.line)
-        if pg.box.is_loopedback_monitor(pg.group):
-            pg.box.open_rfswitch(pg.group, "m")  # for external loop-back lines
+        pg.box.close_rfswitch(pg.group, pg.line)
+        # pg.box.open_rfswitch(pg.group, pg.line)
+        # if pg.box.is_loopedback_monitor(pg.group):
+        #     pg.box.open_rfswitch(pg.group, "m")  # for external loop-back lines
 
     @classmethod
     def init_wave(

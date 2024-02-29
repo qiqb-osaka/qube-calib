@@ -5,6 +5,7 @@ import os
 import re
 import warnings
 from collections import defaultdict, deque
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import EnumMeta
 from ipaddress import IPv4Address, IPv6Address, ip_address
@@ -14,6 +15,7 @@ from typing import (
     Collection,
     Dict,
     Final,
+    List,
     MutableMapping,
     MutableSequence,
     Optional,
@@ -25,7 +27,7 @@ from typing import (
 import json5
 import numpy as np
 import numpy.typing as npt
-from e7awgsw import CaptureParam, WaveSequence
+from e7awgsw import CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import SequencerClient
 from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1BoxType, Quel1ConfigOption
 from quel_ic_config_utils import (
@@ -142,6 +144,9 @@ class QubeCalib:
         self._target_settings: Final[dict[str, dict[str, str | Optional[float]]]] = {}
         self._default_exclude_boxnames: tuple = ()
         self._sequencer_setting = None
+        self._band_by_target: Final[MutableMapping[str, MutableSequence[str]]] = {}
+        self._captparam_settings = CaptureParamSettings()
+        self._captparam_settings._band_by_targets = self._band_by_target
         if path_for_setting_file_of_boxes:
             self._load(path_for_setting_file_of_boxes)
         elif settings is not None:
@@ -181,7 +186,12 @@ class QubeCalib:
             if "port_settings" in jsn:
                 self._port_settings = jsn["port_settings"]
             if "band_by_target" in jsn:
-                self._band_by_target = jsn["band_by_target"]
+                for k, _ in jsn["band_by_target"].items():
+                    self._band_by_target[k] = _
+
+    @property
+    def captparam_setting(self) -> CaptureParamSettings:
+        return self._captparam_settings
 
     @property
     def boxname_by_ipaddrwss(self) -> dict[str, str]:
@@ -303,7 +313,7 @@ class QubeCalib:
         }
         return setting
 
-    def invoke_sequencer(self, sequence: backend.Sequence) -> None:
+    def invoke_sequencer(self, sequence: backend.Sequence) -> Tuple[Any, Any]:
         settings: dict[str, Any] = {}
         sequence_setting = self.convert_sequence(sequence)
         box_settings = {
@@ -323,14 +333,15 @@ class QubeCalib:
             for band_name, _ in sequence_setting
             if isinstance(_, CaptureParam)
         }
+        captparam_settings = self._captparam_settings
         if len(box_settings) == 1:
             settings = {
                 "box_settings": box_settings,
                 "pulsegen_settings": pulsegen_settings,
                 "pulsecap_settings": pulsecap_settings,
+                "captparam_settings": captparam_settings,
             }
-            InvokeSequencerSinglebox(settings).execute()
-            return
+            return InvokeSequencerSinglebox(settings).execute()
         # print(len(box_settings), box_settings)
         if self._clockmaster_setting is None:
             raise ValueError("clockmaster setting is not defined")
@@ -338,8 +349,46 @@ class QubeCalib:
             "clockmaster_setting": self._clockmaster_setting.asdict(),
             "box_settings": box_settings,
         }
-        InvokeSequencer(settings).execute()
-        return
+        return InvokeSequencer(settings).execute()
+
+    def debug_invoke_sequencer(self, sequence: backend.Sequence) -> Tuple[Any, Any]:
+        settings: dict[str, Any] = {}
+        sequence_setting = self.convert_sequence(sequence)
+        box_settings = {
+            "BOX" + self._box_settings.get_boxname(_): self._box_settings[_].asdict()
+            for _ in {
+                self._port_settings[port_name]["box_name_or_alias"]
+                for port_name in {band_name[:-2] for band_name, _ in sequence_setting}
+            }
+        }
+        pulsegen_settings = {
+            band_name: self.create_pulsegen_setting(band_name, _)
+            for band_name, _ in sequence_setting
+            if isinstance(_, WaveSequence)
+        }
+        pulsecap_settings = {
+            band_name: self.create_pulsecap_setting(band_name, _)
+            for band_name, _ in sequence_setting
+            if isinstance(_, CaptureParam)
+        }
+        captparam_settings = self._captparam_settings
+        if len(box_settings) == 1:
+            settings = {
+                "box_settings": box_settings,
+                "pulsegen_settings": pulsegen_settings,
+                "pulsecap_settings": pulsecap_settings,
+                "captparam_settings": captparam_settings,
+            }
+            return settings
+        #     return InvokeSequencerSinglebox(settings).execute()
+        # # print(len(box_settings), box_settings)
+        # if self._clockmaster_setting is None:
+        #     raise ValueError("clockmaster setting is not defined")
+        # settings = {
+        #     "clockmaster_setting": self._clockmaster_setting.asdict(),
+        #     "box_settings": box_settings,
+        # }
+        # return InvokeSequencer(settings).execute()
 
     # def invoke_sequencer_singlebox(
     #     self,
@@ -634,6 +683,31 @@ class QubeCalib:
     # ) -> None:
     #     s = self.dump_config(box_name_or_alias, port)
 
+    def create_single_box(
+        self, setting: Dict[str, Dict[str, Any]]
+    ) -> Tuple[Any, SimpleBoxIntrinsic]:
+        box_setting = setting
+        box_name = {_ for _ in box_setting}.pop()
+
+        _, _, _, _, box = create_box_objects(
+            refer_by_port=False,
+            **box_setting[box_name],
+        )
+        if not isinstance(box, SimpleBoxIntrinsic):
+            raise ValueError(f"unsupported boxtype: {box_setting[box_name]['boxtype']}")
+
+        link_status: bool = True
+        if not box.init().values():
+            # print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
+            if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
+                logger.warning(f"crc error has been detected on MxFEs of {box_name}")
+            else:
+                logger.error(
+                    f"datalink between MxFE and FPGA of {box_name} is not working"
+                )
+                link_status = False
+        return link_status, box
+
     def create_target(
         self,
         target_name: str,
@@ -745,11 +819,18 @@ class QubeCalib:
                     }
                     _["fnco"] = self._port_settings[port_name]["band"][band]
                     _["rf"] = target.frequency
-                    m = calc_modulation_frequency(**_)
+                    m = calc_modulation_frequency(**_)  # TODO
 
-                    # print(f"awg: rf {target.frequency} mod {m} Hz")
+                    # target.frequency が nan で設定される場合がある
+                    if np.isnan(m):
+                        # print("slot.iq", slot.iq)
+                        slot.miq = slot.iq
+                        break
+
                     t = slot.sampling_points
+                    # slot.miq = slot.iq
                     slot.miq = slot.iq * np.exp(1j * 2 * np.pi * (m * t))
+                    # print("slot.miq", slot.miq)
 
         # 各AWG/UNITの各セクション毎に属する Slot のリストの対応表を作る
         section2slots: dict[Sections, MutableSequence[pulse.Slot]] = {}
@@ -1088,15 +1169,23 @@ class SequencerSetting:
 
 
 class CommandBase:
-    def execute(self) -> None:
-        pass
+    def execute(self) -> Tuple[Any, Any]:
+        return None, None
 
 
 class InvokeSequencerSinglebox(CommandBase):
     def __init__(self, settings: dict[str, Any]):
         self._settings = settings
 
-    def execute(self) -> None:
+    def execute(
+        self,
+    ) -> (
+        Tuple[
+            Dict[Tuple[str, int, int], CaptureReturnCode],
+            Dict[Tuple[str, int, int], npt.NDArray[np.complex64]],
+        ]
+        | Tuple[None, None]
+    ):
         box_setting = self._settings["box_settings"]
         box_name = {_ for _ in box_setting}.pop()
         # TODO dump box するためだけにこれしてた
@@ -1126,25 +1215,64 @@ class InvokeSequencerSinglebox(CommandBase):
         pgs = self.create_pulsegens(self._settings["pulsegen_settings"])
         pcs = self.create_pulsecaps(self._settings["pulsecap_settings"])
 
-        if not len(pgs) and not len(pcs):
-            raise ValueError("no pulse setting")
+        # print([_.capprm.capture_delay for _ in pcs])
+        self._settings["captparam_settings"].apply({_.name: _.capprm for _ in pcs})
+        # print([_.capprm.capture_delay for _ in pcs])
 
         # 品質検査で重要だが，後で検討する．とりあえず無効化
         # cp.check_noise(show_graph=False)
-        # boxpool.measure_timediff(cp)
 
-        # if len(pcs) and not len(pgs):
-        results = self.capture_now(pcs)
-        print(results)
+        # boxname に属する pulsecap, pulsegen を集めた _pcs, _pgs を作る（単体の場合不要）
+        # 各 box に対してループする（単体の場合不要）
+        #     _pcs あり _pgs あり の場合 len(_pcs) and len(_pgs)
+        #         self.capture_at_trigger_of() を実行し thread の queue に溜める
+        #     _pcs あり _pgs なし の場合 len(_pcs) and not len(_pgs)
+        #         self.capture_now() を実行する
+        # box が単体の場合 self.emit_now() を実行する
+        # box が複数の場合 self.emit_at() を実行する（単体の場合不要）
+        # future に格納されたデータをデコードして status, iqs を返す
 
         status, iqs = {}, {}
         future = {}
+
+        if not len(pgs) and not len(pcs):
+            raise ValueError("no pulse setting")
+        if len(pcs) and len(pgs):
+            # print("self.capture_at_trigger()")
+            triggering_pg = next(iter(pgs))
+            future.update(self.capture_at_trigger_of(pcs, triggering_pg))
+        else:
+            # print("self.capture_now()")
+            results = self.capture_now(pcs)
+            for (_boxname, _port), (_status, _iqs) in results.items():
+                # _status, _iqs = _future.result()
+                __status = {(_boxname, _port, _channel): _status for _channel in _iqs}
+                __iqs = {
+                    (_boxname, _port, _channel): _iqs[_channel] for _channel in _iqs
+                }
+                status.update(__status)
+                iqs.update(__iqs)
+
+        self.emit_now(pgs)
+        # print("self.emit_now()")
+
+        if len(future):
+            for (_boxname, _port), _future in future.items():
+                _status, _iqs = _future.result()
+                __status = {(_boxname, _port, _channel): _status for _channel in _iqs}
+                __iqs = {
+                    (_boxname, _port, _channel): _iqs[_channel] for _channel in _iqs
+                }
+                status.update(__status)
+                iqs.update(__iqs)
+
+        return status, iqs
 
     def init(self) -> None:
         box, name = self._box, self._box_name
         link_status: bool = True
         if not box.init().values():
-            print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
+            # print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
             if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
                 logger.warning(f"crc error has been detected on MxFEs of {name}")
             else:
@@ -1162,65 +1290,45 @@ class InvokeSequencerSinglebox(CommandBase):
     def create_pulsegens(
         self,
         pulsegen_settings: dict[str, Any],
-        # dump_box: dict[str, Any],
-    ) -> dict[str, PulseGenSinglebox]:
-        pgs: dict[str, PulseGenSinglebox] = {}
-        for pulsegen_name, pulsegen_setting in pulsegen_settings.items():
-            # port_id = int(pulsegen_setting["port"])
-            # channel_id = int(pulsegen_setting["channel"])
-            # dump = dump_box[f"port-#{port_id:02}"]
-            # print(dump)
-            # for d, s in (
-            #     ("lo_hz", "lo_freq"),
-            #     ("cnco_hz", "cnco_freq"),
-            # ):
-            #     if float(dump[d]) == float(pulsegen_setting[s]):
-            #         del pulsegen_setting[s]
-            # if dump["sideband"] == pulsegen_setting["sideband"]:
-            #     del pulsegen_setting["sideband"]
-            # if float(dump["channels"][channel_id]["fnco_hz"]) == float(
-            #     pulsegen_setting["fnco_freq"]
-            # ):
-            #     del pulsegen_setting["fnco_freq"]
+    ) -> Set[PulseGenSinglebox]:
+        pgs: Set[PulseGenSinglebox] = set()
+        for _, pulsegen_setting in pulsegen_settings.items():
             del pulsegen_setting["port"]
-            # print(pulsegen_setting)
-            pgs[pulsegen_name] = PulseGenSinglebox(
+            pg = PulseGenSinglebox(
                 box_status=self._linkstatus,
                 box=self._box,
                 **pulsegen_setting,
             )
-            pgs[pulsegen_name].init()
+            pg.init()
+            pgs.add(pg)
         return pgs
 
     def create_pulsecaps(
         self,
         pulsecap_settings: dict[str, Any],
-        # dump_box: dict[str, Any],
-    ) -> dict[str, PulseCapSinglebox]:
-        pcs: dict[str, PulseCapSinglebox] = {}
+    ) -> Set[PulseCapSinglebox]:
+        pcs: Set[PulseCapSinglebox] = set({})
         for pulsecap_name, pulsecap_setting in pulsecap_settings.items():
-            # port_id = int(pulsecap_setting["port"])
             del pulsecap_setting["port"]
-            pcs[pulsecap_name] = PulseCapSinglebox(
+            pc = PulseCapSinglebox(
                 box_status=self._linkstatus,
                 box=self._box,
                 **pulsecap_setting,
             )
-            pcs[pulsecap_name].init()
+            pc.init()
+            pcs.add(pc)
         return pcs
 
-    def capture_now(
+    def _capture_now(
         self,
-        pcs: Dict[str, PulseCapSinglebox],
-    ) -> Dict[
-        Tuple[str, int], Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]
-    ]:
-        capmods = {pc.capmod for pc in pcs.values()}
+        pcs: Set[PulseCapSinglebox],
+    ) -> Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]:
+        capmods = {_.capmod for _ in pcs}
         if len(capmods) != 1:
             raise ValueError("single capmod is estimated")
-        wss = next(iter({pc.box.wss for pc in pcs.values()}))
+        wss = next(iter({_.box.wss for _ in pcs}))
         capmod = next(iter(capmods))
-        capu_capprm = {pc.channel: pc.capprm for pc in pcs.values()}
+        capu_capprm = {_.channel: _.capprm for _ in pcs}
         capunits = tuple(capu_capprm.keys())
         num_expected_words = {capu: 0 for capu in capu_capprm.keys()}
         thunk = Quel1WaveSubsystemMod.simple_capture_start(
@@ -1232,45 +1340,235 @@ class InvokeSequencerSinglebox(CommandBase):
             triggering_awg=None,
         )
         status, iqs = thunk.result()
-        print(status, iqs)
         return status, iqs
 
-    def emit_now(self, pgs: Set[PulseGen]) -> None:
+    def capture_now(
+        self,
+        pcs: Set[PulseCapSinglebox],
+    ) -> Dict[
+        Tuple[str, str], Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]
+    ]:
+        boxnames = {_.boxname for _ in pcs}
+        if len(boxnames) != 1:
+            raise ValueError("single box is estimated")
+        boxname = next(iter(boxnames))
+
+        result = {}
+        for capmod in {pc.capmod for pc in pcs}:
+            name = next(iter({pc.name for pc in pcs if pc.capmod == capmod}))
+            _pcs = {pc for pc in pcs if pc.capmod == capmod}
+            _status, _iqs = self._capture_now(_pcs)
+            id = (boxname, name)
+            result[id] = (_status, _iqs)
+
+        return result
+
+    def _capture_at_trigger_of(
+        self,
+        pcs: Set[PulseCapSinglebox],
+        pg: PulseGenSinglebox,
+    ) -> Future[Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]]:
+        capmods = {pc.capmod for pc in pcs}
+        if len(capmods) != 1:
+            raise ValueError("single capmod is estimated")
+        wss = next(iter({pc.box.wss for pc in pcs}))
+        if pg.box.wss != wss:
+            raise ValueError("can not be triggered by an awg of the other box")
+        capmod = next(iter(capmods))
+        capu_capprm = {pc.channel: pc.capprm for pc in pcs}
+        capunits = tuple(capu_capprm.keys())
+        num_expected_words = {capu: 0 for capu in capu_capprm.keys()}
+        future = Quel1WaveSubsystemMod.simple_capture_start(
+            wss,
+            capmod,
+            capunits,
+            capu_capprm,
+            num_expected_words=num_expected_words,
+            triggering_awg=pg.awg,
+        )
+        return future
+
+    def capture_at_trigger_of(
+        self,
+        pcs: Set[PulseCapSinglebox],
+        _pg: PulseGenSinglebox,
+    ) -> Dict[
+        Tuple[str, Tuple[int, str]],
+        Future[Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]],
+    ]:
+        box = {_.box for _ in pcs}
+        if len(box) != 1:
+            raise ValueError("single box is estimated")
+        box = next(iter(box))
+        # print(box)
+
+        result = {}
+        for capmod in {_.capmod for _ in pcs}:
+            port = next(iter({(_.group, _.rline) for _ in pcs if _.capmod == capmod}))
+            __pcs = {_ for _ in pcs if _.capmod == capmod}
+            future = self._capture_at_trigger_of(__pcs, _pg)
+            id = ("", port)
+            result[id] = future
+
+        return result
+
+    def emit_now(self, pgs: Set[PulseGenSinglebox]) -> None:
         """単体のボックスで複数のポートから PulseGen に従ったパルスを出射する．パルスは同期して出射される．"""
         if len(pgs) == 0:
             logger.warn("no pulse generator to activate")
 
         self._box.wss.start_emission([_.awg for _ in pgs])
 
-    def stop_now(self, pgs: Set[PulseGen]) -> None:
+    def stop_now(self, pgs: Set[PulseGenSinglebox]) -> None:
         """PulseGen で指定された awg のバルスを停止する．"""
         if len(pgs) == 0:
             logger.warn("no pulse generator to activate")
 
-        self._box.wss.start_emission([_.awg for _ in pgs])
+        self._box.wss.stop_emission([_.awg for _ in pgs])
 
 
 class InvokeSequencer(CommandBase):
-    def __init__(self, settings: dict[str, Any]):
-        self._settings = settings
+    pass
+    # def __init__(self, settings: dict[str, Any]):
+    #     self._settings = settings
 
-    def execute(self) -> None:
-        boxpool_setting = {
-            "CLOCK_MASTER": self._settings["clockmaster_setting"],
-        } | {
-            box_name: box_setting
-            for box_name, box_setting in self._settings["box_settings"].items()
-        }
-        print(boxpool_setting)
-        boxpool = BoxPool(boxpool_setting)
-        print([v for k, v in boxpool._boxes.items()])
+    # def execute(self) -> None:
+    #     boxpool_setting = {
+    #         "CLOCK_MASTER": self._settings["clockmaster_setting"],
+    #     } | {
+    #         box_name: box_setting
+    #         for box_name, box_setting in self._settings["box_settings"].items()
+    #     }
+    #     # print(boxpool_setting)
+    #     boxpool = BoxPool(boxpool_setting)
+    #     # print([v for k, v in boxpool._boxes.items()])
 
-    # def _create_pulsegens(self, settings) -> None:
-    #     pgs = {PulseGen(name, boxpool)}
+    # # def _create_pulsegens(self, settings) -> None:
+    # #     pgs = {PulseGen(name, boxpool)}
 
-    # def _create_pulsecaps(self, settings) -> None:
-    #     pass
+    # # def _create_pulsecaps(self, settings) -> None:
+    # #     pass
 
 
 class RetrieveCaptureResults(CommandBase):
     pass
+
+
+class CaptureParamSettings:
+    def __init__(self) -> None:
+        self._settings: MutableMapping[str, CaptureParamSetting] = defaultdict(
+            CaptureParamSetting
+        )
+        self._band_by_targets: MutableMapping[str, MutableSequence[str]] = {}
+
+    def add_capture_delay(self, target_name: str, capture_delay: int) -> None:
+        self._settings[target_name].additional_capture_delay = capture_delay
+
+    def enable_integration(self, target_name: str) -> None:
+        self._settings[target_name].dsp_units.append(CaptureParamDspIntegraton())
+
+    def apply(self, captparam_by_bandname: MutableMapping[str, CaptureParam]) -> None:
+        for band_name, captparam in captparam_by_bandname.items():
+            self._settings[self.get_target_name(band_name)].apply(captparam)
+
+    def set_band_by_target(
+        self, band_by_target: MutableMapping[str, MutableSequence[str]]
+    ) -> None:
+        self._band_by_targets = band_by_target  # should sync with QubeCalib
+
+    def get_target_name(self, band_name: str) -> str:
+        target_by_band: MutableMapping[str, str] = defaultdict()
+        for band, targets in self._band_by_targets.items():
+            for target in targets:
+                target_by_band[target] = band
+        return target_by_band[band_name]
+
+
+@dataclass
+class CaptureParamSetting:
+    additional_capture_delay: int = 0
+    dsp_units: List[CaptureParamDsp] = field(default_factory=list)
+
+    def apply(self, captparam: CaptureParam) -> None:
+        captparam.capture_delay += self.additional_capture_delay
+        dspunits = [_ for dsp in self.dsp_units for _ in dsp.dspunits]
+        captparam.sel_dsp_units_to_enable(*dspunits)
+        for dsp in self.dsp_units:
+            dsp.apply(captparam)
+
+
+@dataclass
+class CaptureParamDsp:
+    dspunits: Sequence[DspUnit]
+
+    def apply(self, captparam: CaptureParam) -> None:
+        pass
+
+
+# @dataclass
+# class CaptureParamDspDemodulation(CaptureParamDsp):
+#     target_frequency: float
+#     baseband_frequency: float
+#     SAMPLING_PERIOD: float = 2 * nS
+#     dspunits: Sequence[DspUnit] = (
+#         DspUnit.COMPLEX_FIR,  # DSPのBPFを有効化
+#         DspUnit.DECIMATION,  # DSPの間引1/4を有効化
+#         DspUnit.COMPLEX_WINDOW,  # 複素窓関数を有効化
+#     )
+
+#     def apply(self, captparam: CaptureParam) -> None:
+#         t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * SAMPLING_PERIOD
+#         m = u.calc_modulation_frequency(rf_freq=o.frequency)
+#         captparam.complex_window_coefs = list(
+#             np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
+#         )
+#         captparam.complex_fir_coefs = acquisition_fir_coefficient(
+#             -m / MHz
+#         )  # BPFの係数を設定
+
+#     # from QubeServer.py by Tabuchi
+#     # DSPのバンドパスフィルターを構成するFIRの係数を生成.
+#     def acquisition_fir_coefficient(self, bb_frequency: float) -> List:
+#         ADCBB_SAMPLE_R = 500
+#         ACQ_MAX_FCOEF = (
+#             16  # The maximum number of the FIR filter taps prior to decimation process.
+#         )
+#         ACQ_FCBIT_POW_HALF = 2**15  # equivalent to 2^(ACQ_FCOEF_BITS-1).
+
+#         sigma = 100.0  # nanoseconds
+#         freq_in_mhz = bb_frequency  # MHz
+#         n_of_band = (
+#             16  # The maximum number of the FIR filter taps prior to decimation process.
+#         )
+#         band_step = 500 / n_of_band
+#         band_idx = int(freq_in_mhz / band_step + 0.5 + n_of_band) - n_of_band
+#         band_center = band_step * band_idx
+#         x = np.arange(ACQ_MAX_FCOEF) - (ACQ_MAX_FCOEF - 1) / 2
+#         gaussian = np.exp(-0.5 * x**2 / (sigma**2))
+#         phase_factor = (
+#             2 * np.pi * (band_center / ADCBB_SAMPLE_R) * np.arange(ACQ_MAX_FCOEF)
+#         )
+#         coeffs = gaussian * np.exp(1j * phase_factor) * (1 - 1e-3)
+#         return list(
+#             (np.real(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
+#             + 1j * (np.imag(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
+#         )
+
+
+@dataclass
+class CaptureParamDspIntegraton(CaptureParamDsp):
+    dspunits: Sequence[DspUnit] = (DspUnit.INTEGRATION,)
+
+
+@dataclass
+class CaptureParamDspSum(CaptureParamDsp):
+    dspunits: Sequence[DspUnit] = (DspUnit.SUM,)
+
+
+@dataclass
+class CaptureParamDspClassification(CaptureParamDsp):
+    decision_func_params: Tuple[Tuple[int, int, int], Tuple[int, int, int]] = (
+        (0, 0, 0),
+        (0, 0, 0),
+    )
+    dspunits: Sequence[DspUnit] = (DspUnit.CLASSIFICATION,)
