@@ -32,6 +32,7 @@ from quel_clock_master import SequencerClient
 from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1BoxType, Quel1ConfigOption
 from quel_ic_config_utils import (
     CaptureReturnCode,
+    SimpleBox,
     SimpleBoxIntrinsic,
     create_box_objects,
 )
@@ -683,18 +684,45 @@ class QubeCalib:
     # ) -> None:
     #     s = self.dump_config(box_name_or_alias, port)
 
+    def create_single_simplebox(
+        self,
+        box_name_or_alias: str,
+    ) -> Tuple[Any, SimpleBox]:
+        box_setting = self._box_settings[box_name_or_alias]
+
+        _, _, _, _, box = create_box_objects(
+            refer_by_port=True,
+            **box_setting.asdict(),
+        )
+        if not isinstance(box, SimpleBox):
+            raise ValueError(f"unsupported boxtype: {box_setting.boxtype}")
+
+        link_status: bool = True
+        if not box.init().values():
+            # print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
+            if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
+                logger.warning(
+                    f"crc error has been detected on MxFEs of {box_name_or_alias}"
+                )
+            else:
+                logger.error(
+                    f"datalink between MxFE and FPGA of {box_name_or_alias} is not working"
+                )
+                link_status = False
+        return link_status, box
+
     def create_single_box(
-        self, setting: Dict[str, Dict[str, Any]]
+        self, setting: Dict[str, BoxSetting]
     ) -> Tuple[Any, SimpleBoxIntrinsic]:
         box_setting = setting
         box_name = {_ for _ in box_setting}.pop()
 
         _, _, _, _, box = create_box_objects(
             refer_by_port=False,
-            **box_setting[box_name],
+            **box_setting[box_name].asdict(),
         )
         if not isinstance(box, SimpleBoxIntrinsic):
-            raise ValueError(f"unsupported boxtype: {box_setting[box_name]['boxtype']}")
+            raise ValueError(f"unsupported boxtype: {box_setting[box_name].boxtype}")
 
         link_status: bool = True
         if not box.init().values():

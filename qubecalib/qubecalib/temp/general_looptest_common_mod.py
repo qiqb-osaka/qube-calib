@@ -143,9 +143,10 @@ class PulseGenSinglebox:
             channel=self.channel,
             fnco_freq=self.fnco_freq,
         )
-        self.box.open_rfswitch(self.group, self.line)
-        if self.box.is_loopedback_monitor(self.group):
-            self.box.open_rfswitch(self.group, "m")
+        self.box.close_rfswitch(self.group, self.line)
+        # self.box.open_rfswitch(self.group, self.line)
+        # if self.box.is_loopedback_monitor(self.group):
+        #     self.box.open_rfswitch(self.group, "m")
 
     def init_wave(self) -> None:
         Quel1WaveSubsystemMod.set_wave(
@@ -208,12 +209,12 @@ class PulseCapSinglebox:
             lo_freq=self.lo_freq,
             cnco_freq=self.cnco_freq,
         )
-        # self.box.config_runit(
-        #     group=self.group,
-        #     rline=self.rline,
-        #     runit=self.runit,
-        #     fnco_freq=self.fnco_freq,
-        # )
+        self.box.config_runit(
+            group=self.group,
+            rline=self.rline,
+            runit=self.channel,
+            fnco_freq=self.fnco_freq,
+        )
         # Notes: receive signal from input_port, not rather than internal loop-back.
         # self.box.open_rfswitch(group=self.group, line=self.rline)
         self.box.close_rfswitch(group=self.group, line=self.rline)
