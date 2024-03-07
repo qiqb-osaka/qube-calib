@@ -45,47 +45,6 @@ class BoxPoolMod:
         return [_.replace("BOX", "", 1) for _ in boxpool._boxes]
 
 
-# class BoxPoolMod(BoxPool):
-#     def _parse_settings(self, settings: Mapping[str, Mapping[str, Any]]) -> None:
-#         for k, v in settings.items():
-#             if k.startswith("BOX"):
-#                 kwd = k.replace("BOX", "", 1)
-#                 _, _, _, _, box = create_box_objects(**v, refer_by_port=False)
-#                 if not isinstance(box, SimpleBoxIntrinsic):
-#                     raise ValueError(f"unsupported boxtype: {v['boxtype']}")
-#                 sqc = SequencerClient(v["ipaddr_sss"])
-#                 self._boxes[kwd] = (box, sqc)
-#                 self._linkstatus[kwd] = False
-
-
-# class BoxPoolMod:
-#     @classmethod
-#     def create_boxpool(cls, settings: dict[str, dict[str, Any]]) -> BoxPool:
-#         _settings = dict()
-#         if "clockmaster_setting" not in settings:
-#             raise ValueError("colockmaster_setting field required")
-#         _settings["CLOCK_MASTER"] = settings["clockmaster_setting"]
-#         boxpool = BoxPool(settings=_settings)
-#         if "box_settings" not in settings:
-#             return boxpool
-#         cls.add_box(boxpool, settings["box_settings"])
-#         return boxpool
-
-#     @classmethod
-#     def add_box(
-#         cls,
-#         boxpool: BoxPool,
-#         settings: Mapping[str, Any],
-#     ) -> None:
-#         for k, v in settings.items():
-#             _, _, _, _, box = create_box_objects(**v, refer_by_port=False)
-#             if not isinstance(box, SimpleBoxIntrinsic):
-#                 raise ValueError(f"unsupported boxtype: {v['boxtype']}")
-#             sqc = SequencerClient(v["ipaddr_sss"])
-#             boxpool._boxes[k] = (box, sqc)
-#             boxpool._linkstatus[k] = False
-
-
 class PulseGenSinglebox:
     NUM_SAMPLES_IN_WAVE_BLOCK: Final[int] = 64
 
@@ -143,8 +102,8 @@ class PulseGenSinglebox:
             channel=self.channel,
             fnco_freq=self.fnco_freq,
         )
-        self.box.close_rfswitch(self.group, self.line)
-        # self.box.open_rfswitch(self.group, self.line)
+        # self.box.close_rfswitch(self.group, self.line)
+        self.box.open_rfswitch(self.group, self.line)
         # if self.box.is_loopedback_monitor(self.group):
         #     self.box.open_rfswitch(self.group, "m")
 
@@ -216,8 +175,8 @@ class PulseCapSinglebox:
             fnco_freq=self.fnco_freq,
         )
         # Notes: receive signal from input_port, not rather than internal loop-back.
-        # self.box.open_rfswitch(group=self.group, line=self.rline)
-        self.box.close_rfswitch(group=self.group, line=self.rline)
+        self.box.open_rfswitch(group=self.group, line=self.rline)
+        # self.box.close_rfswitch(group=self.group, line=self.rline)
 
 
 class PulseGenMod:
