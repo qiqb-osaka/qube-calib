@@ -229,15 +229,26 @@ class Sequence(DequeWithContext):
             raise ValueError("SequenceTree is not prepared.")
         return self._tree._tree._tree
 
-    def _group_items_by_target(self) -> Dict[str, MutableSequence[TargetHolder]]:
+    def _get_group_items_by_target(
+        self,
+    ) -> Dict[str, Dict[Optional[int], MutableSequence[TargetHolder]]]:
         nodes_items = self._tree._nodes_items
+        subsequences = [
+            _
+            for _ in self._tree._nodes_items.values()
+            if isinstance(_, SubSequenceBranch)
+        ]
         return {
-            _.target: [
-                __
-                for __ in nodes_items.values()
-                if isinstance(__, TargetHolder)
-                if __.target == _.target
-            ]
+            _.target: {
+                sub._next_node: [
+                    item
+                    for node, item in nodes_items.items()
+                    if isinstance(item, TargetHolder)
+                    if item.target == _.target
+                    if node in self._tree.breadth_first_search(sub._root_node)
+                ]
+                for sub in subsequences
+            }
             for _ in nodes_items.values()
             if isinstance(_, TargetHolder)
         }
@@ -259,7 +270,7 @@ class SubSequence(DequeWithContext):
         tree = SequenceTree()
         __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
-        branch = tree.branch(SubSequenceBranch())
+        tree.branch(SubSequenceBranch())
         # with 内で定義された item を舐める
         for item in self:
             if isinstance(item, Item):
@@ -324,7 +335,7 @@ class Series(DequeWithContext):
         # 外側の context にローカルツリーを渡す
         __rc__.contexts[-1].append(tree)
         # ローカルツリーのルート直下を branch して branch item を登録する
-        branch = tree.branch(SeriesBranch())
+        tree.branch(SeriesBranch())
         # with 内で定義された item を舐める
         for item in self:
             if isinstance(item, Item):
@@ -598,6 +609,7 @@ class Range(Slot, TargetHolder):
 class Modifier(Slot, TargetHolder):
     def __init__(self) -> None:
         super().__init__(0)
+        TargetHolder.__init__(self)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(begin={self.begin})"
