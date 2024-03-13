@@ -20,6 +20,7 @@ BoxPool, PulseGen, PulseCap
 logger = logging.getLogger(__name__)
 
 
+# TODO "BOX" 前置は無理に追従する必要ないと思う（内部処理で使ってないよね？）
 class BoxPoolMod:
     @classmethod
     def get_box(
