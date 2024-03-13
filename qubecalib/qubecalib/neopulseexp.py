@@ -43,7 +43,7 @@ class SequenceTree:
         branch._root_node = branch_root
         return branch
 
-    def finalize(self) -> None:
+    def place_slots(self) -> None:
         # 深い branch から順に slot を配置する
         for _ in [
             self._nodes_items[_]
@@ -108,7 +108,7 @@ class Item:
 
 class Padding(Item):
     def __init__(self, duration: Optional[float] = None) -> None:
-        Item.__init__(self, duration)
+        super().__init__(duration)
 
 
 class Branch(Item):
@@ -135,8 +135,7 @@ class Branch(Item):
 
 class Dummy(Item):
     def __init__(self) -> None:
-        super().__init__()
-        self._duration = 0
+        super().__init__(0)
 
     @property
     def duration(self) -> Optional[float]:
@@ -146,13 +145,6 @@ class Dummy(Item):
     def duration(self, duration: float) -> None:
         """Branch object cannot set duration value"""
         raise ValueError("Branch object cannot set duration value")
-
-
-class Modifier(Item, ContextNode):
-    def __init__(self) -> None:
-        super().__init__()
-        self.duration = 0
-        self.begin: Optional[float] = None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(begin={self.begin})"
@@ -195,21 +187,60 @@ class Sequence(DequeWithContext):
                 else:
                     offset = 0
                 root = _tree._tree._tree.root
-                for node, items in _tree._tree._tree.items():
-                    if node == root:
+                for parent, children in _tree._tree._tree.items():
+                    # active_node = (
+                    #     self._tree._active_node
+                    # )  # active_node が変更されるかもなので退避
+                    if parent == root:
                         self._tree._tree._tree[self._tree._active_node] += [
-                            _ + offset for _ in items
+                            _ + offset for _ in children
                         ]
+                        # children に Branch がいるか調べる
+                        branches = {
+                            _tree._nodes_items[_]
+                            for _ in children
+                            if isinstance(
+                                _tree._nodes_items[_],
+                                Branch,
+                            )
+                        }
+                        if branches:
+                            # Series Branch なので Branch は高々一つ
+                            branch = next(iter(branches))
+                            if isinstance(branch, Branch):
+                                if branch._root_node is None:
+                                    raise ValueError("_root_node is None")
+                                branch._root_node += offset
+                                if branch._next_node is None:
+                                    raise ValueError("_next_node is None")
+                                branch._next_node += offset
+                                self._tree._active_node = branch._next_node
                         continue
-                    self._tree._tree._tree[node + offset] = [_ + offset for _ in items]
+                    self._tree._tree._tree[parent + offset] = [
+                        _ + offset for _ in children
+                    ]
                 for node in _tree.breadth_first_search()[1:]:
                     self._tree._nodes_items[node + offset] = _tree._nodes_items[node]
                     self._tree._tree._cost[node + offset] = -1
+                # self._tree._active_node = next_item + offset
 
     def _get_tree(self) -> Tree:
         if self._tree is None:
             raise ValueError("SequenceTree is not prepared.")
         return self._tree._tree._tree
+
+    def _group_items_by_target(self) -> Dict[str, MutableSequence[TargetHolder]]:
+        nodes_items = self._tree._nodes_items
+        return {
+            _.target: [
+                __
+                for __ in nodes_items.values()
+                if isinstance(__, TargetHolder)
+                if __.target == _.target
+            ]
+            for _ in nodes_items.values()
+            if isinstance(_, TargetHolder)
+        }
 
 
 class SubSequenceBranch(Branch):
@@ -555,30 +586,50 @@ class Slot(ContextNode, Item):
         Item.__init__(self, duration)
 
 
-class Range(ContextNode, Item, TargetHolder):
-    def __init__(self, duration: Optional[float] = None) -> None:
-        super().__init__()
-        Item.__init__(self, duration)
-
-
 class Blank(Slot):
-    SAMPLING_PERIOD: Final[float] = 2e-9
+    pass
+
+
+class Range(Slot, TargetHolder):
+    def __init__(self, duration: Optional[float] = None) -> None:
+        super().__init__(duration)
+
+
+class Modifier(Slot, TargetHolder):
+    def __init__(self) -> None:
+        super().__init__(0)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(begin={self.begin})"
 
     @property
-    def sampling_points(self) -> np.ndarray:
-        if self.begin is None or self.duration is None:
-            raise ValueError(f"{self.__class__.__name__}: position is not calculated")
-        return np.arange(
-            ceil(self.begin, 2),
-            ceil(self.begin + self.duration, 2),
-            self.SAMPLING_PERIOD,
-        )  # sampling points [ns]
+    def duration(self) -> Optional[float]:
+        return self._duration
 
-    def func(self, t: float) -> float:
-        return 0.0
+    @duration.setter
+    def duration(self, duration: float) -> None:
+        """Branch object cannot set duration value"""
+        raise ValueError("Branch object cannot set duration value")
 
-    def ufunc(self, t: float) -> NDArray:
-        return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
+
+# class Blank(Slot):
+#     SAMPLING_PERIOD: Final[float] = 2e-9
+
+#     @property
+#     def sampling_points(self) -> np.ndarray:
+#         if self.begin is None or self.duration is None:
+#             raise ValueError(f"{self.__class__.__name__}: position is not calculated")
+#         return np.arange(
+#             ceil(self.begin, 2),
+#             ceil(self.begin + self.duration, 2),
+#             self.SAMPLING_PERIOD,
+#         )  # sampling points [ns]
+
+#     def func(self, t: float) -> float:
+#         return 0.0
+
+#     def ufunc(self, t: float) -> NDArray:
+#         return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
 
 
 class SlotWithIQ(Slot):
