@@ -1047,7 +1047,9 @@ def captparam_enable_classification(captparam):
     captparam_enable_dspunit(captparam, e7awgsw.DspUnit.CLASSIFICATION)
 
 
-def captparam_enable_demodulation(captparam, physical_channel, logical_channel):
+def captparam_enable_demodulation(
+    captparam, physical_channel, logical_channel, sideband: str = "U"
+):
     p, u, o = captparam, physical_channel, logical_channel
     # DSP で周波数変換する複素窓関数を設定
     t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2 * nS
@@ -1055,7 +1057,11 @@ def captparam_enable_demodulation(captparam, physical_channel, logical_channel):
     p.complex_window_coefs = list(
         np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
     )
-    p.complex_fir_coefs = acquisition_fir_coefficient(-m / MHz)  # BPFの係数を設定
+
+    if sideband == "U":
+        p.complex_fir_coefs = acquisition_fir_coefficient(m / MHz)  # BPFの係数を設定
+    else:
+        p.complex_fir_coefs = acquisition_fir_coefficient(-m / MHz)  # BPFの係数を設定
 
     dspunits = p.dsp_units_enabled
     # DSPのどのモジュールを有効化するかを指定
