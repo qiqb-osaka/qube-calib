@@ -172,6 +172,7 @@ class Sequence(DequeWithContext):
         traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
+        print()
         self._tree = SequenceTree()
         for item in self:
             if isinstance(item, Item):
@@ -181,48 +182,75 @@ class Sequence(DequeWithContext):
                 # ノード番号を更新してサブツリーをローカルツリーとマージする
                 # TODO この辺は tree で吸収すべき
                 _tree = item
+                # 全てのノードを舐めて最大のインデックスを更新する
                 all_nodes = self._tree._tree._tree.all
                 if all_nodes:
                     offset = max(all_nodes)
                 else:
+                    # 空なら現在のインデックスは 0
                     offset = 0
                 root = _tree._tree._tree.root
+                # サブツリーのアイテムに対して全て
                 for parent, children in _tree._tree._tree.items():
-                    # active_node = (
-                    #     self._tree._active_node
-                    # )  # active_node が変更されるかもなので退避
                     if parent == root:
+                        # ローカルツリーの active_node にサブツリーの root をぶら下げる
                         self._tree._tree._tree[self._tree._active_node] += [
                             _ + offset for _ in children
                         ]
-                        # children に Branch がいるか調べる
-                        branches = {
-                            _tree._nodes_items[_]
-                            for _ in children
-                            if isinstance(
-                                _tree._nodes_items[_],
-                                Branch,
-                            )
-                        }
-                        if branches:
-                            # Series Branch なので Branch は高々一つ
-                            branch = next(iter(branches))
-                            if isinstance(branch, Branch):
-                                if branch._root_node is None:
-                                    raise ValueError("_root_node is None")
-                                branch._root_node += offset
-                                if branch._next_node is None:
-                                    raise ValueError("_next_node is None")
-                                branch._next_node += offset
-                                self._tree._active_node = branch._next_node
+                    else:
+                        # サブツリーのアイテムをローカルツリーの名前空間に変換して移動する
+                        self._tree._tree._tree[parent + offset] = [
+                            _ + offset for _ in children
+                        ]
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
                         continue
-                    self._tree._tree._tree[parent + offset] = [
-                        _ + offset for _ in children
-                    ]
+                    for branch in branches:
+                        if not isinstance(branch, Branch):
+                            continue
+                        # branch の _root_node と _next_node を更新する
+                        if not isinstance(branch, Branch):
+                            continue
+                        if branch._root_node is None:
+                            raise ValueError("_root_node is None")
+                        if branch._next_node is None:
+                            raise ValueError("_next_node is None")
+                        branch._root_node += offset
+                        branch._next_node += offset
+                    # Series Branch なので toplevel に Branch が居たら次のアイテムはその Branch の次にぶら下げる
+                    # toplevel 以外なら次のアイテムの処理へ
+                    if parent != root:
+                        continue
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
+                        continue
+                    # Series Branch なので Branch は高々一つ
+                    branch = next(iter(branches))
+                    if not isinstance(branch, Branch):
+                        continue
+                    if branch._next_node is None:
+                        raise ValueError("_next_node is None")
+                    self._tree._active_node = branch._next_node
+                # 全てのアイテムをローカルツリーへ複製する
                 for node in _tree.breadth_first_search()[1:]:
                     self._tree._nodes_items[node + offset] = _tree._nodes_items[node]
                     self._tree._tree._cost[node + offset] = -1
-                # self._tree._active_node = next_item + offset
 
     def _get_tree(self) -> Tree:
         if self._tree is None:
@@ -266,9 +294,13 @@ class SubSequence(DequeWithContext):
         traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
+        tree = self.create_tree()
+        # with 内の定義の所定の位置にツリーを追加
+        __rc__.contexts[-1].append(tree)
+
+    def create_tree(self) -> SequenceTree:
         # このブランチ用のローカルツリーを作る
         tree = SequenceTree()
-        __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
         tree.branch(SubSequenceBranch())
         # with 内で定義された item を舐める
@@ -278,44 +310,80 @@ class SubSequence(DequeWithContext):
                 slot = item
                 tree.append(slot)
             elif isinstance(item, SequenceTree):
-                # サブツリーを見つけたらブランチツリーとマージする
-                _tree = item
-                # サブツリーのルート直下第 1 アイテムは branch のはず
-                # サブツリーを抜けたら _branch._next_node に次のアイテムをぶら下げる
-                _branch = _tree._nodes_items[1]
-                if isinstance(_branch, Branch):
-                    if _branch._next_node is None:
-                        raise ValueError("_next_node is None")
-                    next_item = _branch._next_node
-                else:
-                    raise ValueError("1st node is not Branch")
                 # ノード番号を更新してサブツリーをローカルツリーとマージする
                 # TODO この辺は tree で吸収すべき
-                offset = max(tree._tree._tree.all)
+                # サブツリーを見つけたらローカルツリーとマージする
+                _tree = item
+                # 全てのローカルノードを舐めて最大のインデックスを更新する
+                all_nodes = tree._tree._tree.all
+                if all_nodes:
+                    offset = max(all_nodes)
+                else:
+                    # 空なら現在のインデックスは 0
+                    offset = 0
                 root = _tree._tree._tree.root
+                # サブツリーのアイテムに対して全て
                 for parent, children in _tree._tree._tree.items():
                     if parent == root:
+                        # ローカルツリーの active_node にサブツリーの root をぶら下げる
                         tree._tree._tree[tree._active_node] += [
                             _ + offset for _ in children
                         ]
+                    else:
+                        # サブツリーのアイテムをローカルツリーの名前空間に変換して移動する
+                        tree._tree._tree[parent + offset] = [
+                            _ + offset for _ in children
+                        ]
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
                         continue
-                    tree._tree._tree[parent + offset] = [_ + offset for _ in children]
-                for node in _tree.breadth_first_search()[1:]:
-                    _item = _tree._nodes_items[node]
-                    tree._nodes_items[node + offset] = _item
-                    tree._tree._cost[node + offset] = -1
-                    # branch だったら _next_node や _root_node も新しい node 名に更新
-                    if isinstance(_item, Branch):
-                        if _item._root_node is None:
+                    for branch in branches:
+                        if not isinstance(branch, Branch):
+                            continue
+                        # branch の _root_node と _next_node を更新する
+                        if not isinstance(branch, Branch):
+                            continue
+                        if branch._root_node is None:
                             raise ValueError("_root_node is None")
-                        _item._root_node += offset
-                        if _item._next_node is None:
+                        if branch._next_node is None:
                             raise ValueError("_next_node is None")
-                        _item._next_node += offset
-                # ローカルツリーのカウンターをアップデート
-                tree._latest_node = max(tree._tree._tree.all)  # + offset
-                # ローカルツリーの次の追加先を先頭 branch の次に指定
-                tree._active_node = next_item + offset
+                        branch._root_node += offset
+                        branch._next_node += offset
+                    # Series Branch なので toplevel に Branch が居たら次のアイテムはその Branch の次にぶら下げる
+                    # toplevel 以外なら次のアイテムの処理へ
+                    if parent != root:
+                        continue
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
+                        continue
+                    # Series Branch なので Branch は高々一つ
+                    branch = next(iter(branches))
+                    if not isinstance(branch, Branch):
+                        continue
+                    if branch._next_node is None:
+                        raise ValueError("_next_node is None")
+                    tree._active_node = branch._next_node
+                # 全てのアイテムをローカルツリーへ複製する
+                for node in _tree.breadth_first_search()[1:]:
+                    tree._nodes_items[node + offset] = _tree._nodes_items[node]
+                    tree._tree._cost[node + offset] = -1
+        return tree
 
 
 class SeriesBranch(Branch):
@@ -343,40 +411,79 @@ class Series(DequeWithContext):
                 slot = item
                 tree.append(slot)
             elif isinstance(item, SequenceTree):
+                # ノード番号を更新してサブツリーをローカルツリーとマージする
+                # TODO この辺は tree で吸収すべき
                 # サブツリーを見つけたらローカルツリーとマージする
                 _tree = item
-                # サブツリーのルート直下第 1 アイテムは branch のはず
-                # サブツリーを抜けたら _branch._next_node に次のアイテムをぶら下げる
-                _branch = _tree._nodes_items[1]
-                if isinstance(_branch, Branch):
-                    if _branch._next_node is None:
-                        raise ValueError("_next_node is None")
-                    next_item = _branch._next_node
+                # 全てのローカルノードを舐めて最大のインデックスを更新する
+                all_nodes = tree._tree._tree.all
+                if all_nodes:
+                    offset = max(all_nodes)
                 else:
-                    raise ValueError("1st node is not Branch")
-                # ツリーをマージするためにノード番号を更新する
-                offset = max(tree._tree._tree.all)
-                # 幅優先探索で全アイテムを舐める
-                for child in _tree.breadth_first_search()[1:]:
-                    parent = _tree._tree._tree.parentof(child)
-                    # ブランチ用ツリーに追加する
-                    tree._tree.adopt(parent + offset, child + offset, cost=-1)
-                    # ブランチ用ツリーのあいてむに登録する
-                    tree._nodes_items[child + offset] = _tree._nodes_items[child]
-                    # branch だったら _next_node や _root_node も新しい node 名に更新
-                    _item = _tree._nodes_items[child]
-                    if isinstance(_item, Branch):
-                        # _item._tree = tree
-                        if _item._root_node is None:
+                    # 空なら現在のインデックスは 0
+                    offset = 0
+                root = _tree._tree._tree.root
+                # サブツリーのアイテムに対して全て
+                for parent, children in _tree._tree._tree.items():
+                    if parent == root:
+                        # ローカルツリーの active_node にサブツリーの root をぶら下げる
+                        tree._tree._tree[tree._active_node] += [
+                            _ + offset for _ in children
+                        ]
+                    else:
+                        # サブツリーのアイテムをローカルツリーの名前空間に変換して移動する
+                        tree._tree._tree[parent + offset] = [
+                            _ + offset for _ in children
+                        ]
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
+                        continue
+                    for branch in branches:
+                        if not isinstance(branch, Branch):
+                            continue
+                        # branch の _root_node と _next_node を更新する
+                        if not isinstance(branch, Branch):
+                            continue
+                        if branch._root_node is None:
                             raise ValueError("_root_node is None")
-                        _item._root_node += offset
-                        if _item._next_node is None:
+                        if branch._next_node is None:
                             raise ValueError("_next_node is None")
-                        _item._next_node += offset
-                # 親ツリーのカウンターをアップデート
-                tree._latest_node = max(_tree.breadth_first_search()) + offset
-                # 親ツリーの追加先を先頭 branch の次に指定
-                tree._active_node = next_item + offset
+                        branch._root_node += offset
+                        branch._next_node += offset
+                    # Series Branch なので toplevel に Branch が居たら次のアイテムはその Branch の次にぶら下げる
+                    # toplevel 以外なら次のアイテムの処理へ
+                    if parent != root:
+                        continue
+                    # children に Branch がいるか調べる
+                    branches = {
+                        _tree._nodes_items[_]
+                        for _ in children
+                        if isinstance(
+                            _tree._nodes_items[_],
+                            Branch,
+                        )
+                    }
+                    if not branches:
+                        continue
+                    # Series Branch なので Branch は高々一つ
+                    branch = next(iter(branches))
+                    if not isinstance(branch, Branch):
+                        continue
+                    if branch._next_node is None:
+                        raise ValueError("_next_node is None")
+                    tree._active_node = branch._next_node
+                # 全てのアイテムをローカルツリーへ複製する
+                for node in _tree.breadth_first_search()[1:]:
+                    tree._nodes_items[node + offset] = _tree._nodes_items[node]
+                    tree._tree._cost[node + offset] = -1
 
 
 class FlushleftBranch(Branch):
