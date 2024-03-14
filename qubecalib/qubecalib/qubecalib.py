@@ -29,14 +29,15 @@ import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import SequencerClient
-from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1BoxType, Quel1ConfigOption
-from quel_ic_config_utils import (
+from quel_ic_config import (
+    QUEL1_BOXTYPE_ALIAS,
     CaptureReturnCode,
-    SimpleBox,
-    SimpleBoxIntrinsic,
-    create_box_objects,
+    Quel1Box,
+    Quel1BoxIntrinsic,
+    Quel1BoxType,
+    Quel1ConfigOption,
 )
-from quel_ic_config_utils.linkupper import LinkupFpgaMxfe
+from quel_ic_config.linkupper import LinkupFpgaMxfe
 
 from . import backendqube as backend
 from . import neopulse as pulse
@@ -489,9 +490,9 @@ class QubeCalib:
     # ) -> tuple[int, int | str]:
     #     # TODO: Fix abuse API
     #     boxtype = self.get_box_type(box_name_or_alias)
-    #     if port not in SimpleBox._PORT2LINE[boxtype]:
+    #     if port not in Quel1Box._PORT2LINE[boxtype]:
     #         raise ValueError(f"invalid port: {port}")
-    #     return SimpleBox._PORT2LINE[boxtype][port]
+    #     return Quel1Box._PORT2LINE[boxtype][port]
 
     def set_clockmaster_setting(self, ipaddr: str | IPv4Address | IPv6Address) -> None:
         if isinstance(ipaddr, str):
@@ -576,7 +577,7 @@ class QubeCalib:
     def _create_box(
         self,
         box_name_or_alias: str,
-    ) -> tuple[BoxPool, str, SimpleBoxIntrinsic, SequencerClient]:
+    ) -> tuple[BoxPool, str, Quel1BoxIntrinsic, SequencerClient]:
         _settings = self._create_clockmaster_setting()
         boxname = self._box_settings.get_boxname(box_name_or_alias)
 
@@ -591,7 +592,7 @@ class QubeCalib:
     def _create_boxes(
         self,
         *box_names_or_aliases: str,
-    ) -> tuple[BoxPool, dict[str, tuple[SimpleBoxIntrinsic, SequencerClient]]]:
+    ) -> tuple[BoxPool, dict[str, tuple[Quel1BoxIntrinsic, SequencerClient]]]:
         _settings = self._create_clockmaster_setting()
         box_names = [self._box_settings.get_boxname(_) for _ in box_names_or_aliases]
         __settings = {"BOX" + _: self._box_settings[_].asdict() for _ in box_names}
@@ -723,18 +724,18 @@ class QubeCalib:
     # ) -> None:
     #     s = self.dump_config(box_name_or_alias, port)
 
-    def create_single_simplebox(
+    def create_single_Quel1Box(
         self,
         box_name_or_alias: str,
         refer_by_port: bool = True,
-    ) -> Tuple[Any, SimpleBox | SimpleBoxIntrinsic]:
+    ) -> Tuple[Any, Quel1Box | Quel1BoxIntrinsic]:
         box_setting = self._box_settings[box_name_or_alias]
 
         _, _, _, _, box = create_box_objects(
             refer_by_port=refer_by_port,
             **box_setting.asdict(),
         )
-        if not isinstance(box, SimpleBox):
+        if not isinstance(box, Quel1Box):
             raise ValueError(f"unsupported boxtype: {box_setting.boxtype}")
 
         link_status: bool = True
@@ -753,7 +754,7 @@ class QubeCalib:
 
     def create_single_box(
         self, setting: Dict[str, BoxSetting]
-    ) -> Tuple[Any, SimpleBoxIntrinsic]:
+    ) -> Tuple[Any, Quel1BoxIntrinsic]:
         box_setting = setting
         box_name = {_ for _ in box_setting}.pop()
 
@@ -761,7 +762,7 @@ class QubeCalib:
             refer_by_port=False,
             **box_setting[box_name].asdict(),
         )
-        if not isinstance(box, SimpleBoxIntrinsic):
+        if not isinstance(box, Quel1BoxIntrinsic):
             raise ValueError(f"unsupported boxtype: {box_setting[box_name].boxtype}")
 
         link_status: bool = True
@@ -1371,7 +1372,7 @@ class InvokeSequencerSinglebox(CommandBase):
             refer_by_port=False,
             **box_setting[box_name],
         )
-        if not isinstance(box, SimpleBoxIntrinsic):
+        if not isinstance(box, Quel1BoxIntrinsic):
             raise ValueError(f"unsupported boxtype: {box_setting[box_name]['boxtype']}")
         self._box_name = box_name
         self._box = box
@@ -1806,10 +1807,10 @@ class CreateBox(Command):
         self._boxtype = boxtype
         self._config_root = config_root
         self._config_options = config_options
-        self._box: SimpleBoxIntrinsic = None
+        self._box: Quel1BoxIntrinsic = None
         self._link_status: bool = False
 
-    def execute(self) -> SimpleBoxIntrinsic:
+    def execute(self) -> Quel1BoxIntrinsic:
         _, _, _, _, self._box = create_box_objects(
             ipaddr_wss=self._ipaddr_wss,
             ipaddr_sss=self._ipaddr_sss,
@@ -1856,12 +1857,12 @@ class InvokeSequencerSingleboxNext(Command):
         self._settings = settings
 
     @property
-    def box(self) -> SimpleBoxIntrinsic:
+    def box(self) -> Quel1BoxIntrinsic:
         return self._box
 
     def prepare(
         self,
-        box: SimpleBoxIntrinsic,
+        box: Quel1BoxIntrinsic,
         link_status: bool,
     ) -> None:
         if self._settings is None:

@@ -6,11 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from quel_clock_master import QuBEMasterClient, SequencerClient
-from quel_ic_config_utils import (
+from quel_ic_config import (
     CaptureResults,
     CaptureReturnCode,
-    SimpleBoxIntrinsic,
-    create_box_objects,
+    Quel1BoxIntrinsic,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +95,7 @@ class BoxPool:
                 logger.info(f"{name:s}: not found")
         return flag
 
-    def get_box(self, name: str) -> Tuple[bool, SimpleBoxIntrinsic, SequencerClient]:
+    def get_box(self, name: str) -> Tuple[bool, Quel1BoxIntrinsic, SequencerClient]:
         if name in self._boxes:
             box, sqc = self._boxes[name]
             return self._linkstatus[name], box, sqc

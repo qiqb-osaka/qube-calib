@@ -25,8 +25,12 @@ import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import SequencerClient
-from quel_ic_config import QUEL1_BOXTYPE_ALIAS, Quel1ConfigOption
-from quel_ic_config_utils import CaptureReturnCode, SimpleBoxIntrinsic
+from quel_ic_config import (
+    QUEL1_BOXTYPE_ALIAS,
+    CaptureReturnCode,
+    Quel1BoxIntrinsic,
+    Quel1ConfigOption,
+)
 
 from qubecalib.temp.general_looptest_common import PulseCap, PulseGen
 
@@ -198,7 +202,7 @@ class QcPulseGen(PulseGen):
             )
         self.name = name
         self.boxname = boxname
-        self.box: SimpleBoxIntrinsic = qcbox.box._dev
+        self.box: Quel1BoxIntrinsic = qcbox.box._dev
         self.sqc: SequencerClient = sqc
         group, line = qcbox.box._convert_all_port(port)
         if isinstance(line, str):
@@ -356,7 +360,7 @@ class QcBoxSet(dict):
 class QcSystem:
     def __init__(self, boxset_settings: Dict[str, Dict[str, Any]]):
         # init 内容を微調整したいので BoxPool.init はここにオーバーライドした
-        # SimpleBoxIntrinsic はすでに生成されたものを使いたいので BOX{i} 要素は空で渡して後で追加
+        # Quel1BoxIntrinsic はすでに生成されたものを使いたいので BOX{i} 要素は空で渡して後で追加
         self._qcboxes = {}
         for k, _ in boxset_settings.items():
             try:

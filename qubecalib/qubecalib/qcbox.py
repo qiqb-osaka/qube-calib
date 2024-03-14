@@ -1,5 +1,4 @@
-"""quel_ic_config_util.SimpleBox をスムーズに導入するための互換性レイヤ
-"""
+"""quel_ic_config_util.Quel1Box をスムーズに導入するための互換性レイヤ"""
 
 from __future__ import annotations
 
@@ -12,16 +11,18 @@ from pathlib import Path
 from typing import Any, Collection, Dict, Optional, Sequence, Tuple
 
 import yaml
-from quel_ic_config import Quel1AnyConfigSubsystem, Quel1BoxType, Quel1ConfigOption
-from quel_ic_config_utils import (
+from quel_ic_config import (
     LinkupFpgaMxfe,
+    Quel1AnyConfigSubsystem,
+    Quel1Box,
+    Quel1BoxIntrinsic,
+    Quel1BoxType,
+    Quel1ConfigOption,
     Quel1E7ResourceMapper,
     Quel1WaveSubsystem,
-    SimpleBox,
-    SimpleBoxIntrinsic,
-    create_box_objects,
 )
 
+# create_box_objects,
 from .rc import __running_config__ as rc
 
 logger = logging.getLogger(__name__)
@@ -33,8 +34,8 @@ class Sideband(Enum):
 
 
 class QcBox:
-    """SimpleBox の機能追加までの互換性オブジェクト
-    LSI 設定は SimpleBox を踏襲し，SimpleBox への自然な移行を促す
+    """Quel1Box の機能追加までの互換性オブジェクト
+    LSI 設定は Quel1Box を踏襲し，Quel1Box への自然な移行を促す
     """
 
     def __init__(
@@ -71,7 +72,7 @@ class QcBox:
                 continue
 
     @property
-    def box(self) -> SimpleBox:
+    def box(self) -> Quel1Box:
         return self._box
 
     @property
@@ -103,7 +104,7 @@ class QcBox:
         return self._config_options
 
     @property
-    def _dev(self) -> SimpleBoxIntrinsic:
+    def _dev(self) -> Quel1BoxIntrinsic:
         return self.box._dev
 
     def __repr__(self) -> str:

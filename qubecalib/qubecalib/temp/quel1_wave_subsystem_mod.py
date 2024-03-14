@@ -7,7 +7,7 @@ from typing import Dict, MutableSequence, Optional, Tuple
 import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, DspUnit, WaveSequence
-from quel_ic_config_utils import CaptureReturnCode, Quel1WaveSubsystem
+from quel_ic_config import CaptureReturnCode, Quel1WaveSubsystem
 
 logger = logging.getLogger(__name__)
 

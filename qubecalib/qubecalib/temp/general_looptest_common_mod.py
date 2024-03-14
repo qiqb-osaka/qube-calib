@@ -6,15 +6,14 @@ from typing import Any, Final, Mapping, Optional
 
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import SequencerClient
-from quel_ic_config_utils import (
-    SimpleBoxIntrinsic,
-    create_box_objects,
+from quel_ic_config import (
+    Quel1BoxIntrinsic,
 )
 
 from .general_looptest_common import BoxPool, PulseCap, PulseGen
 from .quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
 
-socket, Any, Mapping, SequencerClient, SimpleBoxIntrinsic, create_box_objects
+socket, Any, Mapping, SequencerClient, Quel1BoxIntrinsic
 BoxPool, PulseGen, PulseCap
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ class BoxPoolMod:
         self,
         boxpool: BoxPool,
         boxname: str,
-    ) -> tuple[SimpleBoxIntrinsic, SequencerClient]:
+    ) -> tuple[Quel1BoxIntrinsic, SequencerClient]:
         return boxpool._boxes["BOX" + boxname]
 
     @classmethod
@@ -53,7 +52,7 @@ class PulseGenSinglebox:
         self,
         name: str,
         box_status: bool,
-        box: SimpleBoxIntrinsic,
+        box: Quel1BoxIntrinsic,
         group: int,
         line: int,
         channel: int,
@@ -129,7 +128,7 @@ class PulseCapSinglebox:
         self,
         name: str,
         box_status: bool,
-        box: SimpleBoxIntrinsic,
+        box: Quel1BoxIntrinsic,
         group: int,
         rline: str,
         channel: int,
