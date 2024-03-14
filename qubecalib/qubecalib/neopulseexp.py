@@ -172,7 +172,7 @@ class Sequence(DequeWithContext):
         traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
-        print()
+        print([_.branch if isinstance(_, SequenceTree) else _ for _ in self])
         self._tree = SequenceTree()
         for item in self:
             if isinstance(item, Item):
@@ -202,6 +202,7 @@ class Sequence(DequeWithContext):
                         self._tree._tree._tree[parent + offset] = [
                             _ + offset for _ in children
                         ]
+                    self._tree._latest_node = max(self._tree._tree._tree.all)
                     # children に Branch がいるか調べる
                     branches = {
                         _tree._nodes_items[_]
@@ -334,6 +335,7 @@ class SubSequence(DequeWithContext):
                         tree._tree._tree[parent + offset] = [
                             _ + offset for _ in children
                         ]
+                    tree._latest_node = max(tree._tree._tree.all)
                     # children に Branch がいるか調べる
                     branches = {
                         _tree._nodes_items[_]
@@ -435,6 +437,7 @@ class Series(DequeWithContext):
                         tree._tree._tree[parent + offset] = [
                             _ + offset for _ in children
                         ]
+                    tree._latest_node = max(tree._tree._tree.all)
                     # children に Branch がいるか調べる
                     branches = {
                         _tree._nodes_items[_]
