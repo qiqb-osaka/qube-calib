@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Final, List, MutableSequence, Optional
+from typing import Any, Dict, Final, List, MutableSequence, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .tree import CostedTree, Tree
+
+DEFAULT_SAMPLING_PERIOD: Final[float] = 2e-9
 
 
 class SequenceTree:
@@ -763,32 +765,11 @@ class Modifier(Slot, TargetHolder):
         raise ValueError("Branch object cannot set duration value")
 
 
-# class Blank(Slot):
-#     SAMPLING_PERIOD: Final[float] = 2e-9
-
-#     @property
-#     def sampling_points(self) -> np.ndarray:
-#         if self.begin is None or self.duration is None:
-#             raise ValueError(f"{self.__class__.__name__}: position is not calculated")
-#         return np.arange(
-#             ceil(self.begin, 2),
-#             ceil(self.begin + self.duration, 2),
-#             self.SAMPLING_PERIOD,
-#         )  # sampling points [ns]
-
-#     def func(self, t: float) -> float:
-#         return 0.0
-
-#     def ufunc(self, t: float) -> NDArray:
-#         return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
-
-
 class Waveform(Slot):
     def __init__(self, duration: Optional[float] = None) -> None:
         self.amplitude = 1.0
         self.phase = 0.0  # radian
         self.__iq__: Optional[NDArray] = None
-        # self.__virtual_z_theta__ = 0
 
         super().__init__(duration=duration)
 
@@ -810,40 +791,6 @@ class Waveform(Slot):
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
-    # def virtual_z(self, theta):
-    #     self.__virtual_z_theta__ = theta
-
-    # @property
-    # def iq(self) -> Optional[NDArray]:
-    #     if self.begin is None or self.duration is None:
-    #         raise ValueError(
-    #             "Either or both 'begin' and 'duration' are not initialized."
-    #         )
-    #     self.__iq__ = self.ufunc(self.sampling_points_zero)  # * np.exp(
-    #     # 1j * self.__virtual_z_theta__
-    #     # )
-    #     return self.__iq__
-
-    # @property
-    # def sampling_points(self) -> NDArray:
-    #     if self.begin is None or self.duration is None:
-    #         raise ValueError(
-    #             "Either or both 'begin' and 'duration' are not initialized."
-    #         )
-    #     return np.arange(
-    #         ceil(self.begin, 2e-9),
-    #         ceil(self.begin + self.duration, 2e-9),
-    #         self.SAMPLING_PERIOD,
-    #     )  # sampling points [ns]
-
-    # @property
-    # def sampling_points_zero(self) -> NDArray:
-    #     if self.begin is None:
-    #         raise ValueError(
-    #             "Either or both 'begin' and 'duration' are not initialized."
-    #         )
-    #     return self.sampling_points - self.begin  # sampling points [ns]
-
 
 class RaisedCosFlatTop(Waveform, TargetHolder):
     """
@@ -864,8 +811,6 @@ class RaisedCosFlatTop(Waveform, TargetHolder):
         duration: Optional[float] = None,
         rise_time: Optional[float] = None,
     ):
-        # self.ampl = 1.0
-        # self.phase = 0.0
         self._rise_time = rise_time
 
         super().__init__(duration)
@@ -907,8 +852,6 @@ class RaisedCosFlatTop(Waveform, TargetHolder):
 
         self._rise_time = rise_time
 
-        # return v  # * self.ampl * np.exp(1j * self.phase)
-
 
 class Rectangle(Waveform, TargetHolder):
     def __init__(self, duration: Optional[float] = None):
@@ -921,7 +864,7 @@ class Rectangle(Waveform, TargetHolder):
 class Arbit(Waveform, TargetHolder):
     """ "サンプリング点を直接与えるためのオブジェクト"""
 
-    SAMPLING_PERIOD: Final[float] = 2e-9
+    DEFAULT_SAMPLING_PERIOD: Final[float] = 2e-9
 
     def __init__(
         self,
@@ -943,7 +886,7 @@ class Arbit(Waveform, TargetHolder):
         if self.begin is None or self.duration is None:
             raise ValueError("begin or duration is None")
 
-        d, s = self.duration, self.SAMPLING_PERIOD
+        d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
         if 0 <= t and t < d:
             t0 = np.arange(int(d // s) + 1) * s
             boolean = (t0 <= t) * (t - s < t0)
@@ -951,92 +894,12 @@ class Arbit(Waveform, TargetHolder):
 
         return 0 + 0j
 
-        # # rslt = np.zeros(t.shape).astype(complex)
-        # b, e = self.begin, self.begin + self.duration
-        # iq = self.__iq__
-        # idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
-        # # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
-        # # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
-        # # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
-        # # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
-        # q, m = t[idx].shape[0], iq.shape[0]
-        # n = int(q // m)
-        # v = (
-        #     np.stack(
-        #         n
-        #         * [
-        #             iq,
-        #         ]
-        #     )
-        #     .transpose()
-        #     .reshape(n * m)
-        # )
-        # o = v.shape[0]
-
-        # if q == o:
-        #     rslt[idx] = v
-        # elif q < o:
-        #     rslt[idx] = v[: (q - o)]
-        # else:
-        #     idx[(o - q) :] = False
-        #     rslt[idx] = v
-
-        # return rslt
-
-    # def ufunc(self, t: Optional[NDArray] = None) -> NDArray:
-    #     """
-    #     iq データを格納している numpy array への参照を返す
-
-    #     Parameters
-    #     ----------
-    #     t : numpy.ndarray(float)
-    #         与えると対象の時間列に則した点数にサンプルした iq データを返す
-    #     """
-    #     if self.__iq__ is None:
-    #         raise ValueError("__iq__ is None")
-    #     if t is None:
-    #         return self.__iq__
-    #     else:
-    #         if self.begin is None or self.duration is None:
-    #             raise ValueError("begin or duration is None")
-    #         rslt = np.zeros(t.shape).astype(complex)
-    #         b, e = self.begin, self.begin + self.duration
-    #         iq = self.__iq__
-    #         idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
-    #         # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
-    #         # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
-    #         # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
-    #         # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
-    #         q, m = t[idx].shape[0], iq.shape[0]
-    #         n = int(q // m)
-    #         v = (
-    #             np.stack(
-    #                 n
-    #                 * [
-    #                     iq,
-    #                 ]
-    #             )
-    #             .transpose()
-    #             .reshape(n * m)
-    #         )
-    #         o = v.shape[0]
-
-    #         if q == o:
-    #             rslt[idx] = v
-    #         elif q < o:
-    #             rslt[idx] = v[: (q - o)]
-    #         else:
-    #             idx[(o - q) :] = False
-    #             rslt[idx] = v
-
-    #         return rslt
-
     @property
     def iq(self) -> NDArray:
         """iq データを格納している numpy array への参照を返す"""
         if self.duration is None:
             raise ValueError("duration is None")
-        d, s = self.duration, self.SAMPLING_PERIOD
+        d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
         if self.__iq__ is None or int(d // s) + 1 != self.__iq__.shape[0]:
             self.__iq__ = np.zeros(int(d // s) + 1).astype(complex)  # iq data
@@ -1044,11 +907,82 @@ class Arbit(Waveform, TargetHolder):
         return self.__iq__
 
 
-# class Sampler:
-#     @classmethod
+class Sampler:
+    @classmethod
+    def create_sampling_timing(
+        cls,
+        begin: float,
+        duration: float,
+        over_sampling_ratio: int = 1,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
+        difference_type: str = "back",
+        endpoint: bool = False,
+    ) -> NDArray[np.float]:
+        """サンプル時系列 t 生成する。ratio 倍にオーバーサンプルする。"""
 
+        dt = 1 * sampling_period / over_sampling_ratio
+        if endpoint:
+            duration += dt
+        v = np.arange(ceil(begin, dt), ceil(begin + duration + dt, dt), dt)
+        if difference_type == "back":
+            return v[:-1]
+        elif difference_type == "center":
+            return 0.5 * (v[1:] + v[:-1])
+        else:
+            raise ValueError(f"difference_type={difference_type} is not supported")
 
-if __name__ == "__main__":
-    with Sequence() as sequence:
-        Slot()
-    print(sequence)
+    @classmethod
+    def _sample(
+        self,
+        sampling_timing: NDArray[np.float32],
+        waveforms: List[Waveform],
+    ) -> NDArray[np.complex64]:
+        def func(t: float) -> complex:
+            for w in waveforms:
+                if w.begin is None or w.duration is None:
+                    raise ValueError("begin or duration is None")
+                if (w.begin <= t) and (t < w.begin + w.duration):
+                    return w._func(t)
+            return 0 + 0j
+
+        return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
+
+    def __init__(
+        self,
+        branch: SubSequenceBranch,
+        waveforms: List[Waveform],
+    ) -> None:
+        if not isinstance(branch, SubSequenceBranch):
+            raise ValueError("branch should be SubSequenceBranch")
+        self._branch = branch
+        self._waveforms = waveforms
+
+    def func(self, t: float) -> complex:
+        for waveform in self._waveforms:
+            b, d = waveform.begin, waveform.duration
+            if b is None or d is None:
+                raise ValueError("begin or duration is None")
+            if (b <= t) and (t < b + d):
+                return waveform._func(t)
+        return 0 + 0j
+
+    def sample(
+        self,
+        over_sampling_ratio: int = 1,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
+        difference_type: str = "back",
+        endpoint: bool = False,
+    ) -> Tuple[NDArray[np.float32], NDArray[np.complex64]]:
+        begin = self._branch.begin
+        duration = self._branch.duration
+        if begin is None or duration is None:
+            raise ValueError("begin or duration of branch is None")
+        t = self.create_sampling_timing(
+            begin,
+            duration,
+            over_sampling_ratio,
+            sampling_period,
+            difference_type,
+            endpoint,
+        )
+        return t, self._sample(t, self._waveforms)
