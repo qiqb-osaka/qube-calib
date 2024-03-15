@@ -914,9 +914,9 @@ class Sampler:
         begin: float,
         duration: float,
         over_sampling_ratio: int = 1,
-        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
         difference_type: str = "back",
         endpoint: bool = False,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> NDArray[np.float]:
         """サンプル時系列 t 生成する。ratio 倍にオーバーサンプルする。"""
 
@@ -957,32 +957,45 @@ class Sampler:
         self._branch = branch
         self._waveforms = waveforms
 
-    def func(self, t: float) -> complex:
-        for waveform in self._waveforms:
-            b, d = waveform.begin, waveform.duration
-            if b is None or d is None:
-                raise ValueError("begin or duration is None")
-            if (b <= t) and (t < b + d):
-                return waveform._func(t)
-        return 0 + 0j
-
     def sample(
         self,
         over_sampling_ratio: int = 1,
-        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
         difference_type: str = "back",
-        endpoint: bool = False,
-    ) -> Tuple[NDArray[np.float32], NDArray[np.complex64]]:
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
+    ) -> Tuple[
+        NDArray[np.complex64],
+        NDArray[np.float32],
+        Optional[NDArray[np.float32]],
+    ]:
         begin = self._branch.begin
         duration = self._branch.duration
         if begin is None or duration is None:
             raise ValueError("begin or duration of branch is None")
-        t = self.create_sampling_timing(
-            begin,
-            duration,
-            over_sampling_ratio,
-            sampling_period,
-            difference_type,
-            endpoint,
-        )
-        return t, self._sample(t, self._waveforms)
+        if difference_type == "center":
+            ts = self.create_sampling_timing(
+                begin,
+                duration,
+                over_sampling_ratio=over_sampling_ratio,
+                difference_type="center",
+                endpoint=False,
+                sampling_period=sampling_period,
+            )
+            t = self.create_sampling_timing(
+                begin,
+                duration,
+                over_sampling_ratio=over_sampling_ratio,
+                difference_type="back",
+                endpoint=True,
+                sampling_period=sampling_period,
+            )
+            return self._sample(ts, self._waveforms), t, ts
+        else:
+            ts = self.create_sampling_timing(
+                begin,
+                duration,
+                over_sampling_ratio=over_sampling_ratio,
+                difference_type=difference_type,
+                endpoint=False,
+                sampling_period=sampling_period,
+            )
+            return self._sample(ts, self._waveforms), ts, None
