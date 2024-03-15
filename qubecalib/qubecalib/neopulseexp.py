@@ -198,14 +198,7 @@ class Sequence(DequeWithContext):
             tree.branch(SubSequenceBranch())
             SubSequence.create_tree(tree, item)
             _items.append(tree)
-            # for _ in item:
-            #     tree.append(_)
-        print(_items)
-        # print(_items)
         for item in _items:
-            print(item._nodes_items)
-        for item in _items:
-            # if isinstance(item, SequenceTree):
             # ノード番号を更新してサブツリーをローカルツリーとマージする
             # TODO この辺は tree で吸収すべき
             _tree = item
@@ -279,9 +272,7 @@ class Sequence(DequeWithContext):
             for node in _tree.breadth_first_search()[1:]:
                 self._tree._nodes_items[node + offset] = _tree._nodes_items[node]
                 self._tree._tree._cost[node + offset] = -1
-        # else:
-        #     slot = item
-        #     self._tree.append(slot)
+        self._validate_nodes_items()  # for debug
 
     def _get_tree(self) -> Tree:
         if self._tree is None:
@@ -311,6 +302,13 @@ class Sequence(DequeWithContext):
             for _ in nodes_items.values()
             if isinstance(_, TargetHolder)
         }
+
+    def _validate_nodes_items(self) -> None:
+        for node, item in self._tree._nodes_items.items():
+            if not isinstance(item, Branch):
+                continue
+            if node != item._next_node:
+                raise ValueError("invalid status of item")
 
 
 class SubSequenceBranch(Branch):
@@ -713,10 +711,10 @@ def ceil(value: float, unit: float = 1) -> float:
     Returns:
         float: 丸めた値
     """
-    MAGNIFIER = 1_000_000
+    MAGNIFIER = 1_000_000_000_000_000_000
 
     # unit が循環小数の場合に丸めなければならない場合がある
-    if value % unit < 1e-9:
+    if value % unit < 1e-18 and value % unit != 0:
         return value
 
     value, unit = int(value * MAGNIFIER), int(unit * MAGNIFIER)
@@ -785,9 +783,7 @@ class Modifier(Slot, TargetHolder):
 #         return np.frompyfunc(self.func, 1, 1)(t).astype(complex)
 
 
-class SlotWithIQ(Slot):
-    SAMPLING_PERIOD: Final[float] = 2e-9
-
+class Waveform(Slot):
     def __init__(self, duration: Optional[float] = None) -> None:
         self.amplitude = 1.0
         self.phase = 0.0  # radian
@@ -797,51 +793,59 @@ class SlotWithIQ(Slot):
         super().__init__(duration=duration)
 
     def func(self, t: float) -> complex:
+        """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を定義したもの"""
         raise NotImplementedError()
         return 0
 
-    def cmag_func(self, t: float) -> complex:
-        return self.func(t) * self.amplitude * np.exp(1j * self.phase)
+    def _func(self, t: float) -> complex:
+        """func() に対して複素振幅とローカル時間軸を配慮したもの"""
+        if self.begin is None or self.duration is None:
+            raise ValueError(
+                "Either or both 'begin' and 'duration' are not initialized."
+            )
+        if t < self.begin or self.begin + self.duration < t:
+            return 0 + 0j
+        return self.func(t - self.begin) * self.amplitude * np.exp(1j * self.phase)
 
     def ufunc(self, t: NDArray) -> NDArray:
-        return np.frompyfunc(self.cmag_func, 1, 1)(t).astype(complex)
+        return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
     # def virtual_z(self, theta):
     #     self.__virtual_z_theta__ = theta
 
-    @property
-    def iq(self) -> Optional[NDArray]:
-        if self.begin is None or self.duration is None:
-            raise ValueError(
-                "Either or both 'begin' and 'duration' are not initialized."
-            )
-        self.__iq__ = self.ufunc(self.sampling_points_zero)  # * np.exp(
-        # 1j * self.__virtual_z_theta__
-        # )
-        return self.__iq__
+    # @property
+    # def iq(self) -> Optional[NDArray]:
+    #     if self.begin is None or self.duration is None:
+    #         raise ValueError(
+    #             "Either or both 'begin' and 'duration' are not initialized."
+    #         )
+    #     self.__iq__ = self.ufunc(self.sampling_points_zero)  # * np.exp(
+    #     # 1j * self.__virtual_z_theta__
+    #     # )
+    #     return self.__iq__
 
-    @property
-    def sampling_points(self) -> NDArray:
-        if self.begin is None or self.duration is None:
-            raise ValueError(
-                "Either or both 'begin' and 'duration' are not initialized."
-            )
-        return np.arange(
-            ceil(self.begin, 2e-9),
-            ceil(self.begin + self.duration, 2e-9),
-            self.SAMPLING_PERIOD,
-        )  # sampling points [ns]
+    # @property
+    # def sampling_points(self) -> NDArray:
+    #     if self.begin is None or self.duration is None:
+    #         raise ValueError(
+    #             "Either or both 'begin' and 'duration' are not initialized."
+    #         )
+    #     return np.arange(
+    #         ceil(self.begin, 2e-9),
+    #         ceil(self.begin + self.duration, 2e-9),
+    #         self.SAMPLING_PERIOD,
+    #     )  # sampling points [ns]
 
-    @property
-    def sampling_points_zero(self) -> NDArray:
-        if self.begin is None:
-            raise ValueError(
-                "Either or both 'begin' and 'duration' are not initialized."
-            )
-        return self.sampling_points - self.begin  # sampling points [ns]
+    # @property
+    # def sampling_points_zero(self) -> NDArray:
+    #     if self.begin is None:
+    #         raise ValueError(
+    #             "Either or both 'begin' and 'duration' are not initialized."
+    #         )
+    #     return self.sampling_points - self.begin  # sampling points [ns]
 
 
-class RaisedCosFlatTop(SlotWithIQ, TargetHolder):
+class RaisedCosFlatTop(Waveform, TargetHolder):
     """
     Raised Cosine FlatTopパルス
 
@@ -862,7 +866,7 @@ class RaisedCosFlatTop(SlotWithIQ, TargetHolder):
     ):
         # self.ampl = 1.0
         # self.phase = 0.0
-        self.rise_time = rise_time
+        self._rise_time = rise_time
 
         super().__init__(duration)
 
@@ -877,22 +881,36 @@ class RaisedCosFlatTop(SlotWithIQ, TargetHolder):
         t4 = t3 + self.rise_time  # 立ち下がり完了時刻
 
         if (t1 <= t) & (t < t2):  # 立ち上がり時間領域の条件ブール値
-            v = (1.0 - np.cos(np.pi * (t - t1) / self.rise_time)) / (
-                2.0 + 0.0j
-            )  # 立ち上がり時間領域
-        elif (t2 <= t) & (t < t3):  # 一定値領域の条件ブール値
-            v = 1.0 + 0.0j  # 一定値領域
-        elif (t3 <= t) & (t < t4):  # 立ち下がり時間領域の条件ブール値
-            v = (1.0 - np.cos(np.pi * (t4 - t) / self.rise_time)) / (
-                2.0 + 0.0j
-            )  # 立ち下がり時間領域
-        else:
-            v = 0.0 + 0.0j
+            # 立ち上がり時間領域の値
+            return (1.0 - np.cos(np.pi * (t - t1) / self.rise_time)) / 2.0
+        if (t2 <= t) & (t < t3):  # 一定値領域の条件ブール値
+            # 一定値領域の値
+            return 1.0 + 0.0j
+        if (t3 <= t) & (t < t4):  # 立ち下がり時間領域の条件ブール値
+            # 立ち下がり時間領域の値
+            return (1.0 - np.cos(np.pi * (t4 - t) / self.rise_time)) / 2.0
+        return 0.0 + 0.0j
 
-        return v  # * self.ampl * np.exp(1j * self.phase)
+    @property
+    def rise_time(self) -> Optional[float]:
+        return self._rise_time
+
+    @rise_time.setter
+    def rise_time(self, rise_time: float) -> None:
+        if not isinstance(self._rise_time, float):
+            raise ValueError(f"{type(rise_time)} is invalid")
+        if self.duration is None:
+            raise ValueError("duration is None")
+        print(rise_time, self.duration)
+        if self.duration < rise_time * 2:
+            raise ValueError(f"{rise_time} is too long")
+
+        self._rise_time = rise_time
+
+        # return v  # * self.ampl * np.exp(1j * self.phase)
 
 
-class Rectangle(SlotWithIQ, TargetHolder):
+class Rectangle(Waveform, TargetHolder):
     def __init__(self, duration: Optional[float] = None):
         super().__init__(duration)
 
@@ -900,79 +918,134 @@ class Rectangle(SlotWithIQ, TargetHolder):
         return 1 + 0j
 
 
-class Arbit(SlotWithIQ, TargetHolder):
+class Arbit(Waveform, TargetHolder):
     """ "サンプリング点を直接与えるためのオブジェクト"""
+
+    SAMPLING_PERIOD: Final[float] = 2e-9
 
     def __init__(
         self,
         duration: Optional[float] = None,
         init: Optional[complex] = None,
     ):
+        super().__init__(duration)
         if init is None:
             self.init = 0 + 0j
         else:
             self.init = init
-        super().__init__(duration)
+        self.__iq__: Optional[NDArray] = None
 
-    # @observe("duration")
-    # def notify_duration_change(self, e):
-    #     self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(
-    #         complex
-    #     )  # iq data
-
-    def ufunc(self, t: Optional[NDArray] = None) -> NDArray:
-        """
-        iq データを格納している numpy array への参照を返す
-
-        Parameters
-        ----------
-        t : numpy.ndarray(float)
-            与えると対象の時間列に則した点数にサンプルした iq データを返す
-        """
+    def func(self, t: float) -> complex:
+        """iq データを格納している numpy array に従って iq(t) の値を返す"""
+        # ローカル時間軸を返すのに注意
         if self.__iq__ is None:
             raise ValueError("__iq__ is None")
-        if t is None:
-            return self.__iq__
-        else:
-            if self.begin is None or self.duration is None:
-                raise ValueError("begin or duration is None")
-            rslt = np.zeros(t.shape).astype(complex)
-            b, e = self.begin, self.begin + self.duration
-            iq = self.__iq__
-            idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
-            # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
-            # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
-            # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
-            # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
-            q, m = t[idx].shape[0], iq.shape[0]
-            n = int(q // m)
-            v = (
-                np.stack(
-                    n
-                    * [
-                        iq,
-                    ]
-                )
-                .transpose()
-                .reshape(n * m)
-            )
-            o = v.shape[0]
+        if self.begin is None or self.duration is None:
+            raise ValueError("begin or duration is None")
 
-            if q == o:
-                rslt[idx] = v
-            elif q < o:
-                rslt[idx] = v[: (q - o)]
-            else:
-                idx[(o - q) :] = False
-                rslt[idx] = v
+        d, s = self.duration, self.SAMPLING_PERIOD
+        if 0 <= t and t < d:
+            t0 = np.arange(int(d // s) + 1) * s
+            boolean = (t0 <= t) * (t - s < t0)
+            return self.__iq__[boolean][0]
 
-            return rslt
+        return 0 + 0j
+
+        # # rslt = np.zeros(t.shape).astype(complex)
+        # b, e = self.begin, self.begin + self.duration
+        # iq = self.__iq__
+        # idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
+        # # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
+        # # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
+        # # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
+        # # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
+        # q, m = t[idx].shape[0], iq.shape[0]
+        # n = int(q // m)
+        # v = (
+        #     np.stack(
+        #         n
+        #         * [
+        #             iq,
+        #         ]
+        #     )
+        #     .transpose()
+        #     .reshape(n * m)
+        # )
+        # o = v.shape[0]
+
+        # if q == o:
+        #     rslt[idx] = v
+        # elif q < o:
+        #     rslt[idx] = v[: (q - o)]
+        # else:
+        #     idx[(o - q) :] = False
+        #     rslt[idx] = v
+
+        # return rslt
+
+    # def ufunc(self, t: Optional[NDArray] = None) -> NDArray:
+    #     """
+    #     iq データを格納している numpy array への参照を返す
+
+    #     Parameters
+    #     ----------
+    #     t : numpy.ndarray(float)
+    #         与えると対象の時間列に則した点数にサンプルした iq データを返す
+    #     """
+    #     if self.__iq__ is None:
+    #         raise ValueError("__iq__ is None")
+    #     if t is None:
+    #         return self.__iq__
+    #     else:
+    #         if self.begin is None or self.duration is None:
+    #             raise ValueError("begin or duration is None")
+    #         rslt = np.zeros(t.shape).astype(complex)
+    #         b, e = self.begin, self.begin + self.duration
+    #         iq = self.__iq__
+    #         idx = (ceil(b, 2) <= t + b) & (t + b < ceil(e, 2))
+    #         # 開始点が 31.999968 の様に誤差を含む場合に開始点を含む
+    #         # idx[0] = True if ceil(b, 2) - (t + b)[idx][0] < 1e-4 else False
+    #         # 終点が 41.999968 の様に誤差を含む場合に終点を除外する
+    #         # idx[-1] = False if ceil(e,2) - (t + b)[idx][-1] < 1e-4 else True
+    #         q, m = t[idx].shape[0], iq.shape[0]
+    #         n = int(q // m)
+    #         v = (
+    #             np.stack(
+    #                 n
+    #                 * [
+    #                     iq,
+    #                 ]
+    #             )
+    #             .transpose()
+    #             .reshape(n * m)
+    #         )
+    #         o = v.shape[0]
+
+    #         if q == o:
+    #             rslt[idx] = v
+    #         elif q < o:
+    #             rslt[idx] = v[: (q - o)]
+    #         else:
+    #             idx[(o - q) :] = False
+    #             rslt[idx] = v
+
+    #         return rslt
 
     @property
-    def iq_array(self) -> NDArray:
-        if self.__iq__ is None:
-            raise ValueError("__iq__ is None")
+    def iq(self) -> NDArray:
+        """iq データを格納している numpy array への参照を返す"""
+        if self.duration is None:
+            raise ValueError("duration is None")
+        d, s = self.duration, self.SAMPLING_PERIOD
+        # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
+        if self.__iq__ is None or int(d // s) + 1 != self.__iq__.shape[0]:
+            self.__iq__ = np.zeros(int(d // s) + 1).astype(complex)  # iq data
+
         return self.__iq__
+
+
+# class Sampler:
+#     @classmethod
 
 
 if __name__ == "__main__":

@@ -731,26 +731,31 @@ class QubeCalib:
     ) -> Tuple[Any, Quel1Box | Quel1BoxIntrinsic]:
         box_setting = self._box_settings[box_name_or_alias]
 
-        _, _, _, _, box = create_box_objects(
-            refer_by_port=refer_by_port,
+        box = Quel1Box.create(
             **box_setting.asdict(),
         )
-        if not isinstance(box, Quel1Box):
-            raise ValueError(f"unsupported boxtype: {box_setting.boxtype}")
-
-        link_status: bool = True
-        if not box.init().values():
-            # print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
-            if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
-                logger.warning(
-                    f"crc error has been detected on MxFEs of {box_name_or_alias}"
-                )
-            else:
+        # if not isinstance(box, Quel1Box):
+        #     raise ValueError(f"unsupported boxtype: {box_setting.boxtype}")
+        status = box.reconnect()
+        for mxfe_idx, s in status.items():
+            if not s:
                 logger.error(
-                    f"datalink between MxFE and FPGA of {box_name_or_alias} is not working"
+                    f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                 )
-                link_status = False
-        return link_status, box
+
+        # link_status: bool = True
+        # if not box.init().values():
+        #     # print(box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values())
+        #     if box.init(ignore_crc_error_of_mxfe=box.css.get_all_groups()).values():
+        #         logger.warning(
+        #             f"crc error has been detected on MxFEs of {box_name_or_alias}"
+        #         )
+        #     else:
+        #         logger.error(
+        #             f"datalink between MxFE and FPGA of {box_name_or_alias} is not working"
+        #         )
+        #         link_status = False
+        return status, box
 
     def create_single_box(
         self, setting: Dict[str, BoxSetting]
