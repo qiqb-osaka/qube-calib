@@ -113,7 +113,6 @@ class SlotWithIQ(Slot):
         self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(
             complex
         )  # iq data
-        self.__iq__[:] = self.init
 
     @property
     def sampling_points(self):
@@ -134,6 +133,13 @@ class Arbit(SlotWithIQ, ChannelMixin):
         else:
             self.init = 0 + 0j
         super().__init__(**kw)
+
+    @observe("duration")
+    def notify_duration_change(self, e):
+        self.__iq__ = np.zeros(int(self.duration // self.SAMPLING_PERIOD)).astype(
+            complex
+        )  # iq data
+        self.__iq__[:] = self.init
 
     def update_iq(self):
         pass
