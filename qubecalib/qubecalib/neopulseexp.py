@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Final, List, MutableSequence, Optional, Tuple
 
 import numpy as np
@@ -90,9 +91,13 @@ class ContextNode:
 
 
 class Item:
-    def __init__(self, duration: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        duration: Optional[float] = None,
+        begin: Optional[float] = None,
+    ) -> None:
         self._duration = duration
-        self.begin: Optional[float] = None
+        self.begin: Optional[float] = begin
 
     @property
     def duration(self) -> Optional[float]:
@@ -101,6 +106,12 @@ class Item:
     @duration.setter
     def duration(self, duration: float) -> None:
         self._duration = duration
+
+    @property
+    def end(self) -> float:
+        if self.begin is None or self.duration is None:
+            raise ValueError("begin or duration is None")
+        return self.begin + self.duration
 
     def __repr__(self) -> str:
         return (
@@ -283,7 +294,7 @@ class Sequence(DequeWithContext):
 
     def _get_group_items_by_target(
         self,
-    ) -> Dict[str, Dict[Optional[int], MutableSequence[TargetHolder]]]:
+    ) -> Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]]:
         nodes_items = self._tree._nodes_items
         subsequences = [
             _
@@ -300,6 +311,7 @@ class Sequence(DequeWithContext):
                     if node in self._tree.breadth_first_search(sub._root_node)
                 ]
                 for sub in subsequences
+                if sub._next_node is not None
             }
             for _ in nodes_items.values()
             if isinstance(_, TargetHolder)
@@ -312,12 +324,137 @@ class Sequence(DequeWithContext):
             if node != item._next_node:
                 raise ValueError("invalid status of item")
 
+    def _create_gen_sampled_sequence(
+        self,
+        target_name: str,
+        targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
+        sampling_period: float = 2e-9,
+    ) -> GenSampledSequence:
+        items: Dict[int, MutableSequence[Waveform]] = {
+            edge: [slot for slot in slots if isinstance(slot, Waveform)]
+            for edge, slots in targets_items[target_name].items()
+        }
+        edges_items = {
+            _: __
+            for _, __ in self._tree._nodes_items.items()
+            if isinstance(__, SubSequenceBranch)
+        }
+        subseq_edges = [
+            edge for edge, _ in items.items() if _
+        ]  # waveform を保持する subseq の edge_number
+        subseqs = [
+            edges_items[_]
+            for _ in subseq_edges
+            if isinstance(edges_items[_], SubSequenceBranch)
+        ]
+        nodes: List[float] = sum(
+            [[0]] + [[_.begin, _.end] for _ in subseqs],
+            [],
+        )
+        blanks = [end - begin for begin, end in zip(nodes[:-1:2], nodes[1::2])] + [None]
+        sampled_subsequences = [
+            GenSampledSubSequence(
+                real=np.real(v),
+                imag=np.imag(v),
+                repeats=repeats,
+                post_blank=int(blank / sampling_period) if blank is not None else None,
+            )
+            for (v, _, _), repeats, blank in [
+                (
+                    Sampler(subseq, slots).sample(
+                        over_sampling_ratio=1, difference_type="center"
+                    ),
+                    subseq.repeats,
+                    post_blank,
+                )
+                for subseq, slots, post_blank in zip(
+                    [edges_items[_] for _ in subseq_edges],
+                    [items[_] for _ in subseq_edges],
+                    [_ for _ in blanks][1:],
+                )
+            ]
+        ]
+        # print([edges_items[_] for _ in subseq_edges])
+        # print([items[_] for _ in subseq_edges])
+        # print(blanks)
+        # print([_ for _ in blanks if isinstance(_, float)][1:])
+        # print(
+        #     [
+        #         [subseq, slots, post_blank]
+        #         for subseq, slots, post_blank in zip(
+        #             [edges_items[_] for _ in subseq_edges],
+        #             [items[_] for _ in subseq_edges],
+        #             [_ for _ in blanks][1:],
+        #         )
+        #     ]
+        # )
+        if blanks[0] is None:
+            raise ValueError("first element of blanks is None")
+        return GenSampledSequence(
+            target_name=target_name,
+            prev_blank=int(blanks[0] / sampling_period),
+            post_blank=None,
+            repeats=None,
+            sampling_period=sampling_period,
+            sub_sequences=sampled_subsequences,
+        )
+
+    def _create_sampled_sequence(self) -> Dict[str, SampledSequenceBase]:
+        targets_items = self._get_group_items_by_target()
+        return {
+            _: self._create_gen_sampled_sequence(_, targets_items)
+            for _ in targets_items
+        }
+
+    def _create_cap_sampled_sequence(
+        self,
+        target_name: str,
+        targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
+        sampling_period: float = 2e-9,
+    ) -> CapSampledSequence:
+        return
+
+    def _create_cap_sampled_sequence_(self) -> Dict[str, SampledSequenceBase]:
+        targets_items = self._get_group_items_by_target()
+        # return {
+        #     _: self._create_gen_sampled_sequence(_, targets_items)
+        #     for _ in targets_items
+        # }
+        return {
+            _: self._create_cap_sampled_sequence(_, targets_items)
+            for _ in targets_items
+        }
+
 
 class SubSequenceBranch(Branch):
-    pass
+    def __init__(self, repeats: int = 1) -> None:
+        super().__init__()
+        self.repeats = repeats
+
+    @property
+    def repeats(self) -> int:
+        return self._repeats
+
+    @repeats.setter
+    def repeats(self, repeats: int) -> None:
+        if not isinstance(repeats, int):
+            raise ValueError("repeats must be int")
+        self._repeats = repeats
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, repeats={self.repeats})"
 
 
 class SubSequence(DequeWithContext):
+    def __init__(self, repeats: int = 1) -> None:
+        if not isinstance(repeats, int):
+            raise ValueError("repeats must be int")
+        self._repeats = repeats
+
+    @property
+    def repeats(self) -> int:
+        return self._repeats
+
     def __exit__(
         self,
         exception_type: Any,
@@ -328,7 +465,7 @@ class SubSequence(DequeWithContext):
         # このブランチ用のローカルツリーを作る
         tree = SequenceTree()
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
-        tree.branch(SubSequenceBranch())
+        tree.branch(SubSequenceBranch(repeats=self.repeats))
         SubSequence.create_tree(tree, self)
         # with 内の定義の所定の位置にツリーを追加
         __rc__.contexts[-1].append(tree)
@@ -663,48 +800,8 @@ class Flushright(DequeWithContext):
                 tree._active_node = branch._root_node
 
 
-@dataclass
-class SampledSequenceBase:
-    target_name: str
-    first_blank: float = 0  # second
-    sampling_period: float = 2e-9  # second
-
-    def asdict(self) -> Dict:
-        return {}
-
-
-@dataclass
-class GenSampledSequence(SampledSequenceBase):
-    sub_sequences: List[GenSampledSubSequence] = field(default_factory=list)
-
-
-@dataclass
-class GenSampledSubSequence:
-    real: NDArray[np.float64]
-    imag: NDArray[np.float64]
-    post_blank: float  # second
-    repeat: int
-
-    def asdict(self) -> Dict:
-        return {}
-
-
-@dataclass
-class CapSampledSequence(SampledSequenceBase):
-    sub_sequences: List[CapSampledSubSequence] = field(default_factory=list)
-
-
-@dataclass
-class CapSampledSubSequence:
-    duration: float  # second
-    bost_blank: float  # second
-
-    def asdict(self) -> Dict:
-        return {}
-
-
 def ceil(value: float, unit: float = 1) -> float:
-    """valueの値を指定したunitの単位でその要素以上の最も近い数値に丸める
+    """valueの値を指定したunitの単位でその要素以上の最も近い数値に丸める（正の無限大へ丸める）
 
     Args:
         value (float): 対象の値
@@ -713,17 +810,48 @@ def ceil(value: float, unit: float = 1) -> float:
     Returns:
         float: 丸めた値
     """
-    MAGNIFIER = 1_000_000_000_000_000_000
-
-    # unit が循環小数の場合に丸めなければならない場合がある
-    if value % unit < 1e-18 and value % unit != 0:
-        return value
-
-    value, unit = int(value * MAGNIFIER), int(unit * MAGNIFIER)
-    if value % unit:
-        return int((value // unit + 1) * unit) / MAGNIFIER
+    exponent = math.floor(math.log10(unit))
+    mantissa = unit * 10 ** (-exponent)
+    retval = None
+    if exponent < 0:
+        retval = (
+            math.ceil(value * 10 ** (-exponent) / mantissa) * mantissa * 10**exponent
+        )
     else:
-        return int((value // unit) * unit) / MAGNIFIER
+        retval = (
+            math.ceil(value / 10 ** (exponent) / mantissa) * mantissa * 10**exponent
+        )
+    if (retval - unit) - value < 1e-16:
+        return retval - unit
+    else:
+        return retval
+
+
+def floor(value: float, unit: float = 1) -> float:
+    """valueの値を指定したunitの単位でその要素以下の最も近い数値に丸める（負の無限大へ丸める）
+
+    Args:
+        value (float): 対象の値
+        unit (float, optional): 丸める単位. Defaults to 1.
+
+    Returns:
+        float: 丸めた値
+    """
+    exponent = math.floor(math.log10(unit))
+    mantissa = unit * 10 ** (-exponent)
+    retval = None
+    if exponent < 0:
+        retval = (
+            math.floor(value * 10 ** (-exponent) / mantissa) * mantissa * 10**exponent
+        )
+    else:
+        retval = (
+            math.floor(value / 10 ** (exponent) / mantissa) * mantissa * 10**exponent
+        )
+    if (retval + unit) - value < 1e-16:
+        return retval + unit
+    else:
+        return retval
 
 
 class TargetHolder:
@@ -923,7 +1051,9 @@ class Sampler:
         dt = 1 * sampling_period / over_sampling_ratio
         if endpoint:
             duration += dt
-        v = np.arange(ceil(begin, dt), ceil(begin + duration + dt, dt), dt)
+        v = np.arange(
+            math.ceil(begin / dt) * dt, math.ceil((begin + duration + dt) / dt) * dt, dt
+        )
         if difference_type == "back":
             return v[:-1]
         elif difference_type == "center":
@@ -935,7 +1065,7 @@ class Sampler:
     def _sample(
         self,
         sampling_timing: NDArray[np.float32],
-        waveforms: List[Waveform],
+        waveforms: MutableSequence[Waveform],
     ) -> NDArray[np.complex64]:
         def func(t: float) -> complex:
             for w in waveforms:
@@ -950,7 +1080,7 @@ class Sampler:
     def __init__(
         self,
         branch: SubSequenceBranch,
-        waveforms: List[Waveform],
+        waveforms: MutableSequence[Waveform],
     ) -> None:
         if not isinstance(branch, SubSequenceBranch):
             raise ValueError("branch should be SubSequenceBranch")
@@ -999,3 +1129,75 @@ class Sampler:
                 sampling_period=sampling_period,
             )
             return self._sample(ts, self._waveforms), ts, None
+
+
+# TODO 空の sub_sequence の処理が省かれているので追加する
+# TODO subsequence の repeats 処理が曖昧なので追加する
+
+
+# @dataclass
+# class CapSampledSubSequence:
+#     duration: float  # second
+#     bost_blank: float  # second
+
+#     def asdict(self) -> Dict:
+#         return {}
+
+
+@dataclass
+class SampledSequenceBase:
+    target_name: str
+    prev_blank: int = 0  # words
+    post_blank: Optional[int] = None
+    repeats: Optional[int] = None
+    sampling_period: float = 2e-9  # second
+
+    def asdict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
+class GenSampledSequence(SampledSequenceBase):
+    sub_sequences: List[GenSampledSubSequence] = field(default_factory=list)
+
+    def asdict(self) -> Dict:
+        return super().asdict() | {
+            "sub_sequences": [_.asdict() for _ in self.sub_sequences],
+            "class": self.__class__.__name__,
+        }
+
+
+@dataclass
+class GenSampledSubSequence:
+    real: NDArray[np.float64]
+    imag: NDArray[np.float64]
+    post_blank: int  # samples
+    repeats: int
+
+    def asdict(self) -> Dict:
+        return {
+            "real": self.real.tolist(),
+            "imag": self.imag.tolist(),
+            "post_blank": self.post_blank,
+            "repeats": self.repeats,
+        }
+
+
+@dataclass
+class CapSampledSequence(SampledSequenceBase):
+    sub_sequences: List[CapSampledSubSequence] = field(default_factory=list)
+
+
+@dataclass
+class CapSampledSubSequence:
+    duration: int  # samples
+    post_blank: int  # samples
+
+    def asdict(self) -> Dict:
+        return {}
+
+
+@dataclass
+class CaptureSlots:
+    duration: int  # samples
+    post_blank: int  # samples
