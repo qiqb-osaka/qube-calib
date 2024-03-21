@@ -330,25 +330,28 @@ class Sequence(DequeWithContext):
         targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
         sampling_period: float = 2e-9,
     ) -> GenSampledSequence:
+        # edge と item の対応マップ
         items: Dict[int, MutableSequence[Waveform]] = {
             edge: [slot for slot in slots if isinstance(slot, Waveform)]
             for edge, slots in targets_items[target_name].items()
         }
+        # edge と subseq との対応マップ
         edges_items = {
             _: __
             for _, __ in self._tree._nodes_items.items()
             if isinstance(__, SubSequenceBranch)
         }
-        subseq_edges = [
-            edge for edge, _ in items.items() if _
-        ]  # waveform を保持する subseq の edge_number
+        # 空でない（waveform を保持する）subseq の edge_number
+        subseq_edges = [edge for edge, _ in items.items() if _]
+        # 空でない subseq のリスト
         subseqs = [
             edges_items[_]
             for _ in subseq_edges
             if isinstance(edges_items[_], SubSequenceBranch)
         ]
+        # subseq のノード
         nodes: List[float] = sum(
-            [[0]] + [[_.begin, _.end] for _ in subseqs],
+            [[0]] + [[_.begin, _.end - _.post_blank] for _ in subseqs],
             [],
         )
         blanks = [end - begin for begin, end in zip(nodes[:-1:2], nodes[1::2])] + [None]
@@ -401,65 +404,135 @@ class Sequence(DequeWithContext):
         sampling_period: float = 2e-9,
     ) -> CapSampledSequence:
         edges_items = self._tree._nodes_items
-        # waveform を保持する subseq の edge_number
-        subseq_edges = [edge for edge, _ in targets_items[target_name].items() if _]
+        # waveform を保持する（空でない） subseq の edge_number を begin に対して昇順に並べたもの
+        subseq_edges = sorted(
+            [edge for edge, _ in targets_items[target_name].items() if _],
+            key=lambda x: edges_items[x].begin,
+        )
         # waveform を保持する subseq
-        subseqs = [
-            edges_items[_]
-            for _ in subseq_edges
-            # if isinstance(edges_items[_], SubSequenceBranch)
-        ]
+        subseqs: Dict[int, SubSequenceBranch] = {
+            edge: _
+            for edge, _ in [[edge, edges_items[edge]] for edge in subseq_edges]
+            if isinstance(_, SubSequenceBranch) and isinstance(edge, int)
+        }
         # subseq の境界をサンプリング周期にアライメントする（負の無限大へ丸める）
-        _subseqs = Utils.align_items(
-            sorted(
-                [_ for _ in subseqs],
-                key=lambda x: x.begin,
+        _subseqs = {
+            edge: items
+            for edge, items in zip(
+                subseq_edges,
+                Utils.align_items(
+                    [
+                        Item(
+                            duration=_._total_duration_contents,
+                            begin=_.begin,
+                        )
+                        for _ in [subseqs[edge] for edge in subseq_edges]
+                        if isinstance(_, SubSequenceBranch)
+                        if _._total_duration_contents is not None
+                    ],
+                ),
             )
-        )
+        }
         # 全体の領域長も含めて alignment した subseq のノードを抽出する
-        _nodes: List[Any] = sum(
-            [[0.0]] + [[_.begin, _.end] for _ in subseqs] + [[None]],
-            [],
-        )
-        # 奇数 edge 長を blank, 偶数 edge 長を aligned subseq 長として抽出
-        _blanks = [
-            end - begin if end is not None and begin is not None else None
-            for begin, end in zip(_nodes[:-1:2], _nodes[1::2])
-        ]
+        # _subseq_nodes: List[Any] = sum(
+        #     [[0.0]] + [[_.begin, _.end - _.post_blank] for _ in subseqs] + [[None]],
+        #     [],
+        # )
+        # print(_subseq_nodes)
+        # # 奇数 edge 長を blank, 偶数 edge 長を aligned subseq 長として抽出
+        # _blanks = [
+        #     end - begin if end is not None and begin is not None else None
+        #     for begin, end in zip(_nodes[:-1:2], _nodes[1::2])
+        # ]
+        # slot を alignment する
         _slots = {
-            subseq_edge: targets_items[target_name][subseq_edge]
+            subseq_edge: Utils.align_items(
+                sorted(
+                    [
+                        Item(duration=_.duration, begin=_.begin)
+                        for _ in targets_items[target_name][subseq_edge]
+                    ],
+                    key=lambda x: x.begin,
+                )
+            )
             for subseq_edge in subseq_edges
         }
+        # subseq 毎に slot を含んだ blank と duration の境界 node リストを生成する
+        _nodes: Dict[int, MutableSequence[float] | MutableSequence] = {
+            _: sum(
+                [[_subseqs[_].begin]]
+                + [[__.begin, __.end] for __ in _slots[_]]
+                + [[_subseqs[_].end]],
+                [],
+            )
+            for _ in subseq_edges
+        }
+        # print(_subseqs)
+        # print(_slots)
+        _blanks = {
+            _: [end - begin for begin, end in zip(_nodes[_][:-1:2], _nodes[_][1::2])]
+            for _ in subseq_edges
+        }
+        _durations = {
+            _: [end - begin for begin, end in zip(_nodes[_][1:-1:2], _nodes[_][2::2])]
+            for _ in subseq_edges
+        }
+        # print(_nodes)
+        # print(_blanks)
+        # print(_durations)
+        toplevel_prev_blank = 0
+        toplevel_post_blank: Optional[float] = None
         return CapSampledSequence(
             target_name,
-            prev_blank=round(_blanks[0] / sampling_period),
-            post_blank=None,
+            prev_blank=round(toplevel_prev_blank / sampling_period),
+            post_blank=round(toplevel_post_blank / sampling_period)
+            if toplevel_post_blank is not None
+            else None,
             repeats=None,
             sub_sequences=[
                 CapSampledSubSequence(
                     capture_slots=[
                         CaptureSlots(
                             duration=round(duration / sampling_period),
-                            post_blank=round(blank / sampling_period)
-                            if blank is not None
-                            else None,
+                            post_blank=round(blank / sampling_period),
                         )
-                        for duration, blank in zip(
-                            *Utils._create_duration_and_blanks(__slots, _subseq)
-                        )
+                        for blank, duration in zip(blanks[1:], durations)
                     ],
-                    post_blank=round(blank / sampling_period)
-                    if blank is not None
+                    prev_blank=round(blanks[0] / sampling_period),
+                    post_blank=round(subseq.post_blank / sampling_period)
+                    if subseq.post_blank is not None
                     else None,
-                    repeats=None,
+                    repeats=subseq.repeats,
                 )
-                for __slots, _subseq, blank in zip(
-                    _slots.values(),
-                    # [_ for _ in _subseqs if isinstance(_, SubSequenceBranch)],
-                    _subseqs,
-                    _blanks[1:],
-                )
+                for edge, subseq, blanks, durations in [
+                    [_, subseqs[_], _blanks[_], _durations[_]] for _ in subseq_edges
+                ]
             ],
+            # sub_sequences=[
+            #     CapSampledSubSequence(
+            #         capture_slots=[
+            #             CaptureSlots(
+            #                 duration=round(duration / sampling_period),
+            #                 post_blank=round(blank / sampling_period)
+            #                 if blank is not None
+            #                 else None,
+            #             )
+            #             for duration, blank in zip(
+            #                 *Utils._create_duration_and_blanks(__slots, _subseq)
+            #             )
+            #         ],
+            #         post_blank=round(blank / sampling_period)
+            #         if blank is not None
+            #         else None,
+            #         repeats=None,
+            #     )
+            #     for __slots, _subseq, blank in zip(
+            #         _slots.values(),
+            #         # [_ for _ in _subseqs if isinstance(_, SubSequenceBranch)],
+            #         _subseqs,
+            #         _blanks[1:],
+            #     )
+            # ],
         )
 
     def _create_cap_sampled_sequence_(self) -> Dict[str, SampledSequenceBase]:
@@ -510,9 +583,15 @@ class Utils:
 
 
 class SubSequenceBranch(Branch):
-    def __init__(self, repeats: int = 1) -> None:
+    def __init__(
+        self,
+        fixed_duration: Optional[float] = None,
+        repeats: int = 1,
+    ) -> None:
         super().__init__()
         self.repeats = repeats
+        self._fixed_duration = fixed_duration
+        self._total_duration_contents = None
 
     @property
     def repeats(self) -> int:
@@ -524,15 +603,56 @@ class SubSequenceBranch(Branch):
             raise ValueError("repeats must be int")
         self._repeats = repeats
 
+    @property
+    def fixed_duration(self) -> Optional[float]:
+        return self._fixed_duration
+
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, repeats={self.repeats})"
+        return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, post_blank={self.post_blank}, repeats={self.repeats})"
+
+    # def __repr__(self) -> str:
+    #     return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, repeats={self.repeats})"
+
+    def place(self, tree: SequenceTree) -> None:
+        # 最大長を計算する
+        for _ in tree.breadth_first_search(self._root_node)[1:]:
+            tree._tree._cost[_] = tree._nodes_items[_].duration
+        max_duration = max([_ for _ in tree._tree.evaluate(self._root_node).values()])
+        self._total_duration_contents = max_duration
+        # branch の duration は最大長に揃えると同時に cost も確定する
+        # SubSequence では全体長を指定することもできてその場合は指定値を優先する
+        if self._fixed_duration is None:
+            self.duration = max_duration
+        else:
+            if max_duration <= self._fixed_duration:
+                self.duration = self._fixed_duration
+            else:
+                raise ValueError(
+                    f"Fixed duration {self._fixed_duration} is too smaller than total duration {max_duration}."
+                )
+        if self._next_node is None:
+            raise ValueError("_next_node is None")
+        tree._tree._cost[self._next_node] = self.duration
+
+    @property
+    def post_blank(self) -> Optional[float]:
+        # # 最大長を計算する
+        # for _ in tree.breadth_first_search(self._root_node)[1:]:
+        #     tree._tree._cost[_] = tree._nodes_items[_].duration
+        # max_duration = max([_ for _ in tree._tree.evaluate(self._root_node).values()])
+        if self.duration is None:
+            raise ValueError("duration is None")
+        if self._total_duration_contents is None:
+            raise ValueError("place slot first")
+        return self.duration - self._total_duration_contents
 
 
 class SubSequence(DequeWithContext):
-    def __init__(self, repeats: int = 1) -> None:
+    def __init__(self, duration: Optional[float] = None, repeats: int = 1) -> None:
         if not isinstance(repeats, int):
             raise ValueError("repeats must be int")
         self._repeats = repeats
+        self._fixed_duration = duration
 
     @property
     def repeats(self) -> int:
@@ -548,7 +668,12 @@ class SubSequence(DequeWithContext):
         # このブランチ用のローカルツリーを作る
         tree = SequenceTree()
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
-        tree.branch(SubSequenceBranch(repeats=self.repeats))
+        tree.branch(
+            SubSequenceBranch(
+                fixed_duration=self._fixed_duration,
+                repeats=self.repeats,
+            )
+        )
         SubSequence.create_tree(tree, self)
         # with 内の定義の所定の位置にツリーを追加
         __rc__.contexts[-1].append(tree)
@@ -958,6 +1083,10 @@ class Range(Slot, TargetHolder):
         super().__init__(duration)
 
 
+class Capture(Range):
+    pass
+
+
 class Modifier(Slot, TargetHolder):
     def __init__(self) -> None:
         super().__init__(0)
@@ -1181,7 +1310,7 @@ class Sampler:
         Optional[NDArray[np.float32]],
     ]:
         begin = self._branch.begin
-        duration = self._branch.duration
+        duration = self._branch._total_duration_contents
         if begin is None or duration is None:
             raise ValueError("begin or duration of branch is None")
         if difference_type == "center":
@@ -1275,6 +1404,7 @@ class CapSampledSequence(SampledSequenceBase):
 class CapSampledSubSequence:
     capture_slots: MutableSequence[CaptureSlots]
     # duration: int  # samples
+    prev_blank: int  # samples
     post_blank: Optional[int]  # samples
     repeats: Optional[int]
 
