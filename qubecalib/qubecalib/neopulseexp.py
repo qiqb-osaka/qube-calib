@@ -357,7 +357,9 @@ class Sequence(DequeWithContext):
                 real=np.real(v),
                 imag=np.imag(v),
                 repeats=repeats,
-                post_blank=int(blank / sampling_period) if blank is not None else None,
+                post_blank=round(blank / sampling_period)
+                if blank is not None
+                else None,
             )
             for (v, _, _), repeats, blank in [
                 (
@@ -374,25 +376,11 @@ class Sequence(DequeWithContext):
                 )
             ]
         ]
-        # print([edges_items[_] for _ in subseq_edges])
-        # print([items[_] for _ in subseq_edges])
-        # print(blanks)
-        # print([_ for _ in blanks if isinstance(_, float)][1:])
-        # print(
-        #     [
-        #         [subseq, slots, post_blank]
-        #         for subseq, slots, post_blank in zip(
-        #             [edges_items[_] for _ in subseq_edges],
-        #             [items[_] for _ in subseq_edges],
-        #             [_ for _ in blanks][1:],
-        #         )
-        #     ]
-        # )
         if blanks[0] is None:
             raise ValueError("first element of blanks is None")
         return GenSampledSequence(
             target_name=target_name,
-            prev_blank=int(blanks[0] / sampling_period),
+            prev_blank=round(blanks[0] / sampling_period),
             post_blank=None,
             repeats=None,
             sampling_period=sampling_period,
@@ -412,18 +400,113 @@ class Sequence(DequeWithContext):
         targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
         sampling_period: float = 2e-9,
     ) -> CapSampledSequence:
-        return
+        edges_items = self._tree._nodes_items
+        # waveform を保持する subseq の edge_number
+        subseq_edges = [edge for edge, _ in targets_items[target_name].items() if _]
+        # waveform を保持する subseq
+        subseqs = [
+            edges_items[_]
+            for _ in subseq_edges
+            # if isinstance(edges_items[_], SubSequenceBranch)
+        ]
+        # subseq の境界をサンプリング周期にアライメントする（負の無限大へ丸める）
+        _subseqs = Utils.align_items(
+            sorted(
+                [_ for _ in subseqs],
+                key=lambda x: x.begin,
+            )
+        )
+        # 全体の領域長も含めて alignment した subseq のノードを抽出する
+        _nodes: List[Any] = sum(
+            [[0.0]] + [[_.begin, _.end] for _ in subseqs] + [[None]],
+            [],
+        )
+        # 奇数 edge 長を blank, 偶数 edge 長を aligned subseq 長として抽出
+        _blanks = [
+            end - begin if end is not None and begin is not None else None
+            for begin, end in zip(_nodes[:-1:2], _nodes[1::2])
+        ]
+        _slots = {
+            subseq_edge: targets_items[target_name][subseq_edge]
+            for subseq_edge in subseq_edges
+        }
+        return CapSampledSequence(
+            target_name,
+            prev_blank=round(_blanks[0] / sampling_period),
+            post_blank=None,
+            repeats=None,
+            sub_sequences=[
+                CapSampledSubSequence(
+                    capture_slots=[
+                        CaptureSlots(
+                            duration=round(duration / sampling_period),
+                            post_blank=round(blank / sampling_period)
+                            if blank is not None
+                            else None,
+                        )
+                        for duration, blank in zip(
+                            *Utils._create_duration_and_blanks(__slots, _subseq)
+                        )
+                    ],
+                    post_blank=round(blank / sampling_period)
+                    if blank is not None
+                    else None,
+                    repeats=None,
+                )
+                for __slots, _subseq, blank in zip(
+                    _slots.values(),
+                    # [_ for _ in _subseqs if isinstance(_, SubSequenceBranch)],
+                    _subseqs,
+                    _blanks[1:],
+                )
+            ],
+        )
 
     def _create_cap_sampled_sequence_(self) -> Dict[str, SampledSequenceBase]:
         targets_items = self._get_group_items_by_target()
-        # return {
-        #     _: self._create_gen_sampled_sequence(_, targets_items)
-        #     for _ in targets_items
-        # }
         return {
             _: self._create_cap_sampled_sequence(_, targets_items)
             for _ in targets_items
         }
+
+
+class Utils:
+    @classmethod
+    def align_items(
+        cls,
+        items: MutableSequence[Item],
+        sampling_period: float = 2e-9,
+    ) -> MutableSequence[Item]:
+        dt = sampling_period
+
+        return [
+            Item(
+                duration=floor(_.end, dt) - floor(_.begin, dt),
+                begin=floor(_.begin, dt),
+            )
+            for _ in items
+        ]
+
+    @classmethod
+    def _create_duration_and_blanks(
+        cls,
+        ranges: MutableSequence[Waveform | TargetHolder],
+        frame: SubSequenceBranch,
+    ) -> Tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
+        slots = sorted(ranges, key=lambda x: x.begin)
+        _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
+        _durations = [_.duration for _ in _slots if isinstance(_.duration, float)]
+        _blanks = [
+            post.begin - prev.end
+            if post.begin is not None and prev.end is not None
+            else None
+            for prev, post in zip(_slots[:-1], _slots[1:])
+        ] + [
+            frame.end - _slots[-1].end
+            if frame.end is not None and _slots[-1].end is not None
+            else None
+        ]
+        return _durations, _blanks
 
 
 class SubSequenceBranch(Branch):
@@ -974,7 +1057,7 @@ class RaisedCosFlatTop(Waveform, TargetHolder):
             raise ValueError(f"{type(rise_time)} is invalid")
         if self.duration is None:
             raise ValueError("duration is None")
-        print(rise_time, self.duration)
+        # print(rise_time, self.duration)
         if self.duration < rise_time * 2:
             raise ValueError(f"{rise_time} is too long")
 
@@ -1016,7 +1099,7 @@ class Arbit(Waveform, TargetHolder):
 
         d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
         if 0 <= t and t < d:
-            t0 = np.arange(int(d // s) + 1) * s
+            t0 = np.arange(round(d // s) + 1) * s
             boolean = (t0 <= t) * (t - s < t0)
             return self.__iq__[boolean][0]
 
@@ -1029,8 +1112,8 @@ class Arbit(Waveform, TargetHolder):
             raise ValueError("duration is None")
         d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
-        if self.__iq__ is None or int(d // s) + 1 != self.__iq__.shape[0]:
-            self.__iq__ = np.zeros(int(d // s) + 1).astype(complex)  # iq data
+        if self.__iq__ is None or round(d // s) + 1 != self.__iq__.shape[0]:
+            self.__iq__ = np.zeros(round(d // s) + 1).astype(complex)  # iq data
 
         return self.__iq__
 
@@ -1171,7 +1254,7 @@ class GenSampledSequence(SampledSequenceBase):
 class GenSampledSubSequence:
     real: NDArray[np.float64]
     imag: NDArray[np.float64]
-    post_blank: int  # samples
+    post_blank: Optional[int]  # samples
     repeats: int
 
     def asdict(self) -> Dict:
@@ -1190,8 +1273,10 @@ class CapSampledSequence(SampledSequenceBase):
 
 @dataclass
 class CapSampledSubSequence:
-    duration: int  # samples
-    post_blank: int  # samples
+    capture_slots: MutableSequence[CaptureSlots]
+    # duration: int  # samples
+    post_blank: Optional[int]  # samples
+    repeats: Optional[int]
 
     def asdict(self) -> Dict:
         return {}
@@ -1200,4 +1285,7 @@ class CapSampledSubSequence:
 @dataclass
 class CaptureSlots:
     duration: int  # samples
-    post_blank: int  # samples
+    post_blank: Optional[int]  # samples
+
+    def asdict(self) -> Dict:
+        return {}
