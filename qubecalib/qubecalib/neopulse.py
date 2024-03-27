@@ -1101,8 +1101,8 @@ class Modifier(Slot, TargetHolder):
 
 class Waveform(Slot):
     def __init__(self, duration: Optional[float] = None) -> None:
-        self.amplitude = 1.0
-        self.phase = 0.0  # radian
+        self.amplitude: float = 1.0
+        self.phase: float = 0.0  # radian
         self.__iq__: Optional[NDArray] = None
 
         super().__init__(duration=duration)
@@ -1124,6 +1124,11 @@ class Waveform(Slot):
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
+
+    def __rmul__(self, value: int | float | complex) -> Waveform:
+        self.amplitude = np.abs(value) if isinstance(value, complex) else value
+        self.phase = np.angle(value) if isinstance(value, complex) else 0
+        return self
 
 
 class RaisedCosFlatTop(Waveform, TargetHolder):

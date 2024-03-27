@@ -7,15 +7,34 @@ from dataclasses import dataclass, field
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Any, Dict, Final, MutableSequence, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Dict,
+    Final,
+    MutableMapping,
+    MutableSequence,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import json5
+import numpy as np
 from e7awgsw import CaptureParam, WaveSequence
-from quel_ic_config import CaptureReturnCode, Quel1BoxType, Quel1ConfigOption
+from quel_ic_config import CaptureReturnCode, Quel1Box, Quel1BoxType, Quel1ConfigOption
 
 from . import neopulse
-from .e7utils import CaptureParamTools
-from .neopulse import CapSampledSequence, GenSampledSequence, SampledSequenceBase
+from .e7utils import (
+    CaptureParamTools,
+    WaveSequenceTools,
+    _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
+)
+from .neopulse import (
+    CapSampledSequence,
+    GenSampledSequence,
+    GenSampledSubSequence,
+    SampledSequenceBase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +72,30 @@ class QubeCalib:
 
     def exec_iter(self) -> Executor:
         """queue に登録されている command を実行する iterator を返す"""
+        # work queue を舐めて必要な box を生成する
+        boxes = self._executor.collect_boxes()
+        if len(boxes) == 1:
+            # single box の場合 self._box を生成する
+            box_name = next(iter(boxes))
+            box_setting = self._system_config_database._box_settings[box_name]
+            self._executor._box = box = Quel1Box.create(
+                ipaddr_wss=str(box_setting.ipaddr_wss),
+                ipaddr_sss=str(box_setting.ipaddr_sss),
+                ipaddr_css=str(box_setting.ipaddr_css),
+                boxtype=box_setting.boxtype,
+                config_root=box_setting.config_root,
+                config_options=box_setting.config_options,
+                # ignore_crc_error_of_mxfe=args.ignore_crc_error_of_mxfe,
+                # ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780,
+            )
+            status = box.reconnect()
+            for mxfe_idx, s in status.items():
+                if not s:
+                    logger.error(
+                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+                    )
+        elif len(boxes) > 1:
+            raise ValueError("multi box sync is not implemented yet.")
         return self._executor
 
     def add_sequence(
@@ -79,7 +122,7 @@ class QubeCalib:
             dsp_demodulation,
             software_demodulation,
         )
-        print(devseq)
+        # print(devseq)
         self._executor.add_command(Sequencer(devseq))
 
     def add_config(self) -> None:
@@ -95,7 +138,7 @@ class QubeCalib:
 
     def _create_target_resource_map(
         self, target_names: Sequence[str]
-    ) -> Dict[str, Dict[str, int | BoxSetting | PortSetting]]:
+    ) -> Dict[str, Dict[str, Any]]:
         # {target_name: sampled_sequence} の形式から
         # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
         # {target_name: {box, port, channel_number)}} へ変換
@@ -105,6 +148,7 @@ class QubeCalib:
                 "box": db._box_settings[db.get_box_by_target(_)],
                 "port": db._port_settings[db.get_port_by_target(_)],
                 "channel_number": db.get_channel_number_by_target(_),
+                "target": db._target_settings[_],
             }
             for _ in target_names
         }
@@ -121,15 +165,20 @@ class Converter:
         singleshot: bool,
         dsp_demodulation: bool,
         software_demodulation: bool,
-    ) -> Dict[Tuple[str, str, int], WaveSequence | CaptureParam]:
+    ) -> Dict[Tuple[str, str, int] | Tuple[str, int, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
+        # gen と cap を分離する
         capseq = cls.convert_to_cap_device_specific_sequence(
             {
                 target_name: sseq
                 for target_name, sseq in sampled_sequence.items()
                 if isinstance(sseq, CapSampledSequence)
             },
-            resource_map,
+            {
+                target_name: _
+                for target_name, _ in resource_map.items()
+                if isinstance(sampled_sequence[target_name], CapSampledSequence)
+            },
         )
         genseq = cls.convert_to_gen_device_specific_sequence(
             {
@@ -137,9 +186,12 @@ class Converter:
                 for target_name, sseq in sampled_sequence.items()
                 if isinstance(sseq, GenSampledSequence)
             },
-            resource_map,
+            {
+                target_name: _
+                for target_name, _ in resource_map.items()
+                if isinstance(sampled_sequence[target_name], GenSampledSequence)
+            },
         )
-        # gen と cap を分離する
         return genseq | capseq
 
     @classmethod
@@ -149,7 +201,6 @@ class Converter:
         resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
     ) -> Dict[Tuple[str, str, int], CaptureParam]:
         # CaptureParam の生成
-
         # target_name と (box_name, port_number, channel_number) のマップを作成する
         targets_ids = {
             target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
@@ -164,7 +215,9 @@ class Converter:
                 for _ in Counter([targets_ids[_] for _ in sampled_sequence]).values()
             ]
         ):
-            raise ValueError("multiple access for single runit will be supported")
+            raise ValueError(
+                "multiple access for single runit will be supported, not now"
+            )
         # 戻り値は {(box_name, port_number, channel_number): CaptureParam} の Dict
         return {
             targets_ids[_.target_name]: CaptureParamTools.create(_)
@@ -176,15 +229,52 @@ class Converter:
         cls,
         sampled_sequence: Dict[str, GenSampledSequence],
         resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
-    ) -> Dict[Tuple[str, str, int], WaveSequence]:
+    ) -> Dict[Tuple[str, int, int], WaveSequence]:
         # WaveSequence の生成
+
+        # target 毎の変調周波数の計算
+        targets_freqs = {
+            target_name: cls.calc_modulation_frequency(
+                target_hz=_["target"]["frequency"],
+                lo_hz=_["port"].lo_freq,
+                cnco_hz=_["port"].cnco_freq,
+                sideband=_["port"].sideband,
+                fnco_hz=_["port"].fnco_freq[_["channel_number"]],
+            )
+            for target_name, _ in resource_map.items()
+        }
         # channel 毎 (awg 毎) にデータを束ねる
-        # 各 target 毎に信号を変調する
+        # target_name と (box_name, port_number, channel_number) のマップを作成する
+        targets_ids = {
+            target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
+            for target_name, _ in resource_map.items()
+        }
+        # (box_name, port_number, channel_number) と {target_name: sampled_sequence} とのマップを作成する
+        ids_sampled_sequences = {
+            id: {_: sampled_sequence[_] for _, _id in targets_ids.items() if _id == id}
+            for id in targets_ids.values()
+        }
+        # (box_name, port_number, channel_number) と {target_name: modfreq} とのマップを作成する
+        ids_modfreqs = {
+            id: {_: targets_freqs[_] for _, _id in targets_ids.items() if _id == id}
+            for id in targets_ids.values()
+        }
+
         # channel 毎に WaveSequence を生成する
         # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の Dict
-
-        # print(sampled_sequence)
-        return {}
+        ids_muxed_sequences = {
+            id: cls.multiplex(
+                sequences=ids_sampled_sequences[id],
+                modfreqs=ids_modfreqs[id],
+            )
+            for id in ids_sampled_sequences
+        }
+        return {
+            id: WaveSequenceTools.create(
+                sequence=ids_muxed_sequences[id],
+            )
+            for id in ids_sampled_sequences
+        }
 
     @classmethod
     def calc_modulation_frequency(
@@ -195,6 +285,8 @@ class Converter:
         sideband: str,
         fnco_hz: Optional[float] = None,
     ) -> float:
+        # modulation frequency を 1kHz の分解能で設定するには 1ms の繰り返し周期にしないとだめ？
+        # かと思ったけど，nco の位相が波形開始点で 0 に揃っているなら問題ない
         if_hz = cnco_hz + fnco_hz if fnco_hz is not None else cnco_hz
         if sideband == Sideband.UpperSideBand.value:
             diff_hz = target_hz - lo_hz - if_hz
@@ -204,6 +296,100 @@ class Converter:
             raise ValueError("invalid ssb mode")
 
         return diff_hz
+
+    @classmethod
+    def multiplex(
+        cls,
+        sequences: MutableMapping[str, GenSampledSequence],
+        modfreqs: MutableMapping[str, float],
+    ) -> GenSampledSequence:
+        cls.validate_geometry_identity(sequences)
+        if not cls.validate_geometry_identity(sequences):
+            raise ValueError(
+                "All geometry of sub sequences belonging to the same awg must be equal"
+            )
+        sequence = sequences[next(iter(sequences))]
+        chain = {
+            target_name: _convert_gen_sampled_sequence_to_blanks_and_waves_chain(_)
+            for target_name, _ in sequences.items()
+        }
+        begins = {
+            target_name: [
+                sum(chain[target_name][: i + 1])
+                for i, _ in enumerate(chain[target_name][1:])
+            ]
+            for target_name, _ in sequences.items()
+        }
+        times = {
+            target_name: [
+                (begin + np.arange(subseq.real.shape[0])) * sequence.sampling_period
+                for begin, subseq in zip(
+                    begins[target_name][::2], sequence.sub_sequences
+                )
+            ]
+            for target_name, sequence in sequences.items()
+        }
+        return GenSampledSequence(
+            target_name="",
+            prev_blank=sequence.prev_blank,
+            post_blank=sequence.post_blank,
+            repeats=sequence.repeats,
+            sampling_period=sequence.sampling_period,
+            sub_sequences=[
+                GenSampledSubSequence(
+                    real=np.array(
+                        [
+                            np.real(
+                                (
+                                    sequences[_].sub_sequences[i].real
+                                    + 1j * sequences[_].sub_sequences[i].imag
+                                )
+                                * np.exp(1j * 2 * np.pi * (modfreqs[_] * times[_][i]))
+                            )
+                            for _ in sequences
+                        ]
+                    ).sum(axis=0),
+                    imag=np.array(
+                        [
+                            np.imag(
+                                (
+                                    sequences[_].sub_sequences[i].real
+                                    + 1j * sequences[_].sub_sequences[i].imag
+                                )
+                                * np.exp(1j * 2 * np.pi * (modfreqs[_] * times[_][i]))
+                            )
+                            for _ in sequences
+                        ]
+                    ).sum(axis=0),
+                    post_blank=subseq.post_blank,
+                    repeats=subseq.repeats,
+                )
+                for i, subseq in enumerate(sequence.sub_sequences)
+            ],
+        )
+
+    @classmethod
+    def validate_geometry_identity(
+        cls,
+        sequences: MutableMapping[str, GenSampledSequence],
+    ) -> bool:
+        # 同一 awg から出すすべての信号の GenSampledSequence の波形構造が同一であることを確認する
+        _ = {
+            target_name: [
+                (_.real.shape, _.imag.shape, _.post_blank, _.repeats)
+                for _ in sequence.sub_sequences
+            ]
+            for target_name, sequence in sequences.items()
+        }
+        if not all(
+            sum(
+                [[geometry[0] == __ for __ in geometry] for _, geometry in _.items()],
+                [],
+            )
+        ):
+            return False
+        else:
+            return True
 
 
 class Command:
@@ -218,6 +404,10 @@ class Sequencer(Command):
     def execute(self) -> Tuple[CaptureReturnCode, Dict, Dict]:
         return CaptureReturnCode.SUCCESS, {}, {}
 
+    def execute_single_box(self, box) -> Tuple[CaptureReturnCode, Dict, Dict]:
+        print(box)
+        return CaptureReturnCode.SUCCESS, {}, {}
+
 
 class Configurator(Command):
     def execute(self) -> None:
@@ -227,6 +417,25 @@ class Configurator(Command):
 class Executor:
     def __init__(self) -> None:
         self._work_queue: Final[deque] = deque()
+        self._box: Optional[Quel1Box] = None
+        self._boxpool = None
+
+    def reset(self) -> None:
+        self._work_queue.clear()
+        self._box = None
+        self._boxpool = None
+
+    def collect_boxes(self) -> set[Any]:
+        return set(
+            sum(
+                [
+                    list({__[0] for __ in _._e7_setting})
+                    for _ in self._work_queue
+                    if isinstance(_, Sequencer)
+                ],
+                [],
+            )
+        )
 
     def __iter__(self) -> Executor:
         if not self._work_queue:
@@ -234,6 +443,7 @@ class Executor:
         last_command = self._work_queue[-1]
         if not isinstance(last_command, Sequencer):
             raise ValueError("_work_queue should end with a Sequencer command")
+
         return self
 
     def __next__(self) -> Tuple[Any, Dict, Dict]:
