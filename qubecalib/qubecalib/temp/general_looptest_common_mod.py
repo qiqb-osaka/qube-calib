@@ -15,38 +15,11 @@ from quel_ic_config import (
     Quel1ConfigOption,
 )
 
-# from .general_looptest_common import BoxPool, PulseCap, PulseGen
 from .quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
 
 socket, Any, Mapping, SequencerClient
-# BoxPool, PulseGen, PulseCap
 
 logger = logging.getLogger(__name__)
-
-
-# class BoxPoolMod:
-#     @classmethod
-#     def get_box(
-#         self,
-#         boxpool: BoxPool,
-#         boxname: str,
-#     ) -> tuple[Quel1BoxIntrinsic, SequencerClient]:
-#         return boxpool._boxes["BOX" + boxname]
-
-#     @classmethod
-#     def get_linkstatus(
-#         self,
-#         boxpool: BoxPool,
-#         boxname: str,
-#     ) -> bool:
-#         return boxpool._linkstatus["BOX" + boxname]
-
-#     @classmethod
-#     def get_boxnames(
-#         self,
-#         boxpool: BoxPool,
-#     ) -> list[str]:
-#         return [_.replace("BOX", "", 1) for _ in boxpool._boxes]
 
 
 class BoxPool:
@@ -56,17 +29,12 @@ class BoxPool:
         )
         self._boxes: Dict[str, Tuple[Quel1Box, SequencerClient]] = {}
         self._linkstatus: Dict[str, bool] = {}
-        # self._parse_settings(settings)
-        # self._estimated_timediff: Dict[str, int] = {
-        #     boxname: 0 for boxname in self._boxes
-        # }
-        # self._cap_sysref_time_offset: int = 0
 
-    def set_clock_master(
+    def create_clock_master(
         self,
         ipaddr: str,
     ) -> None:
-        self._clockmaster = QuBEMasterClient(master_ipaddr=ipaddr)
+        self._clock_master = QuBEMasterClient(master_ipaddr=ipaddr)
 
     def create(
         self,
@@ -179,7 +147,6 @@ class PulseGen:
             waveseq=waveseq,
             boxpool=self.boxpool,
         )
-        pg.init()  # TODO ここで実行しても良い？
         self.pulsegens.append(pg)
 
     def emit_now(self) -> None:
@@ -192,35 +159,48 @@ class PulseGen:
             box, _ = self.boxpool.get_box(box_name)
             box.wss.start_emission([_.awg for _ in self.pulsegens])
 
+    def emit_at(self) -> None:
+        min_time_offset = 125_000_000
+        time_counts = [i * 125_000_000 for i in range(1)]
+
+        if not len(self.pulsegens):
+            logger.warning("no pulse generator to activate")
+
+        box_names = set([_.box_name for _ in self.pulsegens])
+        for box_name in box_names:
+            box = next(iter({_.box for _ in self.pulsegens if _.box_name == box_name}))
+            sqc = next(iter({_.sqc for _ in self.pulsegens if _.box_name == box_name}))
+            awgs = {_.awg for _ in self.pulsegens if _.box_name == box_name}
+            box.wss.clear_before_starting_emission(awgs)
+            valid_read, current_time, last_sysref_time = sqc.read_clock()
+            if valid_read:
+                logger.info(
+                    f"current time: {current_time},  last sysref time: {last_sysref_time}"
+                )
+            else:
+                raise RuntimeError("failed to read current clock")
+
+            base_time = (
+                current_time + min_time_offset
+            )  # TODO: implement constraints of the start timing
+            for i, time_count in enumerate(time_counts):
+                valid_sched = sqc.add_sequencer(base_time + time_count)
+                if not valid_sched:
+                    raise RuntimeError("failed to schedule AWG start")
+            logger.info("scheduling completed")
+
 
 class PulseGen_:
     # NUM_SAMPLES_IN_WAVE_BLOCK: Final[int] = 64
 
     def __init__(
         self,
-        # name: str,
-        # box_status: bool,
         box_name: str,
-        # box: Quel1Box,
         port: int,
-        # group: int,
-        # line: int,
         channel: int,
         waveseq: WaveSequence,
         boxpool: BoxPool,
-        # *,
-        # lo_freq: Optional[float] = None,
-        # cnco_freq: Optional[float] = None,
-        # fnco_freq: Optional[float] = None,
-        # sideband: Optional[str] = None,
-        # vatt: Optional[int] = None,
     ):
-        # if not box_status:
-        #     raise RuntimeError(
-        #         f"sender '{(box, port, channel)}' is not available due to link problem of '{box}'"
-        #     )
-
-        # self.name = name
         box, sqc = boxpool.get_box(box_name)
         if not all(box.link_status().values()):
             raise RuntimeError(
@@ -231,7 +211,6 @@ class PulseGen_:
         self.box: Quel1Box = box
         self.sqc: SequencerClient = sqc
 
-        # self.box = box
         self.port, self.subport = self.box.decode_port(port)
         group, line = self.box._convert_any_port(port)
         if isinstance(line, str):
@@ -243,12 +222,6 @@ class PulseGen_:
         self.awg_spec = (port, channel)
         self.waveseq = waveseq
         self.boxpool = boxpool
-
-        # self.lo_freq = lo_freq
-        # self.cnco_freq = cnco_freq
-        # self.fnco_freq = fnco_freq
-        # self.sideband = sideband
-        # self.vatt = vatt
 
     def init(self) -> None:
         self.init_config()
@@ -281,14 +254,6 @@ class PulseGen_:
             self.waveseq,
         )
 
-    # def emit_now(self) -> None:
-    #     """単体のチャネルからバルスを出射する．チャネル間のパルスは非同期で出射される．"""
-    #     self.box.wss.start_emission(awgs=(self.awg,))
-
-    # def stop_now(self) -> None:
-    #     """単体のチャネルを停止する．"""
-    #     self.box.wss.stop_emission(awgs=(self.awg,))
-
 
 class PulseCap:
     def __init__(
@@ -312,7 +277,6 @@ class PulseCap:
             capprm=capprm,
             boxpool=self.boxpool,
         )
-        pc.init()  # TODO ここで実行しても良い？
         self.pulsecaps.append(pc)
 
     def capture_now(
@@ -344,8 +308,8 @@ class PulseCap:
     def capture_at_trigger_of(
         self,
         triggering_pgs: Dict[
-            Tuple[str, int], PulseGen_
-        ],  # (box_name, capmod): PulseGen_
+            Tuple[str, int], PulseGen_  # (box_name, capmod): PulseGen_
+        ],
     ) -> Dict[Tuple[str, int], Future]:
         # box_name, capmod 毎に pulsecaps をまとめる
         box_names_capms = {(_.box_name, _.capmod) for _ in self.pulsecaps}
@@ -355,19 +319,7 @@ class PulseCap:
             ]
             for box_name, capm in box_names_capms
         }
-        # # (box_name, capmod): (box_name, port, channel) のマップを作る
-        # capmods_portchannels = {
-        #     (_.box_name, _.capmod): (_.box_name, _.port, _.channel)
-        #     for _ in self.pulsecaps
-        # }
-        # # box_name, capmod 毎に triggering_pg をまとめる
-        # capms__triggering_pgs = {
-        #     (box_name, capm): triggering_pgs[(box_name, port, channel)]
-        #     for (box_name, capm), (_, port, channel) in capmods_portchannels
-        # }
-        # print(triggering_pgs)
 
-        # status_, iqs_ = {}, {}
         futures = {}
         for (box_name, capm), pulsecaps in box_names_capms__pulsecaps.items():
             box, cqs = self.boxpool.get_box(box_name)
@@ -398,29 +350,12 @@ class PulseCap:
 class PulseCap_:
     def __init__(
         self,
-        # name: str,
-        # box_status: bool,
-        # box: Quel1Box,
         box_name: str,
         port: int,
-        # group: int,
-        # rline: str,
         channel: int,
         capprm: CaptureParam,
         boxpool: BoxPool,
-        # *,
-        # lo_freq: Optional[float] = None,
-        # cnco_freq: Optional[float] = None,
-        # fnco_freq: Optional[float] = None,
-        # sideband: Optional[str] = None,
-        # background_noise_threshold: float = 256,
     ):
-        # if not box_status:
-        #     raise RuntimeError(
-        #         f"capturer is not available due to link problem of '{box}'"
-        #     )
-
-        # self.name = name
         box, sqc = boxpool.get_box(box_name)
         if not all(box.link_status().values()):
             raise RuntimeError(
@@ -438,17 +373,9 @@ class PulseCap_:
         self.group = group
         self.rline = rline
         self.channel = channel
-        # self.runit: int = channel
         self.capmod = self.box.rmap.get_capture_module_of_rline(group, rline)
         self.capprm = capprm
         self.boxpool = boxpool
-
-        # self.lo_freq = lo_freq
-        # self.cnco_freq = cnco_freq
-        # self.fnco_freq = fnco_freq
-        # self.sideband = sideband
-
-        # self.background_noise_threshold = background_noise_threshold
 
     def init(self) -> None:
         self.init_config()
@@ -474,60 +401,3 @@ class PulseCap_:
     def init_capture(self) -> None:
         # wss._setup_capture_units 内で同様の目的のコードが実行されている
         pass
-
-
-# class PulseGenMod:
-#     @classmethod
-#     def init_config(
-#         cls,
-#         pulsegen: PulseGen,
-#     ) -> None:
-#         pg = pulsegen
-
-#         kwargs: dict[str, int | float | str] = {
-#             "group": pg.group,
-#             "line": pg.line,
-#         }
-#         if pg.lo_freq != -1:
-#             kwargs["lo_freq"] = pg.lo_freq
-#         if pg.cnco_freq != -1:
-#             kwargs["cnco_freq"] = pg.cnco_freq
-#         if pg.sideband == "U" or pg.sideband == "L":
-#             kwargs["sideband"] = pg.sideband
-#         if pg.vatt != -1:
-#             kwargs["vatt"] = pg.vatt
-#         pulsegen.box.config_line(**kwargs)
-
-#         kwargs = {
-#             "group": pg.group,
-#             "line": pg.line,
-#             "channel": pg.channel,
-#         }
-#         if pg.fnco_freq != -1:
-#             kwargs["fnco_freq"] = pg.fnco_freq
-#         pg.box.config_channel(**kwargs)
-#         pg.box.close_rfswitch(pg.group, pg.line)
-#         # pg.box.open_rfswitch(pg.group, pg.line)
-#         # if pg.box.is_loopedback_monitor(pg.group):
-#         #     pg.box.open_rfswitch(pg.group, "m")  # for external loop-back lines
-
-#     @classmethod
-#     def init_wave(
-#         cls,
-#         wave: WaveSequence,
-#         pulsegen: PulseGen,
-#     ) -> None:
-#         Quel1WaveSubsystemMod.set_wave(
-#             pulsegen.box.wss,
-#             pulsegen.awg,
-#             wave,
-#         )
-
-#     @classmethod
-#     def init(
-#         cls,
-#         wave: WaveSequence,
-#         pulsegen: PulseGen,
-#     ) -> None:
-#         cls.init_config(pulsegen)
-#         cls.init_wave(wave, pulsegen)

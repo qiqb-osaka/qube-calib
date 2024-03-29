@@ -21,7 +21,8 @@ from typing import (
 import json5
 import numpy as np
 from e7awgsw import CaptureParam, WaveSequence
-from quel_ic_config import CaptureReturnCode, Quel1BoxType, Quel1ConfigOption
+from quel_clock_master import QuBEMasterClient, SequencerClient
+from quel_ic_config import CaptureReturnCode, Quel1Box, Quel1BoxType, Quel1ConfigOption
 
 from . import neopulse
 from .e7utils import (
@@ -77,6 +78,14 @@ class QubeCalib:
         """queue に登録されている command を実行する iterator を返す"""
         # work queue を舐めて必要な box を生成する
         boxes = self._executor.collect_boxes()
+        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
+        if (
+            len(boxes) > 1
+            and self.system_config_database._clockmaster_setting is not None
+        ):
+            self._executor._boxpool.create_clock_master(
+                ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr)
+            )
         for box_name in boxes:
             setting = self._system_config_database._box_settings[box_name]
             box = self._executor._boxpool.create(
@@ -154,6 +163,55 @@ class QubeCalib:
             }
             for _ in target_names
         }
+
+    def retrieve_target_info(self, target_name: str) -> Dict:
+        return {
+            "box_name": self.system_config_database.get_box_by_target(
+                target_name=target_name
+            ),
+            "port": self.system_config_database._port_settings[
+                self.system_config_database.get_port_by_target(target_name=target_name)
+            ],
+            "channel": self.system_config_database.get_channel_number_by_target(
+                target_name=target_name
+            ),
+            "target_frequency": self.system_config_database._target_settings[
+                target_name
+            ]["frequency"],
+        }
+
+    def create_box(self, box_name: str) -> Quel1Box:
+        s = self.system_config_database._box_settings[box_name]
+        return Quel1Box.create(
+            ipaddr_wss=str(s.ipaddr_wss),
+            ipaddr_sss=str(s.ipaddr_sss),
+            ipaddr_css=str(s.ipaddr_css),
+            boxtype=s.boxtype,
+            config_root=Path(s.config_root) if s.config_root is not None else None,
+            config_options=s.config_options,
+        )
+
+    def read_clock(self, *box_names: str) -> MutableSequence[Tuple[bool, int, int]]:
+        return [
+            SequencerClient(
+                target_ipaddr=str(
+                    self.system_config_database._box_settings[_].ipaddr_sss
+                )
+            ).read_clock()
+            for _ in box_names
+        ]
+
+    def resync(
+        self, *box_names: str
+    ) -> MutableSequence[Tuple[bool, int, int] | Tuple[bool, int]]:
+        db = self.system_config_database
+        if db._clockmaster_setting is None:
+            raise ValueError("clock master is not found")
+        master = QuBEMasterClient(master_ipaddr=str(db._clockmaster_setting.ipaddr))
+        master.kick_clock_synch(
+            [str(db._box_settings[_].ipaddr_sss) for _ in box_names]
+        )
+        return [self.read_clock(_) for _ in box_names] + [master.read_clock()]
 
 
 class Converter:
@@ -431,20 +489,20 @@ class Sequencer(Command):
                 )
             else:
                 raise ValueError(f"invalid object {(box_name, port, channel)}:{e7}")
-        # [_.init() for _ in pg.pulsegens] # TODO ここで実行すべき？
-        # [_.init() for _ in pc.pulsecaps] # TODO ここで実行すべき？
+        [_.init() for _ in pg.pulsegens]
+        [_.init() for _ in pc.pulsecaps]
         box_names = {box_name for (box_name, _, _), _ in self._e7_setting.items()}
         # TODO CW 出力については box の機能を使うのが良さげ
         # 制御方式の自動選択
         # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
-        # TODO single and caps and gens: capture_at(), emit_now() 1.
-        # TODO single and caps and not gens: capture_now() 2.
-        # TODO single and not caps and gens: emit_now() 3.
-        # TODO single and not caps and not gens X
+        # TODO ~~single and caps and gens: capture_at(), emit_now() 1.~~
+        # TODO ~~single and caps and not gens: capture_now() 2.~~
+        # TODO ~~single and not caps and gens: emit_now() 3.~~
+        # TODO ~~single and not caps and not gens X~~
         # TODO not single and caps and gens: capture_at(), emit_at() 4.
-        # TODO not single and caps and not gens: capture_now() 2.
+        # TODO ~~not single and caps and not gens: capture_now() 2.~~
         # TODO not single and not caps and gens: emit_at() 5.
-        # TODO not single and not caps and not gens X
+        # TODO ~~not single and not caps and not gens X~~
         if not pg.pulsegens and pc.pulsecaps:  # case 2.
             # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
             return pc.capture_now() + ({"optons": "case 2"},)
@@ -454,15 +512,34 @@ class Sequencer(Command):
             triggering_pgs = self.create_triggering_pgs(pg, pc)
             futures = pc.capture_at_trigger_of(triggering_pgs)
             pg.emit_now()
-            # result = {
-            #     (box_name, capm): future.result()
-            #     for (box_name, capm), future in futures.items()
-            # }
-            # status = {k: v[0] for k, v in result.items()}
-            # iqs = {k: v[1] for k, v in result.items()}
             status, iqs = pc.wait_until_capture_finishes(futures)
             return (status, iqs) + ({"options": "case 1"},)
-            # return pc.capture_now() + ({"options": "case 1"},)
+        elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
+            # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
+            pg.emit_now()
+            return {}, {}, {"debug": "case 3"}
+        elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
+            # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
+            if boxpool._clock_master is None:
+                pg.emit_now()
+                return {}, {}, {"debug": "case 5 without clock master"}
+            else:
+                pg.emit_at()
+                return {}, {}, {"debug": "case 5 with clock master"}
+        elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
+            # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
+            if boxpool._clock_master is None:
+                triggering_pgs = self.create_triggering_pgs(pg, pc)
+                futures = pc.capture_at_trigger_of(triggering_pgs)
+                pg.emit_now()
+                status, iqs = pc.wait_until_capture_finishes(futures)
+                return (status, iqs) + ({"debug": "case 4 without clock master"},)
+            else:
+                triggering_pgs = self.create_triggering_pgs(pg, pc)
+                futures = pc.capture_at_trigger_of(triggering_pgs)
+                pg.emit_at()
+                status, iqs = pc.wait_until_capture_finishes(futures)
+                return (status, iqs) + ({"debug": "case 4 with clock master"},)
         else:
             raise ValueError("this setting is not supported yet")
 

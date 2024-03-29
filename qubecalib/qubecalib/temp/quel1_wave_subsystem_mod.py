@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class Quel1WaveSubsystemMod:
-    # simple_capture_start は改修
-    # capture_start は改修
     @classmethod
     def set_wave(cls, wss: Quel1WaveSubsystem, awg: int, wave: WaveSequence) -> None:
         wss.validate_installed_e7awgsw()
@@ -25,40 +23,16 @@ class Quel1WaveSubsystemMod:
             # TODO: should wait for confirminig the termination (?)
             wss._awgctrl.set_wave_sequence(awg, wave)
 
-    # @classmethod
-    # def set_capture(cls, wss: Quel1WaveSubsystem, awg: int, wave: WaveSequence) -> None:
-    #     wss.validate_installed_e7awgsw()
-    #     wss._validate_awg_hwidxs({awg})
-
-    #     with wss._awgctrl_lock:
-    #         wss._awgctrl.terminate_awgs(awg)  # to override current task of unit
-    #         # TODO: should wait for confirminig the termination (?)
-    #         wss._awgctrl.set_wave_sequence(awg, wave)
-
-    # # TODO これはいらない
-    # @classmethod
-    # def wave_gen(
-    #     cls, wss: Quel1WaveSubsystem, wave_by_awg: Dict[int, WaveSequence]
-    # ) -> None:
-    #     # Note: validation will be done in set_wave()
-
-    #     for awg, wave in wave_by_awg.items():
-    #         cls.set_wave(wss, awg, wave)
-    #     wss.start_emission(list(wave_by_awg))
-
     @classmethod
     def _retrieve_capture_data(
         cls,
         wss: Quel1WaveSubsystem,
         cuhwxs_capums: Dict[int, Tuple[int, int]],
         cuhwxs_capprms: Dict[int, CaptureParam],
-        # num_expected_words: Dict[int, int],
     ) -> Tuple[
         CaptureReturnCode,
         Dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
-        # cuhwxs = [_ for _ in cuhwxs_capprms]
-        # cuhwxs = cuhwxs_modunits
         data: Dict[
             Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
         ] = {}
@@ -131,7 +105,6 @@ class Quel1WaveSubsystemMod:
         wss: Quel1WaveSubsystem,
         cuhwxs_capmus: Dict[int, Tuple[int, int]],
         cuhwxs_capprms: Dict[int, CaptureParam],
-        # num_expected_words: Dict[int, int],  # capu: expected_words
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
     ) -> Tuple[
         CaptureReturnCode,
@@ -147,7 +120,6 @@ class Quel1WaveSubsystemMod:
             wss,
             cuhwxs_capmus,
             cuhwxs_capprms,
-            # num_expected_words,
         )
         return retcode, {capu: iq for (_, capu), iq in iqs.items()}
 
@@ -179,19 +151,16 @@ class Quel1WaveSubsystemMod:
         cls._setup_capture_units(
             wss,
             capmod,
-            # cuhwxs_capmus,
             cuhwxs_capprms,
             triggering_awg,
         )
         # num_expected_words は Dsp から自動計算するように変更
-        # num_expected_words: Dict[int, int] = {}  # capu: expected_words
 
         return wss._executor.submit(
             cls._simple_capture_thread_main,
             wss,
             cuhwxs_capmus,
             cuhwxs_capprms,
-            # num_expected_words,
             timeout,
         )
 
@@ -200,20 +169,59 @@ class Quel1WaveSubsystemMod:
         cls,
         wss: Quel1WaveSubsystem,
         capmod: int,
-        # cuhwxs_capmus: Dict[int, Tuple[int, int]],
         cuhwxs_capprms: Dict[int, CaptureParam],
         triggering_awg: Optional[int] = None,
     ) -> None:
         # capctrl を初期化し capture_param を cuhwx に設定する
         # triggering_awg が指定されていれば trigger 待機に，いなければ即時キャプチャーを開始する
-        # cuhwxs = cuhwxs_capmus
+        # cuhwxs = [_ for _ in cuhwxs_capprms]
+        # with wss._capctrl_lock:
+        #     wss._capctrl.initialize(*cuhwxs)
+        #     # TODO: unit 毎に別の cap_prms を割り当てられるようにした
+        #     for cuhwx, capprm in cuhwxs_capprms.items():
+        #         wss._capctrl.set_capture_params(cuhwx, capprm)
+        cls._setup_capture_units_first_half(wss=wss, cuhwxs_capprms=cuhwxs_capprms)
+        # TODO ここで止められる様な手段を設けるべしと三好さんからのアドバイス
+        cls._setup_capture_units_second_half(
+            wss=wss,
+            capmod=capmod,
+            cuhwxs_capprms=cuhwxs_capprms,
+            triggering_awg=triggering_awg,
+        )
+        #     # TODO: it looks better to dump status of capture units for debug.
+        #     if triggering_awg is None:
+        #         wss._capctrl.start_capture_units(*cuhwxs)
+        #     else:
+        #         logger.info(
+        #             f"capture units {', '.join([str(cuhwxs) for cuhwxs in cuhwxs])} "
+        #             f"will be triggered by awg {triggering_awg}"
+        #         )
+        #         wss._capctrl.select_trigger_awg(capmod, triggering_awg)
+        #         wss._capctrl.enable_start_trigger(*cuhwxs)
+
+    @classmethod
+    def _setup_capture_units_first_half(
+        cls,
+        wss: Quel1WaveSubsystem,
+        cuhwxs_capprms: Dict[int, CaptureParam],
+    ) -> None:
         cuhwxs = [_ for _ in cuhwxs_capprms]
         with wss._capctrl_lock:
             wss._capctrl.initialize(*cuhwxs)
             # TODO: unit 毎に別の cap_prms を割り当てられるようにした
             for cuhwx, capprm in cuhwxs_capprms.items():
                 wss._capctrl.set_capture_params(cuhwx, capprm)
-            # TODO 三好さんのアドバイスでここで止められる様な手段を設ける
+
+    @classmethod
+    def _setup_capture_units_second_half(
+        cls,
+        wss: Quel1WaveSubsystem,
+        capmod: int,
+        cuhwxs_capprms: Dict[int, CaptureParam],
+        triggering_awg: Optional[int] = None,
+    ) -> None:
+        cuhwxs = [_ for _ in cuhwxs_capprms]
+        with wss._capctrl_lock:
             # TODO: it looks better to dump status of capture units for debug.
             if triggering_awg is None:
                 wss._capctrl.start_capture_units(*cuhwxs)
