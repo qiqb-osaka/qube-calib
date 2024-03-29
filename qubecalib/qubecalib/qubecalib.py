@@ -21,7 +21,7 @@ from typing import (
 import json5
 import numpy as np
 from e7awgsw import CaptureParam, WaveSequence
-from quel_ic_config import CaptureReturnCode, Quel1Box, Quel1BoxType, Quel1ConfigOption
+from quel_ic_config import CaptureReturnCode, Quel1BoxType, Quel1ConfigOption
 
 from . import neopulse
 from .e7utils import (
@@ -35,6 +35,9 @@ from .neopulse import (
     GenSampledSubSequence,
     SampledSequenceBase,
 )
+from .temp.general_looptest_common_mod import BoxPool, PulseCap, PulseGen, PulseGen_
+
+PulseGen, PulseCap
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +77,18 @@ class QubeCalib:
         """queue に登録されている command を実行する iterator を返す"""
         # work queue を舐めて必要な box を生成する
         boxes = self._executor.collect_boxes()
-        if len(boxes) == 1:
-            # single box の場合 self._box を生成する
-            box_name = next(iter(boxes))
-            box_setting = self._system_config_database._box_settings[box_name]
-            self._executor._box = box = Quel1Box.create(
-                ipaddr_wss=str(box_setting.ipaddr_wss),
-                ipaddr_sss=str(box_setting.ipaddr_sss),
-                ipaddr_css=str(box_setting.ipaddr_css),
-                boxtype=box_setting.boxtype,
-                config_root=box_setting.config_root,
-                config_options=box_setting.config_options,
+        for box_name in boxes:
+            setting = self._system_config_database._box_settings[box_name]
+            box = self._executor._boxpool.create(
+                box_name,
+                ipaddr_wss=str(setting.ipaddr_wss),
+                ipaddr_sss=str(setting.ipaddr_sss),
+                ipaddr_css=str(setting.ipaddr_css),
+                boxtype=setting.boxtype,
+                config_root=Path(setting.config_root)
+                if setting.config_root is not None
+                else None,
+                config_options=setting.config_options,
                 # ignore_crc_error_of_mxfe=args.ignore_crc_error_of_mxfe,
                 # ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780,
             )
@@ -94,8 +98,6 @@ class QubeCalib:
                     logger.error(
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
-        elif len(boxes) > 1:
-            raise ValueError("multi box sync is not implemented yet.")
         return self._executor
 
     def add_sequence(
@@ -393,7 +395,10 @@ class Converter:
 
 
 class Command:
-    def execute(self) -> Any:
+    def execute(
+        self,
+        boxpool: BoxPool,
+    ) -> Any:
         pass
 
 
@@ -401,29 +406,105 @@ class Sequencer(Command):
     def __init__(self, e7_settings: Dict) -> None:
         self._e7_setting = e7_settings
 
-    def execute(self) -> Tuple[CaptureReturnCode, Dict, Dict]:
-        return CaptureReturnCode.SUCCESS, {}, {}
+    def execute(
+        self,
+        boxpool: BoxPool,
+    ) -> Tuple[
+        Dict[Tuple[str, int], CaptureReturnCode], Dict[Tuple[str, int], Dict], Dict
+    ]:
+        pg = PulseGen(boxpool)
+        pc = PulseCap(boxpool)
+        for (box_name, port, channel), e7 in self._e7_setting.items():
+            if isinstance(e7, WaveSequence):
+                pg.create(
+                    box_name=box_name,
+                    port=port,
+                    channel=channel,
+                    waveseq=e7,
+                )
+            elif isinstance(e7, CaptureParam):
+                pc.create(
+                    box_name=box_name,
+                    port=port,
+                    channel=channel,
+                    capprm=e7,
+                )
+            else:
+                raise ValueError(f"invalid object {(box_name, port, channel)}:{e7}")
+        # [_.init() for _ in pg.pulsegens] # TODO ここで実行すべき？
+        # [_.init() for _ in pc.pulsecaps] # TODO ここで実行すべき？
+        box_names = {box_name for (box_name, _, _), _ in self._e7_setting.items()}
+        # TODO CW 出力については box の機能を使うのが良さげ
+        # 制御方式の自動選択
+        # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
+        # TODO single and caps and gens: capture_at(), emit_now() 1.
+        # TODO single and caps and not gens: capture_now() 2.
+        # TODO single and not caps and gens: emit_now() 3.
+        # TODO single and not caps and not gens X
+        # TODO not single and caps and gens: capture_at(), emit_at() 4.
+        # TODO not single and caps and not gens: capture_now() 2.
+        # TODO not single and not caps and gens: emit_at() 5.
+        # TODO not single and not caps and not gens X
+        if not pg.pulsegens and pc.pulsecaps:  # case 2.
+            # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
+            return pc.capture_now() + ({"optons": "case 2"},)
+        elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
+            # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
+            # trigger を設定
+            triggering_pgs = self.create_triggering_pgs(pg, pc)
+            futures = pc.capture_at_trigger_of(triggering_pgs)
+            pg.emit_now()
+            # result = {
+            #     (box_name, capm): future.result()
+            #     for (box_name, capm), future in futures.items()
+            # }
+            # status = {k: v[0] for k, v in result.items()}
+            # iqs = {k: v[1] for k, v in result.items()}
+            status, iqs = pc.wait_until_capture_finishes(futures)
+            return (status, iqs) + ({"options": "case 1"},)
+            # return pc.capture_now() + ({"options": "case 1"},)
+        else:
+            raise ValueError("this setting is not supported yet")
 
-    def execute_single_box(self, box) -> Tuple[CaptureReturnCode, Dict, Dict]:
-        print(box)
-        return CaptureReturnCode.SUCCESS, {}, {}
+    def create_triggering_pgs(
+        self,
+        pg: PulseGen,
+        pc: PulseCap,
+    ) -> Dict[tuple[Any, Any], PulseGen_]:  # (box_name, capmod): PulseGen_
+        # (box_names, capmod) 毎に同一グループの trigger の何れかをを割り当てる
+        # 同一グループの awg が無ければエラーを返す
+        cap = {(_.box_name, _.group, _.capmod) for _ in pc.pulsecaps}
+        gen = {(_.box_name, _.group, _) for _ in pg.pulsegens}
+        triggering_pgs_ = {
+            (cap_[0], cap_[2]): {gen_[2] for gen_ in gen if cap_[:2] == gen_[:2]}
+            for cap_ in cap
+        }
+        if not all([bool(pgs) for pgs in triggering_pgs_.values()]):
+            # TODO 別の group の trigger を割り当てるようにチャレンジする
+            raise ValueError("invalid trigger")
+        triggering_pgs = {
+            (box_name, capmod): next(iter(gens))
+            for (box_name, capmod), gens in triggering_pgs_.items()
+        }
+        return triggering_pgs
 
 
 class Configurator(Command):
-    def execute(self) -> None:
+    def execute(
+        self,
+        boxpool: BoxPool,
+    ) -> None:
         print(f"{self.__class__.__name__} executed")
 
 
 class Executor:
     def __init__(self) -> None:
         self._work_queue: Final[deque] = deque()
-        self._box: Optional[Quel1Box] = None
-        self._boxpool = None
+        self._boxpool: BoxPool = BoxPool()
 
     def reset(self) -> None:
         self._work_queue.clear()
-        self._box = None
-        self._boxpool = None
+        self._boxpool = BoxPool()
 
     def collect_boxes(self) -> set[Any]:
         return set(
@@ -458,7 +539,7 @@ class Executor:
             if isinstance(next, Sequencer):
                 break
             next.execute()
-        return next.execute()
+        return next.execute(self._boxpool)
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)

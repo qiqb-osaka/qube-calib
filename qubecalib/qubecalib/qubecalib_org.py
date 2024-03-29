@@ -1531,7 +1531,7 @@ class InvokeSequencerSinglebox(CommandBase):
             capmod,
             capunits,
             capu_capprm,
-            num_expected_words=num_expected_words,
+            # num_expected_words=num_expected_words,
             triggering_awg=None,
         )
         status, iqs = thunk.result()
@@ -1576,9 +1576,9 @@ class InvokeSequencerSinglebox(CommandBase):
         future = Quel1WaveSubsystemMod.simple_capture_start(
             wss,
             capmod,
-            capunits,
+            # capunits,
             capu_capprm,
-            num_expected_words=num_expected_words,
+            # num_expected_words=num_expected_words,
             triggering_awg=pg.awg,
         )
         return future

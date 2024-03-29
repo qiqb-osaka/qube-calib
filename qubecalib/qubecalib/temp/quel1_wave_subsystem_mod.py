@@ -25,16 +25,26 @@ class Quel1WaveSubsystemMod:
             # TODO: should wait for confirminig the termination (?)
             wss._awgctrl.set_wave_sequence(awg, wave)
 
-    # TODO これはいらない
-    @classmethod
-    def wave_gen(
-        cls, wss: Quel1WaveSubsystem, wave_by_awg: Dict[int, WaveSequence]
-    ) -> None:
-        # Note: validation will be done in set_wave()
+    # @classmethod
+    # def set_capture(cls, wss: Quel1WaveSubsystem, awg: int, wave: WaveSequence) -> None:
+    #     wss.validate_installed_e7awgsw()
+    #     wss._validate_awg_hwidxs({awg})
 
-        for awg, wave in wave_by_awg.items():
-            cls.set_wave(wss, awg, wave)
-        wss.start_emission(list(wave_by_awg))
+    #     with wss._awgctrl_lock:
+    #         wss._awgctrl.terminate_awgs(awg)  # to override current task of unit
+    #         # TODO: should wait for confirminig the termination (?)
+    #         wss._awgctrl.set_wave_sequence(awg, wave)
+
+    # # TODO これはいらない
+    # @classmethod
+    # def wave_gen(
+    #     cls, wss: Quel1WaveSubsystem, wave_by_awg: Dict[int, WaveSequence]
+    # ) -> None:
+    #     # Note: validation will be done in set_wave()
+
+    #     for awg, wave in wave_by_awg.items():
+    #         cls.set_wave(wss, awg, wave)
+    #     wss.start_emission(list(wave_by_awg))
 
     @classmethod
     def _retrieve_capture_data(
@@ -47,7 +57,7 @@ class Quel1WaveSubsystemMod:
         CaptureReturnCode,
         Dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
-        cuhwxs = [_ for _ in cuhwxs_capprms]
+        # cuhwxs = [_ for _ in cuhwxs_capprms]
         # cuhwxs = cuhwxs_modunits
         data: Dict[
             Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
@@ -61,7 +71,7 @@ class Quel1WaveSubsystemMod:
         with wss._capctrl_lock:
             for cuhwx, capmu in cuhwxs_capums.items():
                 n_sample_captured = wss._capctrl.num_captured_samples(cuhwx)
-                n_sample_expected = cuhwx__num_expected_words[cuhwx] * 4
+                n_sample_expected = cuhwx__num_expected_words[cuhwx]
                 if n_sample_captured == n_sample_expected:
                     logger.info(
                         f"the capture unit {wss._wss_addr}:{capmu} captured {n_sample_captured} samples"
@@ -127,18 +137,17 @@ class Quel1WaveSubsystemMod:
         CaptureReturnCode,
         Dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
-        cuhwxs = [_ for _ in cuhwxs_capprms]
-        # cuhwxs = cuhwxs_modunits
-        ready: bool = wss._wait_for_capture_data(cuhwxs, timeout)
+        ready: bool = wss._wait_for_capture_data(cuhwxs_capmus, timeout)
         if not ready:
             return CaptureReturnCode.CAPTURE_TIMEOUT, {}
-        if wss._check_capture_error(cuhwxs):
+        if wss._check_capture_error(cuhwxs_capmus):
             return CaptureReturnCode.CAPTURE_ERROR, {}
 
         retcode, iqs = cls._retrieve_capture_data(
             wss,
-            cuhwxs,
+            cuhwxs_capmus,
             cuhwxs_capprms,
+            # num_expected_words,
         )
         return retcode, {capu: iq for (_, capu), iq in iqs.items()}
 
@@ -174,12 +183,15 @@ class Quel1WaveSubsystemMod:
             cuhwxs_capprms,
             triggering_awg,
         )
+        # num_expected_words は Dsp から自動計算するように変更
+        # num_expected_words: Dict[int, int] = {}  # capu: expected_words
 
         return wss._executor.submit(
             cls._simple_capture_thread_main,
             wss,
             cuhwxs_capmus,
             cuhwxs_capprms,
+            # num_expected_words,
             timeout,
         )
 
