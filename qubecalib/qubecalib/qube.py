@@ -665,7 +665,7 @@ class QubeTypeA(QubeBase):
                 ch=2,
                 ipfpga=ip,
                 cpts=[
-                    e7.CaptureModule.U1,
+                    e7.CaptureModule.U3,
                 ],
             ),
             lo=LMX2594(lsi=lo[1]),
@@ -751,7 +751,7 @@ class QubeTypeA(QubeBase):
                 ch=2,
                 ipfpga=ip,
                 cpts=[
-                    e7.CaptureModule.U0,
+                    e7.CaptureModule.U2,
                 ],
             ),
             lo=LMX2594(lsi=lo[6]),
