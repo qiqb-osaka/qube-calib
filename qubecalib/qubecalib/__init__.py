@@ -3,7 +3,7 @@
 __version__ = "2.1.0"
 
 from . import neopulse
-from .qubecalib import QubeCalib
+from .qubecalib import QubeCalib, Sequencer
 
 # from .qubecalib import QubeCalib
 
@@ -16,5 +16,6 @@ from .qubecalib import QubeCalib
 __all__ = [
     "neopulse",
     "QubeCalib",
+    "Sequencer",
     # "BoxPoolMod",
 ]

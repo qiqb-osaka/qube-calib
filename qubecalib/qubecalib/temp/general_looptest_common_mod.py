@@ -243,9 +243,10 @@ class PulseGen_:
         #     fnco_freq=self.fnco_freq,
         # )
         # self.box.close_rfswitch(self.group, self.line)
-        self.box.config_rfswitch(port=self.port, rfswitch="pass")
+        # self.box.config_rfswitch(port=self.port, rfswitch="pass")
         # if self.box.is_loopedback_monitor(self.group):
         #     self.box.open_rfswitch(self.group, "m")
+        pass
 
     def init_wave(self) -> None:
         Quel1WaveSubsystemMod.set_wave(
@@ -395,8 +396,9 @@ class PulseCap_:
         #     fnco_freq=self.fnco_freq,
         # )
         # Notes: receive signal from input_port, not rather than internal loop-back.
-        self.box.config_rfswitch(port=self.port, rfswitch="open")
+        # self.box.config_rfswitch(port=self.port, rfswitch="open")
         # self.box.close_rfswitch(group=self.group, line=self.rline)
+        pass
 
     def init_capture(self) -> None:
         # wss._setup_capture_units 内で同様の目的のコードが実行されている

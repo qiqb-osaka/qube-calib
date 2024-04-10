@@ -38,7 +38,7 @@ class Quel1WaveSubsystemMod:
         ] = {}
         cuhwx__num_expected_words = {
             cuhwx: capprm.calc_capture_samples()
-            / (4 if DspUnit.DECIMATION in capprm.dsp_units_enabled else 1)
+            # / (4 if DspUnit.DECIMATION in capprm.dsp_units_enabled else 1)
             for cuhwx, capprm in cuhwxs_capprms.items()
         }
         status: CaptureReturnCode = CaptureReturnCode.SUCCESS

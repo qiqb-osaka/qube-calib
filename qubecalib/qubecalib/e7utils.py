@@ -6,7 +6,7 @@ from typing import Any, MutableMapping, MutableSequence
 import numpy as np
 
 # from dataclasses import dataclass
-from e7awgsw import CaptureParam, IqWave, WaveSequence
+from e7awgsw import CaptureParam, DspUnit, IqWave, WaveSequence
 
 from .neopulse import CapSampledSequence, GenSampledSequence
 
@@ -45,11 +45,20 @@ class WaveSequenceTools:
     def create(
         cls,
         sequence: GenSampledSequence,
+        wait_words: int,
+        repeats: int,
+        interval_samples: int,
     ) -> WaveSequence:
+        unit = WaveSequence.NUM_SAMPLES_IN_AWG_WORD
         # 同一 awg に所属する target を束ねた WaveSequence を生成する
         # TODO もし sequence の geometry が e7 compatible だった場合 wave_chunk を活用して変換する
         # そうでなかったらすべての subseq を 単一の wave_chunk に入れる
-        return cls.create_single_chunked_wave_sequence(sequence)
+        return cls.create_single_chunked_wave_sequence(
+            sequence=sequence,
+            wait_words=wait_words,
+            repeats=repeats,
+            interval_words=int(interval_samples / unit),
+        )
         # # アライメント境界を生成
         # unit = WaveSequence.NUM_SAMPLES_IN_AWG_WORD * 16
         # grid = [math.floor(_ / unit) * unit for _ in bounds]
@@ -97,6 +106,9 @@ class WaveSequenceTools:
     def create_single_chunked_wave_sequence(
         cls,
         sequence: GenSampledSequence,
+        wait_words: int,
+        repeats: int,
+        interval_words: int,
     ) -> WaveSequence:
         """単一の WaveChunk にすべての iq をまとめた WaveSequence を作る"""
         # 市松模様チェーンを生成
@@ -111,16 +123,19 @@ class WaveSequenceTools:
                 raise ValueError("magnitude of iq signal must not exceed 1")
             i[begin : begin + subseq.real.shape[0]] = (32767 * subseq.real).astype(int)
             q[begin : begin + subseq.imag.shape[0]] = (32767 * subseq.imag).astype(int)
-
+        # 繰り返し周期を設定する
         wseq = WaveSequence(
-            num_wait_words=0,
-            num_repeats=sequence.repeats if sequence.repeats is not None else 1,
+            num_wait_words=wait_words,
+            num_repeats=sequence.repeats if sequence.repeats is not None else repeats,
         )
 
         s = IqWave.convert_to_iq_format(i, q, WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK)
+        total_duration_in_words = int(
+            i.shape[0] // WaveSequence.NUM_SAMPLES_IN_AWG_WORD
+        )
         wseq.add_chunk(
             iq_samples=s,
-            num_blank_words=0,
+            num_blank_words=interval_words - total_duration_in_words,
             num_repeats=1,
         )
 
@@ -140,7 +155,13 @@ class WaveSequenceTools:
 
 class CaptureParamTools:
     @classmethod
-    def create(cls, sequence: CapSampledSequence) -> CaptureParam:
+    def create(
+        cls,
+        sequence: CapSampledSequence,
+        capture_delay_words: int,
+        repeats: int,
+        interval_samples: int,
+    ) -> CaptureParam:
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
         # print(sequence)
         # 市松模様チェーンを生成
@@ -169,18 +190,94 @@ class CaptureParamTools:
         new_chain = [
             int((up - low) / unit) if low is not None and up is not None else None
             for low, up in zip(aligned[:-1], aligned[1:])
-        ] + [chain[-1]]
+        ] + [chain[-1] if chain[-1] is not None else 0]
+        total_duration_words = (
+            sum(new_chain[:-1]) if chain[-1] is None else sum(new_chain)
+        )
+        interval_words = int(interval_samples // unit)
+        # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる
+        # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ）
+        new_chain[-1] += interval_words - total_duration_words + new_chain[0]
+        if new_chain[-1] == 0:
+            new_chain[-2] -= 1
+            new_chain[-1] = 1
         # TODO new_chain の blank 要素が潰れることがある（capt は拡張なので潰れない）この処理を追加しないといけない
         # TODO 最終の post_blank の処理をまだ入れていない
         # TODO post_blank は 1 以上の制約がある
         capprm = CaptureParam()
-        capprm.capture_delay = int(new_chain[0] / unit)
+        capprm.capture_delay = capture_delay_words + new_chain[0]
+        capprm.num_integ_sections = repeats
+        # print("capture_delay", capprm.capture_delay, new_chain[0])
         for duration, blank in zip(new_chain[1::2], new_chain[2::2]):
             capprm.add_sum_section(
                 num_words=duration,
-                num_post_blank_words=blank if blank is not None else 1,
+                num_post_blank_words=blank,
             )
+
         return capprm
+
+    @classmethod
+    def enable_integration(
+        cls,
+        capprm: CaptureParam,
+    ) -> CaptureParam:
+        dsp = capprm.dsp_units_enabled
+        dsp.append(DspUnit.INTEGRATION)
+        capprm.sel_dsp_units_to_enable(*dsp)
+        return capprm
+
+    @classmethod
+    def enable_demodulation(
+        cls,
+        capprm: CaptureParam,
+        modulation_frequency: float,
+    ) -> CaptureParam:
+        p = capprm
+        # DSP で周波数変換する複素窓関数を設定
+        t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2e-9
+        m = modulation_frequency
+        p.complex_window_coefs = list(
+            np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
+        )
+        p.complex_fir_coefs = cls.acquisition_fir_coefficient(-m)  # BPFの係数を設定
+
+        # DSPのどのモジュールを有効化するかを指定
+        dspunits = p.dsp_units_enabled
+        dspunits.append(DspUnit.COMPLEX_FIR)  # DSPのBPFを有効化
+        dspunits.append(DspUnit.DECIMATION)  # DSPの間引1/4を有効化
+        # dspunits.append(e7awgsw.DspUnit.REAL_FIR)
+        dspunits.append(DspUnit.COMPLEX_WINDOW)  # 複素窓関数を有効化
+        p.sel_dsp_units_to_enable(*dspunits)
+        return capprm
+
+    # from QubeServer.py by Tabuchi
+    # DSPのバンドパスフィルターを構成するFIRの係数を生成.
+    @classmethod
+    def acquisition_fir_coefficient(cls, bb_frequency: float) -> MutableSequence[int]:
+        ADCBB_SAMPLE_R = 500
+        ACQ_MAX_FCOEF = (
+            16  # The maximum number of the FIR filter taps prior to decimation process.
+        )
+        ACQ_FCBIT_POW_HALF = 2**15  # equivalent to 2^(ACQ_FCOEF_BITS-1).
+
+        sigma = 100.0  # nanoseconds
+        freq_in_mhz = bb_frequency  # MHz
+        n_of_band = (
+            16  # The maximum number of the FIR filter taps prior to decimation process.
+        )
+        band_step = 500 / n_of_band
+        band_idx = int(freq_in_mhz / band_step + 0.5 + n_of_band) - n_of_band
+        band_center = band_step * band_idx
+        x = np.arange(ACQ_MAX_FCOEF) - (ACQ_MAX_FCOEF - 1) / 2
+        gaussian = np.exp(-0.5 * x**2 / (sigma**2))
+        phase_factor = (
+            2 * np.pi * (band_center / ADCBB_SAMPLE_R) * np.arange(ACQ_MAX_FCOEF)
+        )
+        coeffs = gaussian * np.exp(1j * phase_factor) * (1 - 1e-3)
+        return list(
+            (np.real(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
+            + 1j * (np.imag(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
+        )
 
 
 def _convert_gen_sampled_sequence_to_blanks_and_waves_chain(
