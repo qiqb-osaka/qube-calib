@@ -302,19 +302,23 @@ class Sequence(DequeWithContext):
             if isinstance(_, SubSequenceBranch)
         ]
         return {
-            _.target: {
+            target: {
                 sub._next_node: [
                     item
                     for node, item in nodes_items.items()
                     if isinstance(item, TargetHolder)
-                    if item.target == _.target
-                    if node in self._tree.breadth_first_search(sub._root_node)
+                    if target in item.targets
+                    if node
+                    in self._tree.breadth_first_search(
+                        sub._root_node
+                    )  # node が sub に属し
                 ]
-                for sub in subsequences
+                for sub in subsequences  # 空でない subsequence 毎に
                 if sub._next_node is not None
             }
-            for _ in nodes_items.values()
+            for _ in nodes_items.values()  # Sequence に属する TargetHolder 毎に
             if isinstance(_, TargetHolder)
+            for target in _.targets
         }
 
     def _validate_nodes_items(self) -> None:
@@ -1057,8 +1061,8 @@ def floor(value: float, unit: float = 1) -> float:
 
 
 class TargetHolder:
-    def set_target(self, target: str) -> TargetHolder:
-        self.target = target
+    def set_target(self, *targets: str) -> TargetHolder:
+        self.targets = targets
         return self
 
 
@@ -1118,9 +1122,28 @@ class Modifier(Slot, TargetHolder):
 
 
 class VirtualZ(Modifier):
+    """begin 以降の Waveform の位相を theta だけ変化させる"""
+
     def __init__(self, theta: float = 0):  # theta in radian
         super().__init__()
         self.cmag = np.exp(1j * theta)
+
+
+class Magnifier(Modifier):
+    """begin 以降の Waveform の位相を theta だけ変化させる"""
+
+    def __init__(self, magnitude: float = 0):  # theta in radian
+        super().__init__()
+        self.cmag = magnitude * (1 + 0j)
+
+
+class Frequency(Modifier):
+    def __init__(self, modulation_frequency: float = 0):  # Hz
+        super().__init__()
+        self.modulation_frequency = modulation_frequency
+
+    def func(self, t: float) -> complex:
+        return np.exp(2j * np.pi * self.modulation_frequency * t)
 
 
 class Waveform(Slot):
@@ -1275,27 +1298,6 @@ class Arbit(Waveform, TargetHolder):
 
 
 class Sampler:
-    # def _apply_modifiers(self) -> None:
-    #     targets_items = {
-    #         target: {
-    #             node: self.__apply_modifiers(items)
-    #             for node, items in nodes_items.items()
-    #         }
-    #         for target, nodes_items in self._get_group_items_by_target().items()
-    #     }
-    #     print(targets_items)
-
-    # def __apply_modifiers(self, items: MutableSequence[Item]) -> MutableSequence[Item]:
-    #     modifiers = [_ for _ in items if isinstance(_, Modifier)]
-    #     waveforms = [_ for _ in items if isinstance(_, Waveform)]
-    #     for modifier in modifiers:
-    #         for waveform in waveforms:
-    #             if modifier.begin <= waveform.begin:
-    #                 print(waveform)
-    #     print("modifiers", modifiers)
-    #     print("waveforms", waveforms)
-    #     return items
-
     @classmethod
     def create_sampling_timing(
         cls,
