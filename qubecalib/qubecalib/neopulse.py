@@ -1082,9 +1082,12 @@ class Capture(Range):
 
 
 class Modifier(Slot, TargetHolder):
+    """begin <= t の時に cmag * func(t) を返す。未定義の場合，ステップ関数として動作。"""
+
     def __init__(self) -> None:
-        super().__init__(0)
+        super().__init__(duration=0)
         TargetHolder.__init__(self)
+        self.cmag = 1 + 0j
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(begin={self.begin})"
@@ -1098,36 +1101,61 @@ class Modifier(Slot, TargetHolder):
         """Branch object cannot set duration value"""
         raise ValueError("Branch object cannot set duration value")
 
+    def func(self, t: float) -> complex:
+        """時間依存の Modifier （例えば frequency）を書くときにここを定義する。通常の時間非依存では 1 + 0j を返す。"""
+        return 1 + 0j
+
+    def _func(self, t: float) -> complex:
+        """グローバル時間軸 (begin <= t) の時に複素振幅 (self.cmag) を，それ以前は 1 + 0j を返す。"""
+        if self.begin is None or self.duration is None:
+            raise ValueError(
+                "Either or both 'begin' and 'duration' are not initialized."
+            )
+        if self.begin <= t:
+            return self.cmag * self.func(t)
+        else:
+            return 1 + 0j
+
+
+class VirtualZ(Modifier):
+    def __init__(self, theta: float = 0):  # theta in radian
+        super().__init__()
+        self.cmag = np.exp(1j * theta)
+
 
 class Waveform(Slot):
     def __init__(self, duration: Optional[float] = None) -> None:
-        self.amplitude: float = 1.0
-        self.phase: float = 0.0  # radian
+        # self.amplitude: float = 1.0
+        # self.phase: float = 0.0  # radian
+        self.cmag = 1 + 0j
         self.__iq__: Optional[NDArray] = None
 
         super().__init__(duration=duration)
 
     def func(self, t: float) -> complex:
-        """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を定義したもの"""
+        """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を返す．継承する時はここに関数を定義する．"""
         raise NotImplementedError()
         return 0
 
     def _func(self, t: float) -> complex:
-        """func() に対して複素振幅とローカル時間軸を配慮したもの"""
+        """func() に対して複素振幅 (self.cmag) を適用，グローバル時間軸 (t) で iq 波形を返す"""
         if self.begin is None or self.duration is None:
             raise ValueError(
                 "Either or both 'begin' and 'duration' are not initialized."
             )
         if t < self.begin or self.begin + self.duration < t:
             return 0 + 0j
-        return self.func(t - self.begin) * self.amplitude * np.exp(1j * self.phase)
+        return self.cmag * self.func(
+            t - self.begin
+        )  # self.amplitude * np.exp(1j * self.phase)
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
     def __rmul__(self, value: int | float | complex) -> Waveform:
-        self.amplitude = np.abs(value) if isinstance(value, complex) else value
-        self.phase = np.angle(value) if isinstance(value, complex) else 0
+        self.cmag = value
+        # self.amplitude = np.abs(value) if isinstance(value, complex) else value
+        # self.phase = np.angle(value) if isinstance(value, complex) else 0
         return self
 
 
@@ -1247,6 +1275,27 @@ class Arbit(Waveform, TargetHolder):
 
 
 class Sampler:
+    # def _apply_modifiers(self) -> None:
+    #     targets_items = {
+    #         target: {
+    #             node: self.__apply_modifiers(items)
+    #             for node, items in nodes_items.items()
+    #         }
+    #         for target, nodes_items in self._get_group_items_by_target().items()
+    #     }
+    #     print(targets_items)
+
+    # def __apply_modifiers(self, items: MutableSequence[Item]) -> MutableSequence[Item]:
+    #     modifiers = [_ for _ in items if isinstance(_, Modifier)]
+    #     waveforms = [_ for _ in items if isinstance(_, Waveform)]
+    #     for modifier in modifiers:
+    #         for waveform in waveforms:
+    #             if modifier.begin <= waveform.begin:
+    #                 print(waveform)
+    #     print("modifiers", modifiers)
+    #     print("waveforms", waveforms)
+    #     return items
+
     @classmethod
     def create_sampling_timing(
         cls,
@@ -1276,14 +1325,20 @@ class Sampler:
     def _sample(
         self,
         sampling_timing: NDArray[np.float32],
-        waveforms: MutableSequence[Waveform],
+        slots: MutableSequence[Slot],
     ) -> NDArray[np.complex64]:
         def func(t: float) -> complex:
+            modifiers = [_ for _ in slots if isinstance(_, Modifier)]
+            for _ in modifiers:
+                if _.begin is None:
+                    raise ValueError(f"begin of {_.__class__.__name__} is None")
+            modifier = np.array([1 + 0j] + [_._func(t) for _ in modifiers]).prod()
+            waveforms = [_ for _ in slots if isinstance(_, Waveform)]
             for w in waveforms:
                 if w.begin is None or w.duration is None:
                     raise ValueError("begin or duration is None")
                 if (w.begin <= t) and (t < w.begin + w.duration):
-                    return w._func(t)
+                    return modifier * w._func(t)
             return 0 + 0j
 
         return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
