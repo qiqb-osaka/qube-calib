@@ -13,6 +13,14 @@ from .tree import CostedTree, Tree
 DEFAULT_SAMPLING_PERIOD: float = 2e-9
 
 
+@dataclass
+class RunningConfig:
+    contexts: Final[MutableSequence] = deque()
+
+
+__rc__: Final[RunningConfig] = RunningConfig()
+
+
 class SequenceTree:
     def __init__(self) -> None:
         self._tree = CostedTree()
@@ -74,14 +82,6 @@ class SequenceTree:
 
     def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
         return self._tree.breadth_first_search(start)
-
-
-@dataclass
-class RunningConfig:
-    contexts: Final[MutableSequence] = deque()
-
-
-__rc__: Final[RunningConfig] = RunningConfig()
 
 
 class ContextNode:
