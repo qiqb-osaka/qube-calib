@@ -178,6 +178,10 @@ class DequeWithContext(deque):
 
 
 class Sequence(DequeWithContext):
+    def __enter__(self) -> Sequence:
+        super().__enter__()
+        return self
+
     def __exit__(
         self,
         exception_type: Any,
@@ -331,7 +335,7 @@ class Sequence(DequeWithContext):
     def _create_gen_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
+        targets_items: Dict[str, Dict[int, MutableSequence[Waveform]]],
         sampling_period: float = 2e-9,
     ) -> GenSampledSequence:
         # edge と item の対応マップ
@@ -422,26 +426,73 @@ class Sequence(DequeWithContext):
 
     def _create_sampled_sequence(
         self,
-    ) -> Dict[str, SampledSequenceBase]:
-        targets_items = self._get_group_items_by_target()
-        for _, sub_seq_edges__items in targets_items.items():
-            if not self._is_cap_target(
-                sub_seq_edges__items
-            ) and not self._is_gen_target(sub_seq_edges__items):
-                raise ValueError(f"{_} both Waveform and Capture is appeared")
-        return {
-            _: self._create_cap_sampled_sequence(_, targets_items)
-            if self._is_cap_target(subseq_edges__items)
-            else self._create_gen_sampled_sequence(_, targets_items)
-            if self._is_gen_target(subseq_edges__items)
-            else None
-            for _, subseq_edges__items in targets_items.items()
+    ) -> Tuple[
+        Dict[str, GenSampledSequence],
+        Dict[str, CapSampledSequence],
+    ]:
+        group_items = self._get_group_items_by_target()
+        _ = {
+            target_name: {
+                num: [item for item in items if isinstance(item, Waveform)]
+                for num, items in num_items.items()
+            }
+            for target_name, num_items in group_items.items()
         }
+        __ = {
+            target_name: {num: items for num, items in num_items.items() if items}
+            for target_name, num_items in _.items()
+        }
+        targets_items_gen: Dict[str, Dict[int, MutableSequence[Waveform]]] = {
+            target_name: num_items for target_name, num_items in __.items() if num_items
+        }
+        _ = {
+            target_name: {
+                num: [item for item in items if isinstance(item, Range)]
+                for num, items in num_items.items()
+            }
+            for target_name, num_items in group_items.items()
+        }
+        __ = {
+            target_name: {num: items for num, items in num_items.items() if items}
+            for target_name, num_items in _.items()
+        }
+        targets_items_cap: Dict[str, Dict[int, MutableSequence[Range]]] = {
+            target_name: num_items for target_name, num_items in __.items() if num_items
+        }
+        # print(targets_items_gen)
+        # print(targets_items_cap)
+        return (
+            {
+                _: self._create_gen_sampled_sequence(_, targets_items_gen)
+                for _ in targets_items_gen
+            },
+            {
+                _: self._create_cap_sampled_sequence(_, targets_items_cap)
+                for _ in targets_items_cap
+            },
+        )
+        # targets_items = targets_items_gen | targets_items_cap
+        # # targets_items = self._get_group_items_by_target()
+        # # for _, sub_seq_edges__items in targets_items.items():
+        # #     if sub_seq_edges__items is None:
+        # #         raise ValueError(f"{_} empty")
+        # #     if not self._is_cap_target(
+        # #         sub_seq_edges__items
+        # #     ) and not self._is_gen_target(sub_seq_edges__items):
+        # #         raise ValueError(f"{_} both Waveform and Capture is appeared")
+        # return {
+        #     _: self._create_cap_sampled_sequence(_, targets_items)
+        #     if self._is_cap_target(subseq_edges__items)
+        #     else self._create_gen_sampled_sequence(_, targets_items)
+        #     if self._is_gen_target(subseq_edges__items)
+        #     else None
+        #     for _, subseq_edges__items in targets_items.items()
+        # }
 
     def _create_cap_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]],
+        targets_items: Dict[str, Dict[int, MutableSequence[Range]]],
         sampling_period: float = 2e-9,
     ) -> CapSampledSequence:
         edges_items = self._tree._nodes_items
@@ -534,50 +585,13 @@ class Sequence(DequeWithContext):
             ],
         )
 
-    def convert_to_sampled_sequence(self) -> Dict[str, SampledSequenceBase]:
+    def convert_to_sampled_sequence(
+        self,
+    ) -> Tuple[Dict[str, GenSampledSequence], Dict[str, CapSampledSequence]]:
         # 念の為 sequence 内の各要素を配置
         self._tree.place_slots()
         # 中間形式に変換
         return self._create_sampled_sequence()
-
-
-class Utils:
-    @classmethod
-    def align_items(
-        cls,
-        items: MutableSequence[Item],
-        sampling_period: float = 2e-9,
-    ) -> MutableSequence[Item]:
-        dt = sampling_period
-
-        return [
-            Item(
-                duration=floor(_.end, dt) - floor(_.begin, dt),
-                begin=floor(_.begin, dt),
-            )
-            for _ in items
-        ]
-
-    @classmethod
-    def _create_duration_and_blanks(
-        cls,
-        ranges: MutableSequence[Waveform | TargetHolder],
-        frame: SubSequenceBranch,
-    ) -> Tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
-        slots = sorted(ranges, key=lambda x: x.begin)
-        _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
-        _durations = [_.duration for _ in _slots if isinstance(_.duration, float)]
-        _blanks = [
-            post.begin - prev.end
-            if post.begin is not None and prev.end is not None
-            else None
-            for prev, post in zip(_slots[:-1], _slots[1:])
-        ] + [
-            frame.end - _slots[-1].end
-            if frame.end is not None and _slots[-1].end is not None
-            else None
-        ]
-        return _durations, _blanks
 
 
 class SubSequenceBranch(Branch):
@@ -646,6 +660,10 @@ class SubSequenceBranch(Branch):
 
 
 class SubSequence(DequeWithContext):
+    def __enter__(self) -> SubSequence:
+        super().__enter__()
+        return self
+
     def __init__(self, duration: Optional[float] = None, repeats: int = 1) -> None:
         if not isinstance(repeats, int):
             raise ValueError("repeats must be int")
@@ -767,6 +785,10 @@ class SeriesBranch(Branch):
 
 
 class Series(DequeWithContext):
+    def __enter__(self) -> Series:
+        super().__enter__()
+        return self
+
     def __exit__(
         self,
         exception_type: Any,
@@ -868,6 +890,10 @@ class FlushleftBranch(Branch):
 
 
 class Flushleft(DequeWithContext):
+    def __enter__(self) -> Flushleft:
+        super().__enter__()
+        return self
+
     def __exit__(
         self,
         exception_type: Any,
@@ -945,6 +971,10 @@ class FlushrightBranch(Branch):
 
 
 class Flushright(DequeWithContext):
+    def __enter__(self) -> Flushright:
+        super().__enter__()
+        return self
+
     def __exit__(
         self,
         exception_type: Any,
@@ -1004,6 +1034,45 @@ class Flushright(DequeWithContext):
                 if branch._root_node is None:
                     raise ValueError("_root_node is None")
                 tree._active_node = branch._root_node
+
+
+class Utils:
+    @classmethod
+    def align_items(
+        cls,
+        items: MutableSequence[Item],
+        sampling_period: float = 2e-9,
+    ) -> MutableSequence[Item]:
+        dt = sampling_period
+
+        return [
+            Item(
+                duration=floor(_.end, dt) - floor(_.begin, dt),
+                begin=floor(_.begin, dt),
+            )
+            for _ in items
+        ]
+
+    @classmethod
+    def _create_duration_and_blanks(
+        cls,
+        ranges: MutableSequence[Waveform],
+        frame: SubSequenceBranch,
+    ) -> Tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
+        slots = sorted(ranges, key=lambda x: x.begin)
+        _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
+        _durations = [_.duration for _ in _slots if isinstance(_.duration, float)]
+        _blanks = [
+            post.begin - prev.end
+            if post.begin is not None and prev.end is not None
+            else None
+            for prev, post in zip(_slots[:-1], _slots[1:])
+        ] + [
+            frame.end - _slots[-1].end
+            if frame.end is not None and _slots[-1].end is not None
+            else None
+        ]
+        return _durations, _blanks
 
 
 def ceil(value: float, unit: float = 1) -> float:
@@ -1146,7 +1215,7 @@ class Frequency(Modifier):
         return np.exp(2j * np.pi * self.modulation_frequency * t)
 
 
-class Waveform(Slot):
+class Waveform(Slot, TargetHolder):
     def __init__(self, duration: Optional[float] = None) -> None:
         # self.amplitude: float = 1.0
         # self.phase: float = 0.0  # radian
@@ -1154,6 +1223,10 @@ class Waveform(Slot):
         self.__iq__: Optional[NDArray] = None
 
         super().__init__(duration=duration)
+
+    def set_target(self, *targets: str) -> Waveform:
+        super().set_target(*targets)
+        return self
 
     def func(self, t: float) -> complex:
         """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を返す．継承する時はここに関数を定義する．"""
@@ -1182,7 +1255,7 @@ class Waveform(Slot):
         return self
 
 
-class RaisedCosFlatTop(Waveform, TargetHolder):
+class RaisedCosFlatTop(Waveform):
     """
     Raised Cosine FlatTopパルス
 
@@ -1243,7 +1316,7 @@ class RaisedCosFlatTop(Waveform, TargetHolder):
         self._rise_time = rise_time
 
 
-class Rectangle(Waveform, TargetHolder):
+class Rectangle(Waveform):
     def __init__(self, duration: Optional[float] = None):
         super().__init__(duration)
 
@@ -1251,7 +1324,7 @@ class Rectangle(Waveform, TargetHolder):
         return 1 + 0j
 
 
-class Arbit(Waveform, TargetHolder):
+class Arbit(Waveform):
     """ "サンプリング点を直接与えるためのオブジェクト"""
 
     DEFAULT_SAMPLING_PERIOD: Final[float] = 2e-9
@@ -1261,7 +1334,7 @@ class Arbit(Waveform, TargetHolder):
         duration: Optional[float] = None,
         init: Optional[complex] = None,
     ):
-        super().__init__(duration)
+        Waveform.__init__(self, duration)
         if init is None:
             self.init = 0 + 0j
         else:
@@ -1295,6 +1368,10 @@ class Arbit(Waveform, TargetHolder):
             self.__iq__ = np.zeros(round(d // s) + 1).astype(complex)  # iq data
 
         return self.__iq__
+
+    def set_target(self, *targets: str) -> Arbit:
+        super().set_target(*targets)
+        return self
 
 
 class Sampler:

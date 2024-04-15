@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
@@ -11,10 +11,11 @@ from typing import (
     Any,
     Dict,
     Final,
+    Iterable,
     MutableMapping,
     MutableSequence,
     Optional,
-    Sequence,
+    Set,
     Tuple,
     TypedDict,
 )
@@ -69,6 +70,7 @@ class QubeCalib:
             SystemConfigDatabase()
         )
         self._executor: Final[Executor] = Executor()
+        self._box_configs: Dict[str, Dict[str, Any]] = {}
 
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
@@ -77,11 +79,11 @@ class QubeCalib:
     def system_config_database(self) -> SystemConfigDatabase:
         return self._system_config_database
 
-    def exec(self) -> Tuple:
+    def execute(self) -> Tuple:
         """queue に登録されている command を実行する（未実装）"""
         return "", "", ""
 
-    def exec_iter(
+    def step_execute(
         self,
         repeats: int = 1,
         interval: float = 10240e-9,
@@ -143,8 +145,15 @@ class QubeCalib:
         # dsp_demodulation: bool = True,
         # software_demodulation: bool = False,
     ) -> None:
-        sampled_sequence = sequence.convert_to_sampled_sequence()
-        resource_map = self._create_target_resource_map([_ for _ in sampled_sequence])
+        gen_sampled_sequence, cap_sampled_sequence = (
+            sequence.convert_to_sampled_sequence()
+        )
+        targets = set(
+            [_ for _ in gen_sampled_sequence] + [_ for _ in cap_sampled_sequence]
+        )
+        # gen_resource_map = self._create_target_resource_map(gen_targets)
+        # cap_resource_map = self._create_target_resource_map(cap_targets)
+        resource_map = self._create_target_resource_map(targets)
         # devseq = Converter.convert_to_device_specific_sequence(
         #     sampled_sequence,
         #     resource_map,
@@ -159,13 +168,9 @@ class QubeCalib:
         # print(resource_map)
         self._executor.add_command(
             Sequencer(
-                sampled_sequence=sampled_sequence,
+                gen_sampled_sequence=gen_sampled_sequence,
+                cap_sampled_sequence=cap_sampled_sequence,
                 resource_map=resource_map,
-                # repeats=repeats,
-                # interval=interval,
-                # singleshot=singleshot,
-                # dsp_demodulation=dsp_demodulation,
-                # software_demodulation=software_demodulation,
             )
         )
 
@@ -211,12 +216,15 @@ class QubeCalib:
     def define_target(
         self,
         target_name: str,
-        target_frequency: float,
         channel_name: str,
+        target_frequency: Optional[float] = None,
     ) -> None:
         db = self.system_config_database
-        db._target_settings[target_name] = {"frequency": target_frequency}
         db._relation_channel_target.append((channel_name, target_name))
+        if target_frequency is None and target_name not in db._target_settings:
+            raise ValueError(f"frequency of target({target_name}) is not defined")
+        if target_frequency is not None:
+            db._target_settings[target_name] = {"frequency": target_frequency}
         # print(db._target_settings)
         # print(db._relation_channel_target)
         # print(db._relation_channel_port)
@@ -247,11 +255,13 @@ class QubeCalib:
         channel_name: str,
         port_name: str,
         channel_number: int,
+        ndelay_or_nwait: int = 0,
     ) -> None:
         self.system_config_database.define_channel(
             channel_name=channel_name,
             port_name=port_name,
             channel_number=channel_number,
+            ndelay_or_nwait=ndelay_or_nwait,
         )
 
     def define_port(
@@ -261,11 +271,12 @@ class QubeCalib:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: Optional[str] = None,
-        vatt: Optional[int] = None,
+        sideband: str = "U",
+        vatt: int = 0x800,
         fnco_freq: Optional[
             Tuple[float] | Tuple[float, float] | Tuple[float, float, float]
         ] = None,
+        # ndelay_or_nwait: Tuple[int, ...] = (),
     ) -> None:
         self.system_config_database.define_port(
             port_name=port_name,
@@ -276,34 +287,46 @@ class QubeCalib:
             sideband=sideband,
             vatt=vatt,
             fnco_freq=fnco_freq,
+            # ndelay_or_nwait=ndelay_or_nwait,
         )
 
     def _create_target_resource_map(
-        self, target_names: Sequence[str]
-    ) -> Dict[str, Dict[str, Any]]:
+        self,
+        target_names: Iterable[str],
+    ) -> Dict[
+        str, Iterable[Dict[str, BoxSetting | PortSetting | int | Dict[str, Any]]]
+    ]:
         # {target_name: sampled_sequence} の形式から
         # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
         # {target_name: {box, port, channel_number)}} へ変換
         db = self.system_config_database
+        targets_channels = [(_, db.get_channels_by_target(_)) for _ in target_names]
+        bpc_targets = {
+            target_name: [db.get_channel(_) for _ in channels]
+            for target_name, channels in targets_channels
+        }
         return {
-            _: {
-                "box": db._box_settings[db.get_box_by_target(_)],
-                "port": db._port_settings[db.get_port_by_target(_)],
-                "channel_number": db.get_channel_number_by_target(_),
-                "target": db._target_settings[_],
-            }
-            for _ in target_names
+            target_name: [
+                {
+                    "box": db._box_settings[box_name],
+                    "port": db._port_settings[port_name],
+                    "channel_number": channel_number,
+                    "target": db._target_settings[target_name],
+                }
+                for box_name, port_name, channel_number in _
+            ]
+            for target_name, _ in bpc_targets.items()
         }
 
-    def retrieve_target_info(self, target_name: str) -> Dict:
+    def get_target_info(self, target_name: str) -> Dict:
         return {
-            "box_name": self.system_config_database.get_box_by_target(
+            "box_name": self.system_config_database.get_boxes_by_target(
                 target_name=target_name
             ),
-            "port": self.system_config_database._port_settings[
-                self.system_config_database.get_port_by_target(target_name=target_name)
-            ],
-            "channel": self.system_config_database.get_channel_number_by_target(
+            "port": self.system_config_database.get_ports_by_target(
+                target_name=target_name
+            ),
+            "channel": self.system_config_database.get_channel_numbers_by_target(
                 target_name=target_name
             ),
             "target_frequency": self.system_config_database._target_settings[
@@ -311,30 +334,26 @@ class QubeCalib:
             ]["frequency"],
         }
 
+    def get_box_names_by_targets(self, *target_names: str) -> Set[str]:
+        return set(
+            sum(
+                [
+                    list(self.get_target_info(target_name)["box_name"])
+                    for target_name in target_names
+                ],
+                [],
+            )
+        )
+
     def create_box(
         self,
         box_name: str,
         reconnect: bool = True,
     ) -> Quel1Box:
-        s = self.system_config_database._box_settings[box_name]
-        box = Quel1Box.create(
-            ipaddr_wss=str(s.ipaddr_wss),
-            ipaddr_sss=str(s.ipaddr_sss),
-            ipaddr_css=str(s.ipaddr_css),
-            boxtype=s.boxtype,
-            config_root=Path(s.config_root) if s.config_root is not None else None,
-            config_options=s.config_options if s.config_options else None,
+        return self.system_config_database.create_box(
+            box_name=box_name,
+            reconnect=reconnect,
         )
-        if reconnect:
-            if not all([_ for _ in box.link_status().values()]):
-                box.relinkup(use_204b=False)
-            status = box.reconnect()
-            for mxfe_idx, _ in status.items():
-                if not _:
-                    logger.error(
-                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
-                    )
-        return box
 
     def read_clock(self, *box_names: str) -> MutableSequence[Tuple[bool, int, int]]:
         return [
@@ -369,6 +388,53 @@ class QubeCalib:
     ) -> float:
         return sequence_duration // constrain * constrain
 
+    def get_all_box_configs(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            box_name: self.system_config_database.create_box(box_name).dump_box()
+            for box_name in self.system_config_database._box_settings
+        }
+
+    def store_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
+        with open(Path(os.getcwd()) / Path(path_to_config_file), "w") as fp:
+            json5.dump(
+                self.get_all_box_configs(),
+                fp,
+                quote_keys=True,
+            )
+
+    def load_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
+        with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
+            json = json5.load(fp)
+        for box_name, _ in json.items():
+            ports: Dict[int | Tuple[int, int], Dict[str, Any]] = {
+                int(k): v for k, v in _["ports"].items()
+            }
+            _["ports"] = ports
+            for port, port_config in ports.items():
+                if "channels" in port_config:
+                    port_config["channels"] = {
+                        int(k): v for k, v in port_config["channels"].items()
+                    }
+                if "runits" in port_config:
+                    port_config["runits"] = {
+                        int(k): v for k, v in port_config["runits"].items()
+                    }
+        self._box_configs = json
+
+    def apply_all_box_configs(self) -> None:
+        for box_name in self._box_configs:
+            self._apply_box_config(box_name)
+
+    def _apply_box_config(self, box_name: str) -> None:
+        box = self.create_box(box_name)
+        box.config_box(self._box_configs[box_name]["ports"])
+
+    def apply_box_config(self, *target_names: str) -> Set[str]:
+        box_names = self.get_box_names_by_targets(*target_names)
+        for box_name in box_names:
+            self._apply_box_config(box_name)
+        return box_names
+
 
 class Converter:
     @classmethod
@@ -385,6 +451,8 @@ class Converter:
     ) -> Dict[Tuple[str, str, int] | Tuple[str, int, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
+        # print(sampled_sequence)
+        # print(resource_map)
         capseq = cls.convert_to_cap_device_specific_sequence(
             sampled_sequence={
                 target_name: sseq
@@ -442,7 +510,33 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
     ) -> Dict[Tuple[str, str, int], CaptureParam]:
-        delay_word = 6 + 7 * 16
+        # fnco_freqs_by_target = {
+        #     target_name: [
+        #         _["fnco_freq"]
+        #         for _ in port_config[target_name].dump_config["channels"].values()
+        #     ]
+        #     if "channels" in port_config[target_name].dump_config
+        #     else [
+        #         _["fnco_freq"]
+        #         for _ in port_config[target_name].dump_config["runits"].values()
+        #     ]
+        #     for target_name, _ in resource_map.items()
+        # }
+        # ndelay_or_nwait_by_target = {
+        #     target_name: _["port"].ndelay_or_nwait
+        #     if _["port"].ndelay_or_nwait is not None
+        #     else tuple([0 for _ in fnco_freqs_by_target[target_name]])
+        #     for target_name, _ in resource_map.items()
+        # }
+        ndelay_or_nwait_by_target = {
+            target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
+            if _["port"].ndelay_or_nwait is not None
+            else 0
+            for target_name, _ in resource_map.items()
+        }
+        # print(resource_map)
+        # print(ndelay_or_nwait_by_target)
+        # delay_word = 6 + 6 * 16
         # print([_["target"]["frequency"] for target_name, _ in resource_map.items()])
         # print(port_config)
         # CaptureParam の生成
@@ -484,7 +578,7 @@ class Converter:
         ids_e7 = {
             targets_ids[_.target_name]: CaptureParamTools.create(
                 sequence=_,
-                capture_delay_words=delay_word,
+                capture_delay_words=ndelay_or_nwait_by_target[_.target_name] * 16,
                 repeats=repeats,
                 interval_samples=int(interval / _.sampling_period),  # samples
                 # integral_mode=integral_mode,
@@ -496,7 +590,7 @@ class Converter:
                 id: CaptureParamTools.enable_integration(capprm=e7)
                 for id, e7 in ids_e7.items()
             }
-        print(port_config)
+        # print(port_config)
         if dsp_demodulation:
             ids_e7 = {
                 id: CaptureParamTools.enable_demodulation(
@@ -519,6 +613,12 @@ class Converter:
         interval: float,
         # integral_mode: str,
     ) -> Dict[Tuple[str, int, int], WaveSequence]:
+        # ndelay_or_nwait_by_target = {
+        #     target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
+        #     if _["port"].ndelay_or_wait is not None
+        #     else 0
+        #     for target_name, _ in resource_map.items()
+        # }
         wait_words = 0
         # print(port_config)
         # WaveSequence の生成
@@ -540,9 +640,27 @@ class Converter:
             target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
             for target_name, _ in resource_map.items()
         }
+        ndelay_or_nwait_by_id = {
+            id: next(
+                iter(
+                    {
+                        _["port"].ndelay_or_nwait[_["channel_number"]]
+                        for _ in resource_map.values()
+                        if _["box"].box_name == id[0]
+                        and _["port"].port == id[1]
+                        and _["channel_number"] == id[2]
+                    }
+                )
+            )
+            for id in targets_ids.values()
+        }
         # (box_name, port_number, channel_number) と {target_name: sampled_sequence} とのマップを作成する
         ids_sampled_sequences = {
-            id: {_: sampled_sequence[_] for _, _id in targets_ids.items() if _id == id}
+            id: {
+                _: sampled_sequence[_]
+                for _, _id in targets_ids.items()
+                if _id == id and _ in sampled_sequence
+            }
             for id in targets_ids.values()
         }
         # (box_name, port_number, channel_number) と {target_name: modfreq} とのマップを作成する
@@ -564,7 +682,8 @@ class Converter:
         return {
             id: WaveSequenceTools.create(
                 sequence=ids_muxed_sequences[id],
-                wait_words=wait_words,
+                # wait_words=wait_words,
+                wait_words=ndelay_or_nwait_by_id[id],
                 repeats=repeats,
                 interval_samples=int(
                     interval / ids_muxed_sequences[id].sampling_period
@@ -710,7 +829,7 @@ class PortConfigAcquirer:
         port: int | Tuple[int, int],
         channel: int,
     ):
-        dp = box.dump_port(port)
+        self.dump_config = dp = box.dump_port(port)
         fnco_freq = 0
         if "channels" in dp:
             fnco_freq = dp["channels"][channel]["fnco_freq"]
@@ -729,10 +848,14 @@ class PortConfigAcquirer:
 class Sequencer(Command):
     def __init__(
         self,
-        sampled_sequence: Dict[str, SampledSequenceBase],
-        resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
+        gen_sampled_sequence: Dict[str, GenSampledSequence],
+        cap_sampled_sequence: Dict[str, CapSampledSequence],
+        resource_map: Dict[
+            str, Iterable[Dict[str, BoxSetting | PortSetting | int | Dict[str, Any]]]
+        ],
     ):
-        self.sampled_sequence = sampled_sequence
+        self.gen_sampled_sequence = gen_sampled_sequence
+        self.cap_sampled_sequence = cap_sampled_sequence
         self.resource_map = resource_map
 
     def set_measurement_option(
@@ -756,72 +879,203 @@ class Sequencer(Command):
         self,
         boxpool: BoxPool,
     ) -> Tuple[Dict[str, CaptureReturnCode], Dict[str, list], Dict]:
+        # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
+        # print(self.gen_sampled_sequence)
+        # print(self.cap_sampled_sequence)
+        # print("aaa")
+        _cap_resource_map = {
+            target_name: [
+                m
+                for m in ms
+                if boxpool.get_box(m["box"].box_name)[0].dump_port(m["port"].port)[
+                    "direction"
+                ]
+                == "in"
+                and target_name in self.cap_sampled_sequence
+            ]
+            for target_name, ms in self.resource_map.items()
+        }
+        _gen_resource_map = {
+            target_name: [
+                m
+                for m in ms
+                if boxpool.get_box(m["box"].box_name)[0].dump_port(m["port"].port)[
+                    "direction"
+                ]
+                == "out"
+                and target_name in self.gen_sampled_sequence
+            ]
+            for target_name, ms in self.resource_map.items()
+        }
+        # print("bbb")
+        # _cap_target_bpc = {
+        #     target_name: [
+        #         {
+        #             "box": boxpool.get_box(m["box"].box_name)[0],
+        #             "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
+        #             "channel": m["channel_number"],
+        #         }
+        #         for m in ms
+        #         if boxpool.get_box(m["box"].box_name)[0].dump_port(m["port"].port)[
+        #             "direction"
+        #         ]
+        #         == "in"
+        #     ]
+        #     for target_name, ms in self.resource_map.items()
+        # }
+        # _gen_target_bpc = {
+        #     target_name: [
+        #         {
+        #             "box": boxpool.get_box(m["box"].box_name)[0],
+        #             "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
+        #             "channel": m["channel_number"],
+        #         }
+        #         for m in ms
+        #         if boxpool.get_box(m["box"].box_name)[0].dump_port(m["port"].port)[
+        #             "direction"
+        #         ]
+        #         == "out"
+        #     ]
+        #     for target_name, ms in self.resource_map.items()
+        # }
+        # print(_cap_target_bpc)
+        # print(_gen_target_bpc)
+        # TODO ここで caps や gens が二つ以上だとエラーを出すこと
+        # print("ccc")
+        # print(_cap_resource_map)
+        # print(_gen_resource_map)
+        cap_resource_map = {
+            target_name: next(iter(maps))
+            for target_name, maps in _cap_resource_map.items()
+            if maps
+        }
+        gen_resource_map = {
+            target_name: next(iter(maps))
+            for target_name, maps in _gen_resource_map.items()
+            if maps
+        }
+        # print(cap_resource_map)
+        # print(gen_resource_map)
         # e7 の生成に必要な lo_hz などをまとめた辞書を作る
-        # print(self.resource_map)
-        target_bpc: Dict[str, TargetBPC] = {
+        # print("eee")
+        cap_target_bpc: Dict[str, Iterable[TargetBPC]] = {
             target_name: {
                 "box": boxpool.get_box(m["box"].box_name)[0],
                 "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
-                "channel": m["channel_number"]
-                if isinstance(m["channel_number"], int)
-                else 0,
+                "channel": m["channel_number"],
             }
-            for target_name, m in self.resource_map.items()
+            for target_name, m in cap_resource_map.items()
         }
-        target_portconf = {
+        gen_target_bpc: Dict[str, Iterable[TargetBPC]] = {
+            target_name: {
+                "box": boxpool.get_box(m["box"].box_name)[0],
+                "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
+                "channel": m["channel_number"],
+            }
+            for target_name, m in gen_resource_map.items()
+        }
+        # print("ddd")
+        # target_bpc: Dict[str, Iterable[TargetBPC]] = {
+        #     target_name: {
+        #         "box": boxpool.get_box(m["box"].box_name)[0],
+        #         "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
+        #         "channel": m["channel_number"],
+        #     }
+        #     for target_name, m in self.resource_map.items()
+        # }
+        # cap_target_portconf = {
+        #     target_name: PortConfigAcquirer(
+        #         box=m["box"], port=m["port"], channel=m["channel"]
+        #     )
+        #     for target_name, m in cap_target_bpc.items()
+        # }
+        # gen_target_portconf = {
+        #     target_name: PortConfigAcquirer(
+        #         box=m["box"], port=m["port"], channel=m["channel"]
+        #     )
+        #     for target_name, m in gen_target_bpc.items()
+        # }
+        cap_target_portconf = {
             target_name: PortConfigAcquirer(
                 box=m["box"], port=m["port"], channel=m["channel"]
             )
-            for target_name, m in target_bpc.items()
+            for target_name, m in cap_target_bpc.items()
         }
+        gen_target_portconf = {
+            target_name: PortConfigAcquirer(
+                box=m["box"], port=m["port"], channel=m["channel"]
+            )
+            for target_name, m in gen_target_bpc.items()
+        }
+        # target_portconf = {
+        #     target_name: PortConfigAcquirer(
+        #         box=m["box"], port=m["port"], channel=m["channel"]
+        #     )
+        #     for target_name, m in target_bpc.items()
+        # }
         # target_freq = {
         #     target_name: m["target"]["frequency"]
         #     for target_name, m in self.resource_map.items()
         # }
 
-        e7_settings = Converter.convert_to_device_specific_sequence(
-            sampled_sequence=self.sampled_sequence,
-            resource_map=self.resource_map,
+        cap_e7_settings = Converter.convert_to_cap_device_specific_sequence(
+            sampled_sequence=self.cap_sampled_sequence,
+            resource_map=cap_resource_map,
             # target_freq=target_freq,
-            port_config=target_portconf,
+            port_config=cap_target_portconf,
             repeats=self.repeats,
             interval=self.interval,
             integral_mode=self.integral_mode,
             dsp_demodulation=self.dsp_demodulation,
             software_demodulation=self.software_demodulation,
         )
+        gen_e7_settings = Converter.convert_to_gen_device_specific_sequence(
+            sampled_sequence=self.gen_sampled_sequence,
+            resource_map=gen_resource_map,
+            # target_freq=target_freq,
+            port_config=gen_target_portconf,
+            repeats=self.repeats,
+            interval=self.interval,
+            # integral_mode=self.integral_mode,
+            # dsp_demodulation=self.dsp_demodulation,
+            # software_demodulation=self.software_demodulation,
+        )
 
         pg = PulseGen(boxpool)
         pc = PulseCap(boxpool)
-        for (box_name, port, channel), e7 in e7_settings.items():
-            if isinstance(e7, WaveSequence) and isinstance(port, int):
-                pg.create(
-                    box_name=box_name,
-                    port=port,
-                    channel=channel,
-                    waveseq=e7,
-                )
-                # print(
-                #     f"waveseq: wait={e7.num_wait_words}, repeats={e7.num_repeats}, ",
-                #     end="",
-                # )
-                # print([(_.num_wave_words, _.num_blank_words) for _ in e7.chunk_list])
-            elif isinstance(e7, CaptureParam) and isinstance(port, int):
-                pc.create(
-                    box_name=box_name,
-                    port=port,
-                    channel=channel,
-                    capprm=e7,
-                )
-                # print(
-                #     f"cap: delay={e7.capture_delay}, repeats={e7.num_integ_sections}, sections={e7.sum_section_list}"
-                # )
-            else:
-                raise ValueError(f"invalid object {(box_name, port, channel)}:{e7}")
+        for (box_name, port, channel), e7 in gen_e7_settings.items():
+            pg.create(
+                box_name=box_name,
+                port=port,
+                channel=channel,
+                waveseq=e7,
+            )
+            # print(
+            #     f"waveseq: wait={e7.num_wait_words}, repeats={e7.num_repeats}, ",
+            #     end="",
+            # )
+            # print([(_.num_wave_words, _.num_blank_words) for _ in e7.chunk_list])
+        for (box_name, port, channel), e7 in cap_e7_settings.items():
+            pc.create(
+                box_name=box_name,
+                port=port,
+                channel=channel,
+                capprm=e7,
+            )
+            # print(
+            #     f"cap: delay={e7.capture_delay}, repeats={e7.num_integ_sections}, sections={e7.sum_section_list}"
+            # )
+            # else:
+            #     raise ValueError(f"invalid object {(box_name, port, channel)}:{e7}")
         [_.init() for _ in pg.pulsegens]
         [_.init() for _ in pc.pulsecaps]
         #
         bpc_capmod = {(_.box_name, _.port, _.channel): _.capmod for _ in pc.pulsecaps}
+        # print(cap_e7_settings)
+        # print(bpc_capmod)
+        # print([_ for _ in pc.pulsecaps])
+        # for k, v in cap_resource_map.items():
+        #     print(k, v)
         bmc_target: Dict[Tuple[Optional[str], CaptureModule, Optional[int]], str] = {
             (
                 m["box"].box_name if isinstance(m["box"], BoxSetting) else None,
@@ -834,14 +1088,18 @@ class Sequencer(Command):
                 ],
                 m["channel_number"] if isinstance(m["channel_number"], int) else None,
             ): target_name
-            for target_name, m in self.resource_map.items()
-            if isinstance(
-                e7_settings[(m["box"].box_name, m["port"].port, m["channel_number"])],
-                CaptureParam,
-            )
+            for target_name, m in cap_resource_map.items()
+            # if isinstance(
+            #     e7_settings[(m["box"].box_name, m["port"].port, m["channel_number"])],
+            #     CaptureParam,
+            # )
         }
 
-        box_names = {box_name for (box_name, _, _), _ in e7_settings.items()}
+        box_names = {box_name for (box_name, _, _), _ in cap_e7_settings.items()}
+        box_names |= {box_name for (box_name, _, _), _ in gen_e7_settings.items()}
+        box_configs = {
+            box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
+        }
         # TODO CW 出力については box の機能を使うのが良さげ
         # 制御方式の自動選択
         # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
@@ -857,7 +1115,14 @@ class Sequencer(Command):
             # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
             _status, _iqs = pc.capture_now()
             status, iqs = self.convert_key_from_bmu_to_target(bmc_target, _status, _iqs)
-            return (status, iqs) + ({"debug": "case 2: catpure_now"},)
+            return (status, iqs) + (
+                {
+                    "cap_e7_settings": cap_e7_settings,
+                    "box_configs": box_configs,
+                    "debug": "case 2: catpure_now",
+                },
+            )
+            # return {}, {}, {"debug": "case 2: catpure_now"}
         elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
             # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
             # trigger を設定
@@ -869,18 +1134,43 @@ class Sequencer(Command):
             return (status, iqs) + (
                 {"debug": "case 1: capture_at_trigger_of, emit_now"},
             )
+            # return {}, {}, {"debug": "case 1: capture_at_trigger_of, emit_now"}
         elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
             # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
             pg.emit_now()
-            return {}, {}, {"debug": "case 3: emit_now"}
+            return (
+                {},
+                {},
+                {
+                    "gen_e7_settings": gen_e7_settings,
+                    "box_configs": box_configs,
+                    "debug": "case 3: emit_now",
+                },
+            )
         elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
             # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
             if boxpool._clock_master is None:
                 pg.emit_now()
-                return {}, {}, {"debug": "case 5: emit_now"}
+                return (
+                    {},
+                    {},
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 5: emit_now",
+                    },
+                )
             else:
                 pg.emit_at()
-                return {}, {}, {"debug": "case 5: emit_at"}
+                return (
+                    {},
+                    {},
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 5: emit_at",
+                    },
+                )
         elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
             # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
             if boxpool._clock_master is None:
@@ -891,7 +1181,15 @@ class Sequencer(Command):
                 status, iqs = self.convert_key_from_bmu_to_target(
                     bmc_target, _status, _iqs
                 )
-                return (status, iqs) + ({"debug": "case 4: capture_at, emit_now"},)
+                return (status, iqs) + (
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "cap_e7_settings": cap_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 4: capture_at, emit_now",
+                    },
+                )
+                # return {}, {}, {"debug": "case 4: capture_at, emit_now"}
             else:
                 triggering_pgs = self.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
@@ -900,7 +1198,15 @@ class Sequencer(Command):
                 status, iqs = self.convert_key_from_bmu_to_target(
                     bmc_target, _status, _iqs
                 )
-                return (status, iqs) + ({"debug": "case 4: capture_at, emit_at"},)
+                return (status, iqs) + (
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "cap_e7_settings": cap_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 4: capture_at, emit_at",
+                    },
+                )
+                # return {}, {}, {"debug": "case 4: capture_at, emit_now"}
         else:
             raise ValueError("this setting is not supported yet")
 
@@ -1028,13 +1334,36 @@ class Executor:
         return set(
             sum(
                 [
-                    list({__["box"].box_name for __ in _.resource_map.values()})
-                    for _ in self._work_queue
-                    if isinstance(_, Sequencer)
+                    [
+                        __["box"].box_name
+                        for _ in command.resource_map.values()
+                        for __ in _
+                    ]
+                    for command in self._work_queue
+                    if isinstance(command, Sequencer)
                 ],
                 [],
             )
         )
+        # return set(
+        #     sum(
+        #         [
+        #             list(
+        #                 {
+        #                     [
+        #                         ___["box"].box_name
+        #                         for ___ in __
+        #                         if isinstance(___["box"], BoxSetting)
+        #                     ]
+        #                     for __ in _.resource_map.values()
+        #                 }
+        #             )
+        #             for _ in self._work_queue
+        #             if isinstance(_, Sequencer)
+        #         ],
+        #         [],
+        #     )
+        # )
 
     def collect_sequencers(self) -> set[Sequencer]:
         return {_ for _ in self._work_queue if isinstance(_, Sequencer)}
@@ -1070,6 +1399,9 @@ class Executor:
 class ClockmasterSetting:
     ipaddr: str | IPv4Address | IPv6Address
     reset: bool
+
+    def asdict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -1136,11 +1468,28 @@ class PortSetting:
     port_name: str
     box_name: str
     port: int
-    lo_freq: Optional[float] = None
-    cnco_freq: Optional[float] = None
-    sideband: str = "U"
-    vatt: int = 0x800
-    fnco_freq: Optional[Tuple[float] | Tuple[float, float, float]] = None
+    lo_freq: Optional[float] = None  # will be obsolete
+    cnco_freq: Optional[float] = None  # will be obsolete
+    sideband: str = "U"  # will be obsolete
+    vatt: int = 0x800  # will be obsolete
+    fnco_freq: Optional[Tuple[float, ...]] = None  # will be obsolete
+    ndelay_or_nwait: Tuple[int, ...] = ()
+
+    # def __post_init__(self) -> None:
+    #     if self.fnco_freq is not None and self.ndelay_or_nwait is None:
+    #         self.ndelay_or_nwait = tuple([0 for _ in self.fnco_freq])
+    #     if self.fnco_freq is not None and self.ndelay_or_nwait is not None:
+    #         if len(self.fnco_freq) != len(self.ndelay_or_nwait):
+    #             raise ValueError(
+    #                 f"({self.box_name}, {self.port}): nco_freq and ndelay_or_nwait must be the same size"
+    #             )
+    def asdict(self) -> dict[str, Any]:
+        return {
+            "port_name": self.port_name,
+            "box_name": self.box_name,
+            "port": self.port,
+            "ndelay_or_nwait": self.ndelay_or_nwait,
+        }
 
 
 class SystemConfigDatabase:
@@ -1264,33 +1613,79 @@ class SystemConfigDatabase:
             fnco_freq=fnco_freq,
         )
 
-    def get_channel_by_target(self, target_name: str) -> str:
-        return {target: channel for channel, target in self._relation_channel_target}[
-            target_name
-        ]
+    def get_channels_by_target(
+        self,
+        target_name: str,
+    ) -> Set[str]:
+        return {
+            channel
+            for channel, target in self._relation_channel_target
+            if target == target_name
+        }
 
-    def get_channel_number_by_target(self, target_name: str) -> int:
-        channel = self.get_channel_by_target(target_name)
-        return int(
-            {channel: port for channel, port in self._relation_channel_port}[channel][
-                "channel_number"
-            ]
-        )
+    def get_channel_numbers_by_target(
+        self,
+        target_name: str,
+    ) -> Set[int]:
+        channels = self.get_channels_by_target(target_name)
+        return {
+            int(
+                {_: port for _, port in self._relation_channel_port}[channel][
+                    "channel_number"
+                ]
+            )
+            for channel in channels
+        }
 
-    def get_port_by_target(self, target_name: str) -> str:
-        channel = self.get_channel_by_target(target_name)
-        return str(
-            {channel: port for channel, port in self._relation_channel_port}[channel][
-                "port_name"
-            ]
-        )
+    def get_channel(
+        self,
+        channel_name: str,
+    ) -> Tuple[str, str, int]:
+        port_name = self.get_port_by_channel(channel_name)
+        box_name = self._port_settings[port_name].box_name
+        channel_number = self.get_channel_number_by_channel(channel_name)
+        return box_name, port_name, channel_number
 
-    def get_port_number_by_target(self, target_name: str) -> int:
-        return self._port_settings[self.get_port_by_target(target_name)].port
+    def get_port_by_channel(self, channel_name: str) -> str:
+        retval = {channel: port for channel, port in self._relation_channel_port}[
+            channel_name
+        ]["port_name"]
+        return retval if isinstance(retval, str) else ""
 
-    def get_box_by_target(self, target_name: str) -> str:
-        port = self.get_port_by_target(target_name)
-        return self._port_settings[port].box_name
+    def get_channel_number_by_channel(self, channel_name: str) -> int:
+        retval = {channel: port for channel, port in self._relation_channel_port}[
+            channel_name
+        ]["channel_number"]
+        return retval if isinstance(retval, int) else 0
+
+    def get_ports_by_target(
+        self,
+        target_name: str,
+    ) -> Set[str]:
+        channels = self.get_channels_by_target(target_name)
+        return {
+            str(
+                {channel: port for channel, port in self._relation_channel_port}[_][
+                    "port_name"
+                ]
+            )
+            for _ in channels
+        }
+
+    def get_port_numbers_by_target(
+        self,
+        target_name: str,
+    ) -> Set[int]:
+        return {
+            self._port_settings[_].port for _ in self.get_ports_by_target(target_name)
+        }
+
+    def get_boxes_by_target(
+        self,
+        target_name: str,
+    ) -> Set[str]:
+        ports = self.get_ports_by_target(target_name)
+        return {self._port_settings[port].box_name for port in ports}
 
     def define_box(
         self,
@@ -1319,6 +1714,7 @@ class SystemConfigDatabase:
         channel_name: str,
         port_name: str,
         channel_number: int,
+        ndelay_or_nwait: int = 0,
     ) -> None:
         self._relation_channel_port.append(
             (
@@ -1329,6 +1725,16 @@ class SystemConfigDatabase:
                 },
             ),
         )
+        _ndelay_or_nwait = list(self._port_settings[port_name].ndelay_or_nwait)
+        if channel_number < len(_ndelay_or_nwait):
+            _ndelay_or_nwait[channel_number] = ndelay_or_nwait
+        else:
+            _ = [0 for _ in range(channel_number + 1)]
+            for i, v in enumerate(_ndelay_or_nwait):
+                _[i] = v
+            _[channel_number] = ndelay_or_nwait
+            _ndelay_or_nwait = _
+        self._port_settings[port_name].ndelay_or_nwait = tuple(_ndelay_or_nwait)
 
     def define_port(
         self,
@@ -1337,12 +1743,17 @@ class SystemConfigDatabase:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: Optional[str] = None,
-        vatt: Optional[int] = None,
+        sideband: str = "U",
+        vatt: int = 0x800,
         fnco_freq: Optional[
             Tuple[float] | Tuple[float, float] | Tuple[float, float, float]
         ] = None,
+        # ndelay_or_nwait: Tuple[int, ...] = [],
     ) -> None:
+        if port_name in self._port_settings:
+            ndelay_or_nwait = self._port_settings[port_name].ndelay_or_nwait
+        else:
+            ndelay_or_nwait = ()
         self._port_settings[port_name] = PortSetting(
             port_name=port_name,
             box_name=box_name,
@@ -1352,4 +1763,47 @@ class SystemConfigDatabase:
             sideband=sideband,
             vatt=vatt,
             fnco_freq=fnco_freq,
+            ndelay_or_nwait=ndelay_or_nwait,
         )
+
+    def create_box(
+        self,
+        box_name: str,
+        reconnect: bool = True,
+    ) -> Quel1Box:
+        s = self._box_settings[box_name]
+        box = Quel1Box.create(
+            ipaddr_wss=str(s.ipaddr_wss),
+            ipaddr_sss=str(s.ipaddr_sss),
+            ipaddr_css=str(s.ipaddr_css),
+            boxtype=s.boxtype,
+            config_root=Path(s.config_root) if s.config_root is not None else None,
+            config_options=s.config_options if s.config_options else None,
+        )
+        if reconnect:
+            if not all([_ for _ in box.link_status().values()]):
+                box.relinkup(use_204b=False)
+            status = box.reconnect()
+            for mxfe_idx, _ in status.items():
+                if not _:
+                    logger.error(
+                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+                    )
+        return box
+
+    def asdict(self) -> Dict[str, Any]:
+        return {
+            "clockmaster_setting": self._clockmaster_setting.asdict()
+            if self._clockmaster_setting is not None
+            else None,
+            "box_settings": {
+                box_name: _.asdict() for box_name, _ in self._box_settings.items()
+            },
+            "box_aliases": self._box_aliases,
+            "port_settings": {
+                port_name: _.asdict() for port_name, _ in self._port_settings.items()
+            },
+            "target_settings": self._target_settings,
+            "relation_channel_target": self._relation_channel_target,
+            "relation_channel_port": self._relation_channel_port,
+        }

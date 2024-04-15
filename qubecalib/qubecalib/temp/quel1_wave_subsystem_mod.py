@@ -44,6 +44,8 @@ class Quel1WaveSubsystemMod:
         status: CaptureReturnCode = CaptureReturnCode.SUCCESS
         with wss._capctrl_lock:
             for cuhwx, capmu in cuhwxs_capums.items():
+                # TODO monitor に dsp を適用してしまうバグあり
+                # そのため monitor では
                 n_sample_captured = wss._capctrl.num_captured_samples(cuhwx)
                 n_sample_expected = cuhwx__num_expected_words[cuhwx]
                 if n_sample_captured == n_sample_expected:

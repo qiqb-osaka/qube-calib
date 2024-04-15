@@ -239,7 +239,7 @@ class CaptureParamTools:
         p.complex_window_coefs = list(
             np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
         )
-        p.complex_fir_coefs = cls.acquisition_fir_coefficient(-m)  # BPFの係数を設定
+        p.complex_fir_coefs = cls.acquisition_fir_coefficient(m)  # BPFの係数を設定
 
         # DSPのどのモジュールを有効化するかを指定
         dspunits = p.dsp_units_enabled
@@ -260,12 +260,12 @@ class CaptureParamTools:
         )
         ACQ_FCBIT_POW_HALF = 2**15  # equivalent to 2^(ACQ_FCOEF_BITS-1).
 
-        sigma = 100.0  # nanoseconds
-        freq_in_mhz = bb_frequency  # MHz
+        sigma = 300.0  # nanoseconds
+        freq_in_mhz = bb_frequency * 1e-6  # MHz
         n_of_band = (
             16  # The maximum number of the FIR filter taps prior to decimation process.
         )
-        band_step = 500 / n_of_band
+        band_step = ADCBB_SAMPLE_R / n_of_band
         band_idx = int(freq_in_mhz / band_step + 0.5 + n_of_band) - n_of_band
         band_center = band_step * band_idx
         x = np.arange(ACQ_MAX_FCOEF) - (ACQ_MAX_FCOEF - 1) / 2
