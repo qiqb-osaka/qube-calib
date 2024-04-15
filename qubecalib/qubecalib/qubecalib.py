@@ -38,13 +38,13 @@ from .e7utils import (
     WaveSequenceTools,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
 )
+from .general_looptest_common_mod import BoxPool, PulseCap, PulseGen, PulseGen_
 from .neopulse import (
     CapSampledSequence,
     GenSampledSequence,
     GenSampledSubSequence,
     SampledSequenceBase,
 )
-from .temp.general_looptest_common_mod import BoxPool, PulseCap, PulseGen, PulseGen_
 
 PulseGen, PulseCap
 
