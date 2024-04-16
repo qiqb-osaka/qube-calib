@@ -1,0 +1,40 @@
+@startuml system_config_database
+entity box{
+	box_name
+	---
+}
+entity channel {
+		channel_name
+		---
+		port_name[FK]
+		channel_number
+		ndelay_or_nwait
+}
+entity port {
+	port_name
+	---
+	box_name[FK]
+	port_number
+}
+entity relation_channel_target {
+	---
+	channel_name[FK]
+	target_name[FK]
+}
+entity target #LightSalmon {
+	target_name
+	---
+	target_frequency
+}
+
+port -[hidden]l- box
+port -[hidden]r- channel
+channel -[hidden]r- relation_channel_target
+relation_channel_target -[hidden]r- target
+
+box::box_name <-- port::box_name
+channel::port_name --> port::port_name
+channel::channel_name <-- relation_channel_target::channel_name
+relation_channel_target::target_name --> target::target_name
+
+@enduml

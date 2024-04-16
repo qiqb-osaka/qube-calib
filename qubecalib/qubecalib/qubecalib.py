@@ -136,6 +136,25 @@ class QubeCalib:
 
         return self._executor
 
+    def modify_target_frequency(self, target_name: str, frequency: float) -> None:
+        self.system_config_database._target_settings[target_name]["frequency"] = (
+            frequency
+        )
+
+    # def add_rfswitch(self, target_name: str, rfswitch: str) -> None:
+    #     """(block / pass), (loop / open)"""
+    #     box_name = next(
+    #         iter(self.system_config_database.get_boxes_by_target(target_name))
+    #     )
+    #     port = next(
+    #         iter(self.system_config_database.get_port_numbers_by_target(target_name))
+    #     )
+    #     self._executor.add_command(RfSwitch(box_name, port, rfswitch))
+
+    def add_rfswitch(self, box_name: str, port: int, rfswitch: str) -> None:
+        """(block / pass), (loop / open)"""
+        self._executor.add_command(RfSwitch(box_name, port, rfswitch))
+
     def add_sequence(
         self,
         sequence: neopulse.Sequence,
@@ -230,6 +249,16 @@ class QubeCalib:
         # print(db._relation_channel_port)
         # print(db._port_settings)
 
+    def define_clockmaster(
+        self,
+        ipaddr: str,
+        reset: bool,
+    ) -> None:
+        return self.system_config_database.define_clockmaster(
+            ipaddr,
+            reset,
+        )
+
     def define_box(
         self,
         box_name: str,
@@ -301,6 +330,7 @@ class QubeCalib:
         # {target_name: {box, port, channel_number)}} へ変換
         db = self.system_config_database
         targets_channels = [(_, db.get_channels_by_target(_)) for _ in target_names]
+        # print(targets_channels)
         bpc_targets = {
             target_name: [db.get_channel(_) for _ in channels]
             for target_name, channels in targets_channels
@@ -344,6 +374,9 @@ class QubeCalib:
                 [],
             )
         )
+
+    def get_box_name_by_alias(self, alias: str) -> str:
+        return self.system_config_database._box_aliases[alias]
 
     def create_box(
         self,
@@ -558,6 +591,7 @@ class Converter:
             target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
             for target_name, _ in resource_map.items()
         }
+        # print(targets_ids)
         ids_targets = {id: target_name for target_name, id in targets_ids.items()}
         if len(targets_ids) != len(ids_targets):
             raise ValueError("multiple targets are assigned.")
@@ -845,6 +879,20 @@ class PortConfigAcquirer:
         return f"{self.__class__.__name__}(lo_freq={self.lo_freq}, cnco_freq={self.cnco_freq}, fnco_freq={self.fnco_freq}, sideband={self.sideband})"
 
 
+class RfSwitch(Command):
+    def __init__(self, box_name: str, port: int, rfswitch: str):
+        self._box_name = box_name
+        self._port = port
+        self._rfswitch = rfswitch
+
+    def execute(
+        self,
+        boxpool: BoxPool,
+    ) -> None:
+        box = boxpool.get_box(self._box_name)[0]
+        box.config_rfswitch(self._port, rfswitch=self._rfswitch)
+
+
 class Sequencer(Command):
     def __init__(
         self,
@@ -954,8 +1002,6 @@ class Sequencer(Command):
             for target_name, maps in _gen_resource_map.items()
             if maps
         }
-        # print(cap_resource_map)
-        # print(gen_resource_map)
         # e7 の生成に必要な lo_hz などをまとめた辞書を作る
         # print("eee")
         cap_target_bpc: Dict[str, Iterable[TargetBPC]] = {
@@ -1388,7 +1434,7 @@ class Executor:
             next = self._work_queue.pop()
             if isinstance(next, Sequencer):
                 break
-            next.execute()
+            next.execute(self._boxpool)
         return next.execute(self._boxpool)
 
     def add_command(self, command: Command) -> None:
@@ -1462,6 +1508,11 @@ class BoxSetting:
             "config_options": self.config_options,
         }
 
+    def asjsonable(self) -> Dict[str, Any]:
+        dct = self.asdict()
+        dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[dct["boxtype"]]
+        return dct
+
 
 @dataclass
 class PortSetting:
@@ -1504,6 +1555,16 @@ class SystemConfigDatabase:
             MutableSequence[Tuple[str, Dict[str, str | int]]]
         ] = []
 
+    def define_clockmaster(
+        self,
+        ipaddr: str,
+        reset: bool,
+    ) -> None:
+        self._clockmaster_setting = ClockmasterSetting(
+            ipaddr=ipaddr,
+            reset=reset,
+        )
+
     def set(
         self,
         clockmaster_setting: Optional[Dict] = None,
@@ -1527,10 +1588,11 @@ class SystemConfigDatabase:
                 self._box_aliases[alias] = name
         if port_settings is not None:
             for port_name, setting in port_settings.items():
-                setting["box_name"] = self._box_aliases[setting["box_name_or_alias"]]
-                setting["fnco_freq"] = setting["band"]
-                del setting["box_name_or_alias"]
-                del setting["band"]
+                if setting["box_name"] in self._box_aliases:
+                    setting["box_name"] = self._box_aliases[setting["box_name"]]
+                # setting["fnco_freq"] = setting["channel"]
+                # del setting["box_name"]
+                # del setting["band"]
                 self.add_port_setting(**{"port_name": port_name} | setting)
         if relation_channel_target is not None:
             for _ in relation_channel_target:
@@ -1558,15 +1620,17 @@ class SystemConfigDatabase:
                 "port_settings",
             ]
         }
-        relation_channel_target = [
-            [channel[:-2] + "CH" + channel[-1], target]
-            for channel, target in json["relation_band_target"]
-        ]
+        # relation_channel_target = [
+        #     [channel[:-2] + "CH" + channel[-1], target]
+        #     for channel, target in json["relation_channel_target"]
+        # ]
+        relation_channel_target = json["relation_channel_target"]
         settings["relation_channel_target"] = relation_channel_target
         channels = {channel for channel, target in relation_channel_target}
-        relation_channel_port = [
-            [_, {"port_name": _[:-3], "channel_number": int(_[-1:])}] for _ in channels
-        ]
+        # relation_channel_port = [
+        #     [_, {"port_name": _[:-3], "channel_number": int(_[-1:])}] for _ in channels
+        # ]
+        relation_channel_port = json["relation_channel_port"]
         settings["relation_channel_port"] = relation_channel_port
         # TODO ----------
         self.set(**settings)
@@ -1581,6 +1645,8 @@ class SystemConfigDatabase:
         config_root: Optional[str | os.PathLike] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
     ) -> None:
+        if isinstance(boxtype, str):
+            boxtype = QUEL1_BOXTYPE_ALIAS[boxtype]
         self._box_settings[box_name] = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -1596,11 +1662,12 @@ class SystemConfigDatabase:
         port_name: str,
         box_name: str,
         port: int,
-        lo_freq: float,
-        cnco_freq: float,
-        sideband: str,
-        vatt: int,
-        fnco_freq: Tuple[float] | Tuple[float, float, float],
+        lo_freq: float = 0,
+        cnco_freq: float = 0,
+        sideband: str = "",
+        vatt: int = 0,
+        fnco_freq: Tuple[float] | Tuple[float, float, float] = (0.0,),
+        ndelay_or_nwait: Tuple[int, ...] = (),
     ) -> None:
         self._port_settings[port_name] = PortSetting(
             port_name=port_name,
@@ -1611,6 +1678,7 @@ class SystemConfigDatabase:
             sideband=sideband,
             vatt=vatt,
             fnco_freq=fnco_freq,
+            ndelay_or_nwait=ndelay_or_nwait,
         )
 
     def get_channels_by_target(
@@ -1807,3 +1875,29 @@ class SystemConfigDatabase:
             "relation_channel_target": self._relation_channel_target,
             "relation_channel_port": self._relation_channel_port,
         }
+
+    def asjson(self) -> Dict[str, Any]:
+        box_settings = {
+            box_name: _.asdict() for box_name, _ in self._box_settings.items()
+        }
+        for dct in box_settings.values():
+            dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[
+                dct["boxtype"]
+            ]
+        return json5.dumps(
+            {
+                "clockmaster_setting": self._clockmaster_setting.asdict()
+                if self._clockmaster_setting is not None
+                else None,
+                "box_settings": box_settings,
+                "box_aliases": self._box_aliases,
+                "port_settings": {
+                    port_name: _.asdict()
+                    for port_name, _ in self._port_settings.items()
+                },
+                "target_settings": self._target_settings,
+                "relation_channel_target": self._relation_channel_target,
+                "relation_channel_port": self._relation_channel_port,
+            },
+            quote_keys=True,
+        )
