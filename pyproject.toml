@@ -1,21 +1,28 @@
 [build-system]
-requires = ["setuptools>=44.0.0", "wheel"]
+requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.flake8]
-max-line-length = 120
+[project]
+dependencies = [
+    "jupyter ~= 1.0",
+    "numpy ~= 1.0",
+    "matplotlib ~= 3.0",
+    "tqdm ~= 4.0",
+]
+name = "qubecalib"
+dynamic = ["version"]
+requires-python = ">=3.9"
+authors = [{ name = "h403", email = "shiomi@ieee.org" }]
+description = "QuBE calibration tools"
+readme = "README.md"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: GPL",
+    "Programming Language :: Python :: 3",
+]
 
-[tool.black]
-line-length = 120
-target-version = ["py39"]
+[tool.setuptools]
+packages = ["qubecalib"]
 
-[tool.isort]
-profile = "black"
-line_length = 120
-
-[tool.mypy]
-python_version = 3.9
-
-[[tool.mypy.overrides]]
-module = "matplotlib.*"
-ignore_missing_imports = true
+[tool.setuptools.dynamic]
+version = { attr = "qubecalib.__version__" }

@@ -1,9 +1,0 @@
-pip
-jupyter
-matplotlib
-tqdm
-numpy
-
-git+https://github.com/qiqb-osaka/qube-calib.git@1a4603bc
-# テストが終了してタグをつけたらこちらに変更
-# git+https://github.com/qiqb-osaka/qube-calib.git@3.0.0
