@@ -8,6 +8,7 @@ dependencies = [
     "numpy ~= 1.0",
     "matplotlib ~= 3.0",
     "tqdm ~= 4.0",
+    "json5 ~= 0.9",
 ]
 name = "qubecalib"
 dynamic = ["version"]
