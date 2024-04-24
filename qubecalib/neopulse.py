@@ -15,7 +15,7 @@ DEFAULT_SAMPLING_PERIOD: float = 2e-9
 
 @dataclass
 class RunningConfig:
-    contexts: Final[MutableSequence] = deque()
+    contexts: Final[MutableSequence] = field(default_factory=deque)
 
 
 __rc__: Final[RunningConfig] = RunningConfig()
