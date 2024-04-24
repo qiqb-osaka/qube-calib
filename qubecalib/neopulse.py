@@ -368,9 +368,9 @@ class Sequence(DequeWithContext):
                 real=np.real(v),
                 imag=np.imag(v),
                 repeats=repeats,
-                post_blank=round(blank / sampling_period)
-                if blank is not None
-                else None,
+                post_blank=(
+                    round(blank / sampling_period) if blank is not None else None
+                ),
             )
             for (v, _, _), repeats, blank in [
                 (
@@ -560,9 +560,11 @@ class Sequence(DequeWithContext):
         return CapSampledSequence(
             target_name,
             prev_blank=round(toplevel_prev_blank / sampling_period),
-            post_blank=round(toplevel_post_blank / sampling_period)
-            if toplevel_post_blank is not None
-            else None,
+            post_blank=(
+                round(toplevel_post_blank / sampling_period)
+                if toplevel_post_blank is not None
+                else None
+            ),
             repeats=None,
             sub_sequences=[
                 CapSampledSubSequence(
@@ -574,9 +576,11 @@ class Sequence(DequeWithContext):
                         for blank, duration in zip(blanks[1:], durations)
                     ],
                     prev_blank=round(blanks[0] / sampling_period),
-                    post_blank=round(subseq.post_blank / sampling_period)
-                    if subseq.post_blank is not None
-                    else None,
+                    post_blank=(
+                        round(subseq.post_blank / sampling_period)
+                        if subseq.post_blank is not None
+                        else None
+                    ),
                     repeats=subseq.repeats,
                 )
                 for edge, subseq, blanks, durations in [
@@ -1063,14 +1067,18 @@ class Utils:
         _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
         _durations = [_.duration for _ in _slots if isinstance(_.duration, float)]
         _blanks = [
-            post.begin - prev.end
-            if post.begin is not None and prev.end is not None
-            else None
+            (
+                post.begin - prev.end
+                if post.begin is not None and prev.end is not None
+                else None
+            )
             for prev, post in zip(_slots[:-1], _slots[1:])
         ] + [
-            frame.end - _slots[-1].end
-            if frame.end is not None and _slots[-1].end is not None
-            else None
+            (
+                frame.end - _slots[-1].end
+                if frame.end is not None and _slots[-1].end is not None
+                else None
+            )
         ]
         return _durations, _blanks
 
