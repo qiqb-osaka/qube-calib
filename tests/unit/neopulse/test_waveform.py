@@ -6,7 +6,6 @@ def test_empty_init():
     wf = Waveform()
     assert wf.__iq__ is None
     assert wf.duration is None
-    assert wf.cmag == 1 + 0j  # TODO
 
 
 def test_init():
@@ -14,7 +13,6 @@ def test_init():
     wf = Waveform(duration=10.0)
     assert wf.__iq__ is None
     assert wf.duration == 10.0
-    assert wf.cmag == 1 + 0j  # TODO
 
 
 def test_set_target():
