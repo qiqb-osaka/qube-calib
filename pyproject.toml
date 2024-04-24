@@ -3,13 +3,6 @@ requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-dependencies = [
-    "jupyter ~= 1.0",
-    "numpy ~= 1.0",
-    "matplotlib ~= 3.0",
-    "tqdm ~= 4.0",
-    "json5 ~= 0.9",
-]
 name = "qubecalib"
 dynamic = ["version"]
 requires-python = ">=3.9"
@@ -20,6 +13,16 @@ license = { file = "LICENSE" }
 classifiers = [
     "License :: OSI Approved :: GPL",
     "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "jupyter ~= 1.0",
+    "numpy ~= 1.0",
+    "matplotlib ~= 3.0",
+    "tqdm ~= 4.0",
+    "json5 ~= 0.9",
+    "e7awgsw @ git+https://github.com/e-trees/e7awg_sw.git@simple_multi",
+    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.8#subdirectory=quel_clock_master",
+    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.8#subdirectory=quel_ic_config",
 ]
 
 [tool.setuptools]
