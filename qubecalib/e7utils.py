@@ -307,10 +307,12 @@ def _convert_gen_sampled_sequence_to_blanks_and_waves_chain(
         + [
             [
                 sequence.sub_sequences[-1].real.shape[0],
-                sequence.sub_sequences[-1].post_blank + sequence.post_blank
-                if sequence.post_blank is not None
-                and sequence.sub_sequences[-1].post_blank is not None
-                else 0,
+                (
+                    sequence.sub_sequences[-1].post_blank + sequence.post_blank
+                    if sequence.post_blank is not None
+                    and sequence.sub_sequences[-1].post_blank is not None
+                    else 0
+                ),
             ]
         ],
         [],
@@ -326,11 +328,13 @@ def _convert_cap_sampled_sequence_to_blanks_and_durations_chain(
     # sub sequence 間を橋渡しするブランクのリスト MutableSequence[Optional[int|float]]
     # 最終スロットの blank, 前 subseq の post_blank, 後 subseq の prev_blank
     blank_bridges = [
-        lo.capture_slots[-1].post_blank + lo.post_blank + hi.prev_blank
-        if lo.capture_slots[-1].post_blank is not None
-        and lo.post_blank is not None
-        and hi.prev_blank is not None
-        else None
+        (
+            lo.capture_slots[-1].post_blank + lo.post_blank + hi.prev_blank
+            if lo.capture_slots[-1].post_blank is not None
+            and lo.post_blank is not None
+            and hi.prev_blank is not None
+            else None
+        )
         for lo, hi in zip(seq.sub_sequences[:-1], seq.sub_sequences[1:])
     ]
 
