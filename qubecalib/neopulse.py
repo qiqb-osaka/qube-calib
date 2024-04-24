@@ -1229,6 +1229,7 @@ class Waveform(Slot, TargetHolder):
         duration: Optional[float] = None,
     ) -> None:
         super().__init__(duration=duration)
+        self.cmag = 1 + 0j
         self.__iq__: Optional[NDArray] = None
 
     def set_target(self, *targets: str) -> Waveform:
@@ -1240,14 +1241,14 @@ class Waveform(Slot, TargetHolder):
         raise NotImplementedError()
 
     def _func(self, t: float) -> complex:
-        """グローバル時間軸 (t) で iq 波形を返す"""
+        """func() に対して複素振幅 (self.cmag) を適用，グローバル時間軸 (t) で iq 波形を返す"""
         if self.begin is None or self.duration is None:
             raise ValueError(
                 "Either or both 'begin' and 'duration' are not initialized."
             )
         if t < self.begin or self.begin + self.duration < t:
             return 0 + 0j
-        return self.func(t - self.begin)
+        return self.cmag * self.func(t - self.begin)
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
