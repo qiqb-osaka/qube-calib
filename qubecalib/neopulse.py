@@ -15,7 +15,7 @@ DEFAULT_SAMPLING_PERIOD: float = 2e-9
 
 @dataclass
 class RunningConfig:
-    contexts: Final[MutableSequence] = deque()
+    contexts: Final[MutableSequence] = field(default_factory=deque)
 
 
 __rc__: Final[RunningConfig] = RunningConfig()
@@ -1224,13 +1224,13 @@ class Frequency(Modifier):
 
 
 class Waveform(Slot, TargetHolder):
-    def __init__(self, duration: Optional[float] = None) -> None:
-        # self.amplitude: float = 1.0
-        # self.phase: float = 0.0  # radian
-        self.cmag = 1 + 0j
-        self.__iq__: Optional[NDArray] = None
-
+    def __init__(
+        self,
+        duration: Optional[float] = None,
+    ) -> None:
         super().__init__(duration=duration)
+        self.__iq__: Optional[NDArray] = None
+        self.cmag = 1 + 0j
 
     def set_target(self, *targets: str) -> Waveform:
         super().set_target(*targets)
@@ -1239,7 +1239,6 @@ class Waveform(Slot, TargetHolder):
     def func(self, t: float) -> complex:
         """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を返す．継承する時はここに関数を定義する．"""
         raise NotImplementedError()
-        return 0
 
     def _func(self, t: float) -> complex:
         """func() に対して複素振幅 (self.cmag) を適用，グローバル時間軸 (t) で iq 波形を返す"""
@@ -1249,47 +1248,31 @@ class Waveform(Slot, TargetHolder):
             )
         if t < self.begin or self.begin + self.duration < t:
             return 0 + 0j
-        return self.cmag * self.func(
-            t - self.begin
-        )  # self.amplitude * np.exp(1j * self.phase)
+        return self.cmag * self.func(t - self.begin)
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
-    def __rmul__(self, value: int | float | complex) -> Waveform:
-        self.cmag = value
-        # self.amplitude = np.abs(value) if isinstance(value, complex) else value
-        # self.phase = np.angle(value) if isinstance(value, complex) else 0
-        return self
-
 
 class RaisedCosFlatTop(Waveform):
-    """
-    Raised Cosine FlatTopパルス
-
-    Attributes
-    ----------
-    ampl : float
-        全体にかかる振幅
-    phase : float
-        全体にかかる位相[rad]
-    rise_time: float
-        立ち上がり・立ち下がり時間[ns]
-    """
-
     def __init__(
         self,
         duration: Optional[float] = None,
-        rise_time: Optional[float] = None,
+        amplitude: float = 1.0,
+        rise_time: float = 0.0,
     ):
-        self._rise_time = rise_time
-
-        super().__init__(duration)
+        super().__init__(duration=duration)
+        self.amplitude = amplitude
+        self.rise_time = rise_time
 
     def func(self, t: float) -> complex:
-        if self.duration is None or self.rise_time is None:
-            raise ValueError("duration or rise_time is None")
+        if self.duration is None:
+            raise ValueError("duration is None")
+
         flattop_duration = self.duration - self.rise_time * 2
+
+        if flattop_duration < 0:
+            raise ValueError("duration is too short for rise_time")
 
         t1 = 0
         t2 = t1 + self.rise_time  # 立ち上がり完了時刻
@@ -1298,55 +1281,48 @@ class RaisedCosFlatTop(Waveform):
 
         if (t1 <= t) & (t < t2):  # 立ち上がり時間領域の条件ブール値
             # 立ち上がり時間領域の値
-            return (1.0 - np.cos(np.pi * (t - t1) / self.rise_time)) / 2.0
+            return (
+                self.amplitude * (1.0 - np.cos(np.pi * (t - t1) / self.rise_time)) / 2.0
+            )
         if (t2 <= t) & (t < t3):  # 一定値領域の条件ブール値
             # 一定値領域の値
-            return 1.0 + 0.0j
+            return self.amplitude
         if (t3 <= t) & (t < t4):  # 立ち下がり時間領域の条件ブール値
             # 立ち下がり時間領域の値
-            return (1.0 - np.cos(np.pi * (t4 - t) / self.rise_time)) / 2.0
+            return (
+                self.amplitude * (1.0 - np.cos(np.pi * (t4 - t) / self.rise_time)) / 2.0
+            )
         return 0.0 + 0.0j
-
-    @property
-    def rise_time(self) -> Optional[float]:
-        return self._rise_time
-
-    @rise_time.setter
-    def rise_time(self, rise_time: float) -> None:
-        if not isinstance(self._rise_time, float):
-            raise ValueError(f"{type(rise_time)} is invalid")
-        if self.duration is None:
-            raise ValueError("duration is None")
-        # print(rise_time, self.duration)
-        if self.duration < rise_time * 2:
-            raise ValueError(f"{rise_time} is too long")
-
-        self._rise_time = rise_time
 
 
 class Rectangle(Waveform):
-    def __init__(self, duration: Optional[float] = None):
+    def __init__(
+        self,
+        duration: Optional[float] = None,
+        amplitude: float = 1.0,
+    ):
         super().__init__(duration)
+        self.amplitude = amplitude
 
     def func(self, t: float) -> complex:
-        return 1 + 0j
+        if self.duration is None:
+            raise ValueError("duration is None")
+
+        if 0 <= t and t < self.duration:
+            return complex(self.amplitude)
+        return 0 + 0j
 
 
 class Arbit(Waveform):
-    """ "サンプリング点を直接与えるためのオブジェクト"""
+    """サンプリング点を直接与えるためのオブジェクト"""
 
     DEFAULT_SAMPLING_PERIOD: Final[float] = 2e-9
 
     def __init__(
         self,
         duration: Optional[float] = None,
-        init: Optional[complex] = None,
     ):
-        Waveform.__init__(self, duration)
-        if init is None:
-            self.init = 0 + 0j
-        else:
-            self.init = init
+        super().__init__(duration)
         self.__iq__: Optional[NDArray] = None
 
     def func(self, t: float) -> complex:
@@ -1358,7 +1334,7 @@ class Arbit(Waveform):
             raise ValueError("begin or duration is None")
 
         d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
-        if 0 <= t and t < d:
+        if 0 <= t < d:
             t0 = np.arange(round(d // s) + 1) * s
             boolean = (t0 <= t) * (t - s < t0)
             return self.__iq__[boolean][0]
