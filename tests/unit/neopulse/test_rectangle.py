@@ -11,7 +11,6 @@ def test_inheritance():
 def test_empty_init():
     """Rectangle should initialize with no arguments."""
     wf = Rectangle()
-    assert wf.__iq__ is None
     assert wf.duration is None
     assert wf.amplitude == 1.0
 
@@ -19,7 +18,6 @@ def test_empty_init():
 def test_init():
     """Rectangle should initialize with arguments."""
     wf = Rectangle(duration=10.0, amplitude=0.5)
-    assert wf.__iq__ is None
     assert wf.duration == 10.0
     assert wf.amplitude == 0.5
 

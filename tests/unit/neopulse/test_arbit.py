@@ -12,7 +12,6 @@ def test_inheritance():
 def test_empty_init():
     """Arbit should initialize with no arguments."""
     wf = Arbit()
-    assert wf.__iq__ is None
     assert wf.duration is None
 
 

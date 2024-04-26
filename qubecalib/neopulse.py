@@ -18,7 +18,7 @@ class RunningConfig:
     contexts: Final[MutableSequence] = field(default_factory=deque)
 
 
-__rc__: Final[RunningConfig] = RunningConfig()
+_rc: Final[RunningConfig] = RunningConfig()
 
 
 class SequenceTree:
@@ -86,8 +86,8 @@ class SequenceTree:
 
 class ContextNode:
     def __init__(self) -> None:
-        if len(__rc__.contexts):
-            __rc__.contexts[-1].append(self)
+        if len(_rc.contexts):
+            _rc.contexts[-1].append(self)
 
 
 class Item:
@@ -165,7 +165,7 @@ class Dummy(Item):
 
 class DequeWithContext(deque):
     def __enter__(self) -> DequeWithContext:
-        __rc__.contexts.append(self)
+        _rc.contexts.append(self)
         return self
 
     def __exit__(
@@ -174,7 +174,7 @@ class DequeWithContext(deque):
         exception_value: Any,
         traceback: Any,
     ) -> None:
-        __rc__.contexts.pop()
+        _rc.contexts.pop()
 
 
 class Sequence(DequeWithContext):
@@ -696,7 +696,7 @@ class SubSequence(DequeWithContext):
         )
         SubSequence.create_tree(tree, self)
         # with 内の定義の所定の位置にツリーを追加
-        __rc__.contexts[-1].append(tree)
+        _rc.contexts[-1].append(tree)
 
     @classmethod
     def create_tree(cls, tree: SequenceTree, items: MutableSequence) -> None:
@@ -803,7 +803,7 @@ class Series(DequeWithContext):
         # この context 用のローカルツリーを作る
         tree = SequenceTree()
         # 外側の context にローカルツリーを渡す
-        __rc__.contexts[-1].append(tree)
+        _rc.contexts[-1].append(tree)
         # ローカルツリーのルート直下を branch して branch item を登録する
         tree.branch(SeriesBranch())
         # with 内で定義された item を舐める
@@ -907,7 +907,7 @@ class Flushleft(DequeWithContext):
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
         tree = SequenceTree()
-        __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
+        _rc.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
         branch = tree.branch(FlushleftBranch())
         # with 内で定義された item を舐める
@@ -988,7 +988,7 @@ class Flushright(DequeWithContext):
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
         tree = SequenceTree()
-        __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
+        _rc.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
         branch = tree.branch(FlushrightBranch())
         # with 内で定義された item を舐める
@@ -1229,7 +1229,7 @@ class Waveform(Slot, TargetHolder):
         duration: Optional[float] = None,
     ) -> None:
         super().__init__(duration=duration)
-        self.__iq__: Optional[NDArray] = None
+        self._iq: Optional[NDArray] = None
         self.cmag = 1 + 0j
 
     def set_target(self, *targets: str) -> Waveform:
@@ -1323,13 +1323,13 @@ class Arbit(Waveform):
         duration: Optional[float] = None,
     ):
         super().__init__(duration)
-        self.__iq__: Optional[NDArray] = None
+        self._iq: Optional[NDArray] = None
 
     def func(self, t: float) -> complex:
         """iq データを格納している numpy array に従って iq(t) の値を返す"""
         # ローカル時間軸を返すのに注意
-        if self.__iq__ is None:
-            raise ValueError("__iq__ is None")
+        if self._iq is None:
+            raise ValueError("_iq is None")
         if self.begin is None or self.duration is None:
             raise ValueError("begin or duration is None")
 
@@ -1337,7 +1337,7 @@ class Arbit(Waveform):
         if 0 <= t < d:
             t0 = np.arange(round(d // s) + 1) * s
             boolean = (t0 <= t) * (t - s < t0)
-            return self.__iq__[boolean][0]
+            return self._iq[boolean][0]
 
         return 0 + 0j
 
@@ -1348,10 +1348,10 @@ class Arbit(Waveform):
             raise ValueError("duration is None")
         d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
-        if self.__iq__ is None or round(d // s) + 1 != self.__iq__.shape[0]:
-            self.__iq__ = np.zeros(round(d // s) + 1).astype(complex)  # iq data
+        if self._iq is None or round(d // s) + 1 != self._iq.shape[0]:
+            self._iq = np.zeros(round(d // s) + 1).astype(complex)  # iq data
 
-        return self.__iq__
+        return self._iq
 
     def set_target(self, *targets: str) -> Arbit:
         super().set_target(*targets)
