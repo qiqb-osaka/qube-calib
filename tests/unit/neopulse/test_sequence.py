@@ -125,7 +125,7 @@ def test_series():
         "prev_blank": 0,
         "post_blank": None,
         "repeats": None,
-        "sampling_period": 2e-09,
+        "sampling_period": dt,
         "sub_sequences": [
             {
                 "real": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
