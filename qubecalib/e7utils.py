@@ -18,12 +18,12 @@ class WaveSequenceTools:
     def quantize_duration(
         cls,
         duration: float,
-        constrain: float = 10_240e-9,
-    ) -> float:
+        constrain: int = 10_240,
+    ) -> int:
         # nco 達をデータフレームの長さと同期させると位相が揃う
         # 15.625MHz の整数倍/割にすると良い
         # 15.625MHz(64ns) の1/160 97.65625kHz(10_240ns) を繰り返し周期にすると位相が揃う
-        return duration // constrain * constrain
+        return int(duration // constrain) * constrain
 
     @classmethod
     def validate_e7_compatibility(
@@ -230,11 +230,11 @@ class CaptureParamTools:
     def enable_demodulation(
         cls,
         capprm: CaptureParam,
-        modulation_frequency: float,
+        modulation_frequency: float,  # Hz
     ) -> CaptureParam:
         p = capprm
         # DSP で周波数変換する複素窓関数を設定
-        t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2e-9
+        t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2e-9  # ns
         m = modulation_frequency
         p.complex_window_coefs = list(
             np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))

@@ -86,7 +86,7 @@ class QubeCalib:
     def step_execute(
         self,
         repeats: int = 1,
-        interval: float = 10240e-9,
+        interval: float = 10240,
         integral_mode: str = "integral",  # "single"
         dsp_demodulation: bool = True,
         software_demodulation: bool = False,
@@ -417,7 +417,7 @@ class QubeCalib:
     def quantize_sequence_duration(
         cls,
         sequence_duration: float,
-        constrain: float = 10_240e-9,
+        constrain: float = 10_240,
     ) -> float:
         return sequence_duration // constrain * constrain
 
@@ -576,7 +576,7 @@ class Converter:
         # target 毎の変調周波数の計算
         targets_freqs: MutableMapping[str, float] = {
             target_name: cls.calc_modulation_frequency(
-                target_hz=_["target"]["frequency"],
+                target_hz=_["target"]["frequency"] * 1e9,
                 lo_hz=port_config[target_name].lo_freq,
                 cnco_hz=port_config[target_name].cnco_freq,
                 sideband=port_config[target_name].sideband,
@@ -659,7 +659,7 @@ class Converter:
         # target 毎の変調周波数の計算
         targets_freqs = {
             target_name: cls.calc_modulation_frequency(
-                target_hz=_["target"]["frequency"],
+                target_hz=_["target"]["frequency"] * 1e9,
                 lo_hz=port_config[target_name].lo_freq,
                 cnco_hz=port_config[target_name].cnco_freq,
                 sideband=port_config[target_name].sideband,
