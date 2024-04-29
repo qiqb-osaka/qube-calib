@@ -1386,10 +1386,10 @@ class Sampler:
 
     @classmethod
     def _sample(
-        self,
-        sampling_timing: NDArray[np.float32],
+        cls,
+        sampling_timing: NDArray[np.float64],
         slots: MutableSequence[Slot],
-    ) -> NDArray[np.complex64]:
+    ) -> NDArray[np.complex128]:
         def func(t: float) -> complex:
             modifiers = [_ for _ in slots if isinstance(_, Modifier)]
             for _ in modifiers:
@@ -1422,9 +1422,9 @@ class Sampler:
         difference_type: str = "back",
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> Tuple[
-        NDArray[np.complex64],
-        NDArray[np.float32],
-        Optional[NDArray[np.float32]],
+        NDArray[np.complex128],
+        NDArray[np.float64],
+        Optional[NDArray[np.float64]],
     ]:
         begin = self._branch.begin
         duration = self._branch._total_duration_contents
