@@ -283,8 +283,8 @@ class CaptureParamTools:
         MAX_VAL = CaptureParam.MAX_FIR_COEF_VAL  # 32767
         t_ns = SAMPLING_PERIOD * np.arange(-N_COEFS + 1, 1)  # [-30, -28, ..., 0]
         window_function = MAX_VAL * np.ones(N_COEFS).astype(complex)  # rect window
-        coeffs = window_function * np.exp(1j * 2 * np.pi * f_GHz * t_ns)
-        result = coeffs.round().tolist()
+        coefs = window_function * np.exp(1j * 2 * np.pi * f_GHz * t_ns)
+        result = coefs.round().tolist()
         return result
 
     @classmethod
@@ -311,8 +311,8 @@ class CaptureParamTools:
         N_COEFS = CaptureParam.NUM_COMPLEXW_WINDOW_COEFS  # 2048
         MAX_VAL = CaptureParam.MAX_WINDOW_COEF_VAL  # 2147483647
         t_ns = N_DECIMATION * SAMPLING_PERIOD * np.arange(N_COEFS)  # [0, 8, ..., 16376]
-        window_function = MAX_VAL * np.exp(-1j * 2 * np.pi * f_GHz * t_ns)
-        result = window_function.round().tolist()
+        coefs = MAX_VAL * np.exp(-1j * 2 * np.pi * f_GHz * t_ns)
+        result = coefs.round().tolist()
         return result
 
 
