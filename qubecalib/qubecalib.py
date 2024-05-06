@@ -576,11 +576,8 @@ class Converter:
         # target 毎の変調周波数の計算
         targets_freqs: MutableMapping[str, float] = {
             target_name: cls.calc_modulation_frequency(
-                target_hz=_["target"]["frequency"] * 1e9,
-                lo_hz=port_config[target_name].lo_freq,
-                cnco_hz=port_config[target_name].cnco_freq,
-                sideband=port_config[target_name].sideband,
-                fnco_hz=port_config[target_name].fnco_freq,
+                f_target=_["target"]["frequency"],
+                port_config=port_config[target_name],
             )
             for target_name, _ in resource_map.items()
         }
@@ -629,7 +626,7 @@ class Converter:
             ids_e7 = {
                 id: CaptureParamTools.enable_demodulation(
                     capprm=e7,
-                    modulation_frequency=targets_freqs[ids_targets[id]],
+                    f_GHz=targets_freqs[ids_targets[id]],
                 )
                 for id, e7 in ids_e7.items()
             }
@@ -659,11 +656,8 @@ class Converter:
         # target 毎の変調周波数の計算
         targets_freqs = {
             target_name: cls.calc_modulation_frequency(
-                target_hz=_["target"]["frequency"] * 1e9,
-                lo_hz=port_config[target_name].lo_freq,
-                cnco_hz=port_config[target_name].cnco_freq,
-                sideband=port_config[target_name].sideband,
-                fnco_hz=port_config[target_name].fnco_freq,
+                f_target=_["target"]["frequency"],
+                port_config=port_config[target_name],
             )
             for target_name, _ in resource_map.items()
         }
@@ -729,23 +723,37 @@ class Converter:
     @classmethod
     def calc_modulation_frequency(
         cls,
-        target_hz: float,
-        lo_hz: float,
-        cnco_hz: float,
-        sideband: str,
-        fnco_hz: Optional[float] = None,
+        f_target: float,
+        port_config: PortConfigAcquirer,
     ) -> float:
-        # modulation frequency を 1kHz の分解能で設定するには 1ms の繰り返し周期にしないとだめ？
-        # かと思ったけど，nco の位相が波形開始点で 0 に揃っているなら問題ない
-        if_hz = cnco_hz + fnco_hz if fnco_hz is not None else cnco_hz
+        """
+        Calculate modulation frequency from target frequency and port configuration.
+
+        Parameters
+        ----------
+        f_target : float
+            Target frequency in GHz.
+        port_config : PortConfigAcquirer
+            Port configuration.
+
+        Returns
+        -------
+        float
+            Modulation frequency in GHz.
+        """
+        # Note that port_config has frequencies in Hz.
+        f_lo = port_config.lo_freq * 1e-9  # Hz -> GHz
+        f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
+        f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
+        sideband = port_config.sideband
         if sideband == Sideband.UpperSideBand.value:
-            diff_hz = target_hz - lo_hz - if_hz
+            f_diff = f_target - f_lo - (f_cnco + f_fnco)
         elif sideband == Sideband.LowerSideBand.value:
-            diff_hz = -(target_hz - lo_hz) - if_hz
+            f_diff = -(f_target - f_lo) - (f_cnco + f_fnco)
         else:
             raise ValueError("invalid ssb mode")
 
-        return diff_hz
+        return f_diff  # GHz
 
     @classmethod
     def multiplex(

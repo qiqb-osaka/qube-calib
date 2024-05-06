@@ -12,6 +12,8 @@ from .neopulse import CapSampledSequence, GenSampledSequence
 
 # import json
 
+SAMPLING_PERIOD = 2  # [ns]
+
 
 class WaveSequenceTools:
     @classmethod
@@ -230,54 +232,88 @@ class CaptureParamTools:
     def enable_demodulation(
         cls,
         capprm: CaptureParam,
-        modulation_frequency: float,  # Hz
+        f_GHz: float,
     ) -> CaptureParam:
-        p = capprm
-        # DSP で周波数変換する複素窓関数を設定
-        t = 4 * np.arange(p.NUM_COMPLEXW_WINDOW_COEFS) * 2e-9  # ns
-        m = modulation_frequency
-        p.complex_window_coefs = list(
-            np.round((2**31 - 1) * np.exp(-1j * 2 * np.pi * (m * t)))
-        )
-        p.complex_fir_coefs = cls.acquisition_fir_coefficient(m)  # BPFの係数を設定
+        """
+        Enable demodulation of the captured signal.
 
-        # DSPのどのモジュールを有効化するかを指定
-        dspunits = p.dsp_units_enabled
-        dspunits.append(DspUnit.COMPLEX_FIR)  # DSPのBPFを有効化
-        dspunits.append(DspUnit.DECIMATION)  # DSPの間引1/4を有効化
-        # dspunits.append(e7awgsw.DspUnit.REAL_FIR)
-        dspunits.append(DspUnit.COMPLEX_WINDOW)  # 複素窓関数を有効化
-        p.sel_dsp_units_to_enable(*dspunits)
+        Parameters
+        ----------
+        capprm : CaptureParam
+            Capture parameters.
+        f_GHz : float
+            Frequency in GHz to demodulate the captured signal.
+
+        Returns
+        -------
+        CaptureParam
+            CaptureParam object with demodulation enabled.
+        """
+        capprm.complex_fir_coefs = cls.fir_coefficient(f_GHz)
+        capprm.complex_window_coefs = cls.window_coefficient(f_GHz)
+
+        dspunits = capprm.dsp_units_enabled
+        dspunits.append(DspUnit.COMPLEX_FIR)
+        dspunits.append(DspUnit.DECIMATION)
+        dspunits.append(DspUnit.COMPLEX_WINDOW)
+        capprm.sel_dsp_units_to_enable(*dspunits)
         return capprm
 
-    # from QubeServer.py by Tabuchi
-    # DSPのバンドパスフィルターを構成するFIRの係数を生成.
     @classmethod
-    def acquisition_fir_coefficient(cls, bb_frequency: float) -> MutableSequence[int]:
-        ADCBB_SAMPLE_R = 500
-        ACQ_MAX_FCOEF = (
-            16  # The maximum number of the FIR filter taps prior to decimation process.
-        )
-        ACQ_FCBIT_POW_HALF = 2**15  # equivalent to 2^(ACQ_FCOEF_BITS-1).
+    def fir_coefficient(
+        cls,
+        f_GHz: float,
+    ) -> list[complex]:
+        """
+        Calculate FIR coefficients for a bandpass filter.
 
-        sigma = 300.0  # nanoseconds
-        freq_in_mhz = bb_frequency * 1e-6  # MHz
-        n_of_band = (
-            16  # The maximum number of the FIR filter taps prior to decimation process.
-        )
-        band_step = ADCBB_SAMPLE_R / n_of_band
-        band_idx = int(freq_in_mhz / band_step + 0.5 + n_of_band) - n_of_band
-        band_center = band_step * band_idx
-        x = np.arange(ACQ_MAX_FCOEF) - (ACQ_MAX_FCOEF - 1) / 2
-        gaussian = np.exp(-0.5 * x**2 / (sigma**2))
-        phase_factor = (
-            2 * np.pi * (band_center / ADCBB_SAMPLE_R) * np.arange(ACQ_MAX_FCOEF)
-        )
-        coeffs = gaussian * np.exp(1j * phase_factor) * (1 - 1e-3)
-        return list(
-            (np.real(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
-            + 1j * (np.imag(coeffs) * ACQ_FCBIT_POW_HALF).astype(int)
-        )
+        Parameters
+        ----------
+        f_GHz : float
+            Center frequency of the bandpass filter in GHz.
+
+        Returns
+        -------
+        list[complex]
+            FIR coefficients for the bandpass filter.
+            Each part of a complex FIR coefficient must be an integer
+            and in the range of [-2**15, 2**15 - 1].
+        """
+        N_COEFS = CaptureParam.NUM_COMPLEX_FIR_COEFS  # 16
+        MAX_VAL = CaptureParam.MAX_FIR_COEF_VAL  # 32767
+        t_ns = SAMPLING_PERIOD * np.arange(-N_COEFS + 1, 1)  # [-30, -28, ..., 0]
+        window_function = MAX_VAL * np.ones(N_COEFS).astype(complex)  # rect window
+        coeffs = window_function * np.exp(1j * 2 * np.pi * f_GHz * t_ns)
+        result = coeffs.round().tolist()
+        return result
+
+    @classmethod
+    def window_coefficient(
+        cls,
+        f_GHz: float,
+    ) -> list[complex]:
+        """
+        Calculate window coefficients for a bandpass filter.
+
+        Parameters
+        ----------
+        f_GHz : float
+            Center frequency of the bandpass filter in GHz.
+
+        Returns
+        -------
+        list[complex]
+            Window coefficients for the bandpass filter.
+            Each part of a complex window coefficient must be an integer
+            and in the range of [-2**31, 2**31 - 1].
+        """
+        N_DECIMATION = 4
+        N_COEFS = CaptureParam.NUM_COMPLEXW_WINDOW_COEFS  # 2048
+        MAX_VAL = CaptureParam.MAX_WINDOW_COEF_VAL  # 2147483647
+        t_ns = N_DECIMATION * SAMPLING_PERIOD * np.arange(N_COEFS)  # [0, 8, ..., 16376]
+        window_function = MAX_VAL * np.exp(-1j * 2 * np.pi * f_GHz * t_ns)
+        result = window_function.round().tolist()
+        return result
 
 
 def _convert_gen_sampled_sequence_to_blanks_and_waves_chain(
