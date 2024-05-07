@@ -4,14 +4,22 @@ import numpy as np
 
 
 class Units:
-    Sec: Final[float] = 1.0
-    mS: Final[float] = 1e-3
-    uS: Final[float] = 1e-6
-    nS: Final[float] = 1e-9
-    Hz: Final[float] = 1.0
-    kHz: Final[float] = 1e3
-    MHz: Final[float] = 1e6
-    GHz: Final[float] = 1e9
+    """
+    Constants for units.
+
+    Note
+    ----
+    The time/frequency units are in ns/GHz so that the product of the two is dimensionless.
+    """
+
+    Sec: Final[float] = 1e9
+    mS: Final[float] = 1e6
+    uS: Final[float] = 1e3
+    nS: Final[float] = 1.0
+    Hz: Final[float] = 1e-9
+    kHz: Final[float] = 1e-6
+    MHz: Final[float] = 1e-3
+    GHz: Final[float] = 1.0
     BLOCK: Final[float] = 128.0  # ns
     BLOCKs: Final[float] = BLOCK
     WORD: Final[float] = 8.0  # ns

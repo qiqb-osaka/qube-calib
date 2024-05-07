@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from .tree import CostedTree, Tree
 
-DEFAULT_SAMPLING_PERIOD: float = 2e-9
+DEFAULT_SAMPLING_PERIOD: float = 2.0
 
 
 @dataclass
@@ -18,7 +18,7 @@ class RunningConfig:
     contexts: Final[MutableSequence] = field(default_factory=deque)
 
 
-__rc__: Final[RunningConfig] = RunningConfig()
+_rc: Final[RunningConfig] = RunningConfig()
 
 
 class SequenceTree:
@@ -86,8 +86,8 @@ class SequenceTree:
 
 class ContextNode:
     def __init__(self) -> None:
-        if len(__rc__.contexts):
-            __rc__.contexts[-1].append(self)
+        if len(_rc.contexts):
+            _rc.contexts[-1].append(self)
 
 
 class Item:
@@ -165,7 +165,7 @@ class Dummy(Item):
 
 class DequeWithContext(deque):
     def __enter__(self) -> DequeWithContext:
-        __rc__.contexts.append(self)
+        _rc.contexts.append(self)
         return self
 
     def __exit__(
@@ -174,7 +174,7 @@ class DequeWithContext(deque):
         exception_value: Any,
         traceback: Any,
     ) -> None:
-        __rc__.contexts.pop()
+        _rc.contexts.pop()
 
 
 class Sequence(DequeWithContext):
@@ -336,7 +336,7 @@ class Sequence(DequeWithContext):
         self,
         target_name: str,
         targets_items: Dict[str, Dict[int, MutableSequence[Waveform]]],
-        sampling_period: float = 2e-9,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> GenSampledSequence:
         # edge と item の対応マップ
         items: Dict[int, MutableSequence[Waveform]] = {
@@ -493,7 +493,7 @@ class Sequence(DequeWithContext):
         self,
         target_name: str,
         targets_items: Dict[str, Dict[int, MutableSequence[Range]]],
-        sampling_period: float = 2e-9,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> CapSampledSequence:
         edges_items = self._tree._nodes_items
         # waveform を保持する（空でない） subseq の edge_number を begin に対して昇順に並べたもの
@@ -696,7 +696,7 @@ class SubSequence(DequeWithContext):
         )
         SubSequence.create_tree(tree, self)
         # with 内の定義の所定の位置にツリーを追加
-        __rc__.contexts[-1].append(tree)
+        _rc.contexts[-1].append(tree)
 
     @classmethod
     def create_tree(cls, tree: SequenceTree, items: MutableSequence) -> None:
@@ -803,7 +803,7 @@ class Series(DequeWithContext):
         # この context 用のローカルツリーを作る
         tree = SequenceTree()
         # 外側の context にローカルツリーを渡す
-        __rc__.contexts[-1].append(tree)
+        _rc.contexts[-1].append(tree)
         # ローカルツリーのルート直下を branch して branch item を登録する
         tree.branch(SeriesBranch())
         # with 内で定義された item を舐める
@@ -907,7 +907,7 @@ class Flushleft(DequeWithContext):
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
         tree = SequenceTree()
-        __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
+        _rc.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
         branch = tree.branch(FlushleftBranch())
         # with 内で定義された item を舐める
@@ -988,7 +988,7 @@ class Flushright(DequeWithContext):
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
         tree = SequenceTree()
-        __rc__.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
+        _rc.contexts[-1].append(tree)  # with 内の定義の所定の位置にツリーを追加
         # ツリーの根本にブランチアイテムを作る．このブランチの外のアイテムはこのブランチアイテムの次につながる
         branch = tree.branch(FlushrightBranch())
         # with 内で定義された item を舐める
@@ -1045,7 +1045,7 @@ class Utils:
     def align_items(
         cls,
         items: MutableSequence[Item],
-        sampling_period: float = 2e-9,
+        sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> MutableSequence[Item]:
         dt = sampling_period
 
@@ -1229,7 +1229,7 @@ class Waveform(Slot, TargetHolder):
         duration: Optional[float] = None,
     ) -> None:
         super().__init__(duration=duration)
-        self.__iq__: Optional[NDArray] = None
+        self._iq: Optional[NDArray] = None
         self.cmag = 1 + 0j
 
     def set_target(self, *targets: str) -> Waveform:
@@ -1316,28 +1316,27 @@ class Rectangle(Waveform):
 class Arbit(Waveform):
     """サンプリング点を直接与えるためのオブジェクト"""
 
-    DEFAULT_SAMPLING_PERIOD: Final[float] = 2e-9
-
     def __init__(
         self,
         duration: Optional[float] = None,
     ):
         super().__init__(duration)
-        self.__iq__: Optional[NDArray] = None
+        self._iq: Optional[NDArray] = None
 
     def func(self, t: float) -> complex:
         """iq データを格納している numpy array に従って iq(t) の値を返す"""
         # ローカル時間軸を返すのに注意
-        if self.__iq__ is None:
-            raise ValueError("__iq__ is None")
+        if self._iq is None:
+            raise ValueError("_iq is None")
         if self.begin is None or self.duration is None:
             raise ValueError("begin or duration is None")
 
-        d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
-        if 0 <= t < d:
-            t0 = np.arange(round(d // s) + 1) * s
-            boolean = (t0 <= t) * (t - s < t0)
-            return self.__iq__[boolean][0]
+        T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
+        N = round(T // dt)
+        if 0 <= t < T:
+            t0 = np.arange(N) * dt
+            boolean = (t0 <= t) * (t - dt < t0)
+            return self._iq[boolean][0]
 
         return 0 + 0j
 
@@ -1346,12 +1345,13 @@ class Arbit(Waveform):
         """iq データを格納している numpy array への参照を返す"""
         if self.duration is None:
             raise ValueError("duration is None")
-        d, s = self.duration, self.DEFAULT_SAMPLING_PERIOD
+        T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
+        N = round(T // dt)
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
-        if self.__iq__ is None or round(d // s) + 1 != self.__iq__.shape[0]:
-            self.__iq__ = np.zeros(round(d // s) + 1).astype(complex)  # iq data
+        if self._iq is None or N != self._iq.shape[0]:
+            self._iq = np.zeros(N).astype(complex)  # iq data
 
-        return self.__iq__
+        return self._iq
 
     def set_target(self, *targets: str) -> Arbit:
         super().set_target(*targets)
@@ -1368,7 +1368,7 @@ class Sampler:
         difference_type: str = "back",
         endpoint: bool = False,
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
-    ) -> NDArray[np.float]:
+    ) -> NDArray[np.float64]:
         """サンプル時系列 t 生成する。ratio 倍にオーバーサンプルする。"""
 
         dt = 1 * sampling_period / over_sampling_ratio
@@ -1386,10 +1386,10 @@ class Sampler:
 
     @classmethod
     def _sample(
-        self,
-        sampling_timing: NDArray[np.float32],
+        cls,
+        sampling_timing: NDArray[np.float64],
         slots: MutableSequence[Slot],
-    ) -> NDArray[np.complex64]:
+    ) -> NDArray[np.complex128]:
         def func(t: float) -> complex:
             modifiers = [_ for _ in slots if isinstance(_, Modifier)]
             for _ in modifiers:
@@ -1422,9 +1422,9 @@ class Sampler:
         difference_type: str = "back",
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> Tuple[
-        NDArray[np.complex64],
-        NDArray[np.float32],
-        Optional[NDArray[np.float32]],
+        NDArray[np.complex128],
+        NDArray[np.float64],
+        Optional[NDArray[np.float64]],
     ]:
         begin = self._branch.begin
         duration = self._branch._total_duration_contents
@@ -1479,7 +1479,7 @@ class SampledSequenceBase:
     prev_blank: int = 0  # words
     post_blank: Optional[int] = None
     repeats: Optional[int] = None
-    sampling_period: float = 2e-9  # second
+    sampling_period: float = DEFAULT_SAMPLING_PERIOD
 
     def asdict(self) -> Dict:
         return asdict(self)

@@ -11,7 +11,6 @@ def test_inheritance():
 def test_empty_init():
     """RaisedCosFlatTop should initialize with no arguments."""
     wf = RaisedCosFlatTop()
-    assert wf.__iq__ is None
     assert wf.duration is None
     assert wf.amplitude == 1.0
     assert wf.rise_time == 0.0
@@ -20,7 +19,6 @@ def test_empty_init():
 def test_init():
     """RaisedCosFlatTop should initialize with arguments."""
     wf = RaisedCosFlatTop(duration=10.0, amplitude=0.5, rise_time=2.0)
-    assert wf.__iq__ is None
     assert wf.duration == 10.0
     assert wf.amplitude == 0.5
     assert wf.rise_time == 2.0

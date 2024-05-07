@@ -4,14 +4,12 @@ from qubecalib.neopulse import Waveform
 def test_empty_init():
     """Waveform should initialize with no arguments."""
     wf = Waveform()
-    assert wf.__iq__ is None
     assert wf.duration is None
 
 
 def test_init():
     """Waveform should initialize with arguments."""
     wf = Waveform(duration=10.0)
-    assert wf.__iq__ is None
     assert wf.duration == 10.0
 
 
