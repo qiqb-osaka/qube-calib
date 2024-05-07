@@ -1191,7 +1191,7 @@ class Modifier(Slot, TargetHolder):
         raise ValueError("Branch object cannot set duration value")
 
     def func(self, t: float) -> complex:
-        """時間依存の Modifier （例えば frequency）を書くときにここを定義する。通常の時間非依存では 1 + 0j を返す。"""
+        """時間依存の Modifier (例えば frequency) を書くときにここを定義する。通常の時間非依存では 1 + 0j を返す。"""
         return 1 + 0j
 
     def _func(self, t: float) -> complex:
@@ -1207,23 +1207,46 @@ class Modifier(Slot, TargetHolder):
 
 
 class VirtualZ(Modifier):
-    """begin 以降の Waveform の位相を theta だけ変化させる"""
+    """
+    Modify the phase of the waveform.
 
-    def __init__(self, theta: float = 0):  # theta in radian
+    Parameters
+    ----------
+    theta : float, optional
+        Phase angle in radian. Default is 0.0.
+    """
+
+    def __init__(self, theta: float = 0.0):
         super().__init__()
         self.cmag = np.exp(1j * theta)
 
 
 class Magnifier(Modifier):
-    """begin 以降の Waveform の位相を theta だけ変化させる"""
+    """
+    Modify the magnitude of the waveform.
 
-    def __init__(self, magnitude: float = 0):  # theta in radian
+    Parameters
+    ----------
+    magnitude : float, optional
+        Magnitude of the waveform. Default is 1.0.
+    """
+
+    def __init__(self, magnitude: float = 1.0):
         super().__init__()
         self.cmag = magnitude * (1 + 0j)
 
 
 class Frequency(Modifier):
-    def __init__(self, modulation_frequency: float = 0):  # Hz
+    """
+    Modify the frequency of the waveform.
+
+    Parameters
+    ----------
+    modulation_frequency : float, optional
+        Modulation frequency in GHz. Default is 0.0.
+    """
+
+    def __init__(self, modulation_frequency: float = 0.0):
         super().__init__()
         self.modulation_frequency = modulation_frequency
 
