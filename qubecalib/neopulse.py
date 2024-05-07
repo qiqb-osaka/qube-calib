@@ -340,7 +340,11 @@ class Sequence(DequeWithContext):
     ) -> GenSampledSequence:
         # edge と item の対応マップ
         items: Dict[int, MutableSequence[Waveform]] = {
-            edge: [slot for slot in slots if isinstance(slot, Waveform)]
+            edge: [
+                slot
+                for slot in slots
+                if isinstance(slot, Waveform) or isinstance(slot, Modifier)
+            ]
             for edge, slots in targets_items[target_name].items()
         }
         # edge と subseq との対応マップ
@@ -433,7 +437,11 @@ class Sequence(DequeWithContext):
         group_items = self._get_group_items_by_target()
         _ = {
             target_name: {
-                num: [item for item in items if isinstance(item, Waveform)]
+                num: [
+                    item
+                    for item in items
+                    if isinstance(item, Waveform) or isinstance(item, Modifier)
+                ]
                 for num, items in num_items.items()
             }
             for target_name, num_items in group_items.items()
