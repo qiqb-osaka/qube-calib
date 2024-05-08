@@ -13,11 +13,11 @@ def test_init():
     assert wf.duration == 10.0
 
 
-def test_set_target():
-    """set_target should set the target(s) of the waveform."""
+def test_target():
+    """target should set the target(s) of the waveform."""
     wf1 = Waveform()
-    wf1.set_target("RQ00")
+    wf1.target("RQ00")
     assert wf1.targets == ("RQ00",)
     wf2 = Waveform()
-    wf2.set_target("RQ00", "RQ01")
+    wf2.target("RQ00", "RQ01")
     assert wf2.targets == ("RQ00", "RQ01")

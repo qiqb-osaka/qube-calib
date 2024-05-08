@@ -17,8 +17,8 @@ def test_convert_to_sampled_sequence():
     target = "RQ00"
 
     with Sequence() as seq:
-        Rectangle(duration=10e-9).set_target(target)
-        Capture(duration=10e-9).set_target(target)
+        Rectangle(duration=10e-9).target(target)
+        Capture(duration=10e-9).target(target)
 
     sampled_sequence = seq.convert_to_sampled_sequence()
     gen_sampled_sequence = sampled_sequence[0][target]
@@ -35,8 +35,8 @@ def test_gen_sampled_sequence():
     n = 5
 
     with Sequence() as seq:
-        Blank(duration=n * dt)
-        Rectangle(duration=n * dt).set_target(target)
+        Blank(duration=n * dt).target(target)
+        Rectangle(duration=n * dt).target(target)
 
     sampled_sequence = seq.convert_to_sampled_sequence()
     gen_sampled_sequence = sampled_sequence[0][target]
@@ -66,8 +66,8 @@ def test_cap_sampled_sequence():
     n_capture = 10
 
     with Sequence() as seq:
-        Blank(duration=n_blank * dt)
-        Capture(duration=n_capture * dt).set_target(target)
+        Blank(duration=n_blank * dt).target(target)
+        Capture(duration=n_capture * dt).target(target)
 
     sampled_sequence = seq.convert_to_sampled_sequence()
     cap_sampled_sequence = sampled_sequence[1][target]
@@ -97,8 +97,8 @@ def test_series():
 
     with Sequence() as seq:
         with Series():
-            Rectangle(duration=n * dt).set_target(target0)
-            Rectangle(duration=n * dt).set_target(target1)
+            Rectangle(duration=n * dt).target(target0)
+            Rectangle(duration=n * dt).target(target1)
 
     target0_sequence = seq.convert_to_sampled_sequence()[0][target0].asdict()
     target1_sequence = seq.convert_to_sampled_sequence()[0][target1].asdict()
@@ -145,13 +145,13 @@ def test_series_as_default():
     duration = 10e-9
 
     with Sequence() as seq1:
-        Rectangle(duration=duration).set_target(target0)
-        Rectangle(duration=duration).set_target(target1)
+        Rectangle(duration=duration).target(target0)
+        Rectangle(duration=duration).target(target1)
 
     with Sequence() as seq2:
         with Series():
-            Rectangle(duration=duration).set_target(target0)
-            Rectangle(duration=duration).set_target(target1)
+            Rectangle(duration=duration).target(target0)
+            Rectangle(duration=duration).target(target1)
 
     target0_sequence1 = seq1.convert_to_sampled_sequence()[0][target0].asdict()
     target0_sequence2 = seq2.convert_to_sampled_sequence()[0][target0].asdict()
@@ -171,8 +171,8 @@ def test_flushleft():
 
     with Sequence() as seq:
         with Flushleft():
-            Rectangle(duration=n0 * dt).set_target(target0)
-            Rectangle(duration=n1 * dt).set_target(target1)
+            Rectangle(duration=n0 * dt).target(target0)
+            Rectangle(duration=n1 * dt).target(target1)
 
     target0_sequence = seq.convert_to_sampled_sequence()[0][target0].asdict()
     target1_sequence = seq.convert_to_sampled_sequence()[0][target1].asdict()
@@ -222,8 +222,8 @@ def test_flushright():
 
     with Sequence() as seq:
         with Flushright():
-            Rectangle(duration=n0 * dt).set_target(target0)
-            Rectangle(duration=n1 * dt).set_target(target1)
+            Rectangle(duration=n0 * dt).target(target0)
+            Rectangle(duration=n1 * dt).target(target1)
 
     target0_sequence = seq.convert_to_sampled_sequence()[0][target0].asdict()
     target1_sequence = seq.convert_to_sampled_sequence()[0][target1].asdict()
