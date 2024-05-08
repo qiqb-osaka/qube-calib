@@ -1267,6 +1267,28 @@ class Frequency(Modifier):
 
 
 class Waveform(Slot):
+    """
+    Waveform class for the sequence.
+
+    Parameters
+    ----------
+    duration : float, optional
+        Duration of the waveform in ns. Default is None.
+
+    Attributes
+    ----------
+    duration : float
+        Duration of the waveform in ns.
+    begin : float
+        Begin time of the waveform in ns.
+    end : float
+        End time of the waveform in ns.
+    targets : tuple[str]
+        Target qubits.
+    cmag : complex
+        Complex magnitude of the waveform.
+    """
+
     def __init__(
         self,
         duration: Optional[float] = None,
@@ -1291,6 +1313,18 @@ class Waveform(Slot):
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
+
+    def scaled(self, scale: float) -> "Waveform":
+        """Returns a copy of the waveform scaled by the given factor."""
+        new_waveform = deepcopy(self)
+        new_waveform.cmag *= scale
+        return new_waveform
+
+    def shifted(self, phase: float) -> "Waveform":
+        """Returns a copy of the waveform shifted by the given phase."""
+        new_waveform = deepcopy(self)
+        new_waveform.cmag *= np.exp(1j * phase)
+        return new_waveform
 
 
 class RaisedCosFlatTop(Waveform):

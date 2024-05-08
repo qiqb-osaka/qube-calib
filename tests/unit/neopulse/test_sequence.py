@@ -1,3 +1,6 @@
+import numpy as np
+import pytest
+
 from qubecalib import neopulse
 from qubecalib.neopulse import (
     Blank,
@@ -17,8 +20,8 @@ def test_convert_to_sampled_sequence():
     target = "RQ00"
 
     with Sequence() as seq:
-        Rectangle(duration=10e-9).target(target)
-        Capture(duration=10e-9).target(target)
+        Rectangle(duration=10).target(target)
+        Capture(duration=10).target(target)
 
     sampled_sequence = seq.convert_to_sampled_sequence()
     gen_sampled_sequence = sampled_sequence[0][target]
@@ -26,6 +29,27 @@ def test_convert_to_sampled_sequence():
 
     assert isinstance(gen_sampled_sequence, GenSampledSequence)
     assert isinstance(cap_sampled_sequence, CapSampledSequence)
+
+
+def test_reuse_slot_instance():
+    """Slot instances should be reusable."""
+    target = "RQ00"
+    dt = neopulse.DEFAULT_SAMPLING_PERIOD
+    n = 2
+
+    rect = Rectangle(duration=n * dt)
+
+    with Sequence() as seq:
+        Blank(duration=n * dt).target(target)
+        Rectangle(duration=n * dt).target(target)
+        rect.scaled(2).shifted(np.pi).target(target)
+        rect.target(target)
+
+    gen_sampled_sequence, _ = seq.convert_to_sampled_sequence()
+    gen_sub_sequence = gen_sampled_sequence[target].sub_sequences[0]
+    assert gen_sub_sequence.real == pytest.approx(
+        np.array([0.0, 0.0, 1.0, 1.0, -2.0, -2.0, 1.0, 1.0])
+    )
 
 
 def test_gen_sampled_sequence():
