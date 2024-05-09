@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections import Counter, deque
@@ -20,7 +21,6 @@ from typing import (
     TypedDict,
 )
 
-import json5
 import numpy as np
 from e7awgsw import CaptureModule, CaptureParam, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
@@ -429,16 +429,16 @@ class QubeCalib:
 
     def store_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
         with open(Path(os.getcwd()) / Path(path_to_config_file), "w") as fp:
-            json5.dump(
+            json.dump(
                 self.get_all_box_configs(),
                 fp,
-                quote_keys=True,
+                indent=4,
             )
 
     def load_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
         with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
-            json = json5.load(fp)
-        for box_name, _ in json.items():
+            configs = json.load(fp)
+        for box_name, _ in configs.items():
             ports: Dict[int | Tuple[int, int], Dict[str, Any]] = {
                 int(k): v for k, v in _["ports"].items()
             }
@@ -452,7 +452,7 @@ class QubeCalib:
                     port_config["runits"] = {
                         int(k): v for k, v in port_config["runits"].items()
                     }
-        self._box_configs = json
+        self._box_configs = configs
 
     def apply_all_box_configs(self) -> None:
         for box_name in self._box_configs:
@@ -1614,11 +1614,11 @@ class SystemConfigDatabase:
 
     def load(self, path_to_database_file: str | os.PathLike) -> None:
         with open(Path(os.getcwd()) / Path(path_to_database_file), "r") as file:
-            json = json5.load(file)
+            configs = json.load(file)
         # TODO workaround
         settings = {
             k: v
-            for k, v in json.items()
+            for k, v in configs.items()
             if k
             in [
                 "clockmaster_setting",
@@ -1632,13 +1632,13 @@ class SystemConfigDatabase:
         #     [channel[:-2] + "CH" + channel[-1], target]
         #     for channel, target in json["relation_channel_target"]
         # ]
-        relation_channel_target = json["relation_channel_target"]
+        relation_channel_target = configs["relation_channel_target"]
         settings["relation_channel_target"] = relation_channel_target
         channels = {channel for channel, target in relation_channel_target}
         # relation_channel_port = [
         #     [_, {"port_name": _[:-3], "channel_number": int(_[-1:])}] for _ in channels
         # ]
-        relation_channel_port = json["relation_channel_port"]
+        relation_channel_port = configs["relation_channel_port"]
         settings["relation_channel_port"] = relation_channel_port
         # TODO ----------
         self.set(**settings)
@@ -1884,7 +1884,7 @@ class SystemConfigDatabase:
             "relation_channel_port": self._relation_channel_port,
         }
 
-    def asjson(self) -> Dict[str, Any]:
+    def asjson(self) -> str:
         box_settings = {
             box_name: _.asdict() for box_name, _ in self._box_settings.items()
         }
@@ -1892,7 +1892,7 @@ class SystemConfigDatabase:
             dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[
                 dct["boxtype"]
             ]
-        return json5.dumps(
+        return json.dumps(
             {
                 "clockmaster_setting": self._clockmaster_setting.asdict()
                 if self._clockmaster_setting is not None
@@ -1907,5 +1907,5 @@ class SystemConfigDatabase:
                 "relation_channel_target": self._relation_channel_target,
                 "relation_channel_port": self._relation_channel_port,
             },
-            quote_keys=True,
+            indent=4,
         )
