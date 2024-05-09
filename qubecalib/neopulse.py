@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Final, List, MutableSequence, Optional, Tuple
 
@@ -82,12 +83,6 @@ class SequenceTree:
 
     def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
         return self._tree.breadth_first_search(start)
-
-
-class ContextNode:
-    def __init__(self) -> None:
-        if len(_rc.contexts):
-            _rc.contexts[-1].append(self)
 
 
 class Item:
@@ -298,7 +293,7 @@ class Sequence(DequeWithContext):
 
     def _get_group_items_by_target(
         self,
-    ) -> Dict[str, Dict[int, MutableSequence[Waveform | TargetHolder]]]:
+    ) -> Dict[str, Dict[int, MutableSequence[Slot]]]:
         nodes_items = self._tree._nodes_items
         subsequences = [
             _
@@ -310,7 +305,7 @@ class Sequence(DequeWithContext):
                 sub._next_node: [
                     item
                     for node, item in nodes_items.items()
-                    if isinstance(item, TargetHolder)
+                    if isinstance(item, Slot)
                     if target in item.targets
                     if node
                     in self._tree.breadth_first_search(
@@ -320,8 +315,8 @@ class Sequence(DequeWithContext):
                 for sub in subsequences  # 空でない subsequence 毎に
                 if sub._next_node is not None
             }
-            for _ in nodes_items.values()  # Sequence に属する TargetHolder 毎に
-            if isinstance(_, TargetHolder)
+            for _ in nodes_items.values()  # Sequence に属する Slot 毎に
+            if isinstance(_, Slot)
             for target in _.targets
         }
 
@@ -407,10 +402,10 @@ class Sequence(DequeWithContext):
         cls,
         sub_seq_edges__items: Dict[int, MutableSequence[Item]],
     ) -> bool:
-        # 各々の subseq 配下の items が Range のみを含むか 空[] である
+        # 各々の subseq 配下の items が Capture のみを含むか 空[] である
         return all(
             [
-                not bool(_) or all([isinstance(__, Range) for __ in _])
+                not bool(_) or all([isinstance(__, Capture) for __ in _])
                 for _ in sub_seq_edges__items.values()
             ]
         )
@@ -455,7 +450,7 @@ class Sequence(DequeWithContext):
         }
         _ = {
             target_name: {
-                num: [item for item in items if isinstance(item, Range)]
+                num: [item for item in items if isinstance(item, Capture)]
                 for num, items in num_items.items()
             }
             for target_name, num_items in group_items.items()
@@ -464,7 +459,7 @@ class Sequence(DequeWithContext):
             target_name: {num: items for num, items in num_items.items() if items}
             for target_name, num_items in _.items()
         }
-        targets_items_cap: Dict[str, Dict[int, MutableSequence[Range]]] = {
+        targets_items_cap: Dict[str, Dict[int, MutableSequence[Capture]]] = {
             target_name: num_items for target_name, num_items in __.items() if num_items
         }
         # print(targets_items_gen)
@@ -500,7 +495,7 @@ class Sequence(DequeWithContext):
     def _create_cap_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Range]]],
+        targets_items: Dict[str, Dict[int, MutableSequence[Capture]]],
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> CapSampledSequence:
         edges_items = self._tree._nodes_items
@@ -1145,37 +1140,54 @@ def floor(value: float, unit: float = 1) -> float:
         return retval
 
 
-class TargetHolder:
-    def set_target(self, *targets: str) -> TargetHolder:
-        self.targets = targets
-        return self
+class Slot(Item):
+    """
+    Slot class for the sequence.
 
+    Parameters
+    ----------
+    duration : float, optional
+        Duration of the slot in ns. Default is None.
 
-class Slot(ContextNode, Item):
+    Attributes
+    ----------
+    duration : float
+        Duration of the slot in ns.
+    begin : float
+        Begin time of the slot in ns.
+    end : float
+        End time of the slot in ns.
+    targets : tuple[str]
+        Target qubits.
+    """
+
     def __init__(self, duration: Optional[float] = None) -> None:
-        super().__init__()
-        Item.__init__(self, duration)
+        super().__init__(duration)
+
+    def target(self, *targets: str):
+        """
+        Set the target qubits of the slot.
+        """
+        self.targets = targets
+
+        # Add the slot to the context
+        if len(_rc.contexts):
+            _rc.contexts[-1].append(deepcopy(self))
 
 
 class Blank(Slot):
     pass
 
 
-class Range(Slot, TargetHolder):
-    def __init__(self, duration: Optional[float] = None) -> None:
-        super().__init__(duration)
-
-
-class Capture(Range):
+class Capture(Slot):
     pass
 
 
-class Modifier(Slot, TargetHolder):
+class Modifier(Slot):
     """begin <= t の時に cmag * func(t) を返す。未定義の場合，ステップ関数として動作。"""
 
     def __init__(self) -> None:
         super().__init__(duration=0)
-        TargetHolder.__init__(self)
         self.cmag = 1 + 0j
 
     def __repr__(self) -> str:
@@ -1254,7 +1266,29 @@ class Frequency(Modifier):
         return np.exp(2j * np.pi * self.modulation_frequency * t)
 
 
-class Waveform(Slot, TargetHolder):
+class Waveform(Slot):
+    """
+    Waveform class for the sequence.
+
+    Parameters
+    ----------
+    duration : float, optional
+        Duration of the waveform in ns. Default is None.
+
+    Attributes
+    ----------
+    duration : float
+        Duration of the waveform in ns.
+    begin : float
+        Begin time of the waveform in ns.
+    end : float
+        End time of the waveform in ns.
+    targets : tuple[str]
+        Target qubits.
+    cmag : complex
+        Complex magnitude of the waveform.
+    """
+
     def __init__(
         self,
         duration: Optional[float] = None,
@@ -1262,10 +1296,6 @@ class Waveform(Slot, TargetHolder):
         super().__init__(duration=duration)
         self._iq: Optional[NDArray] = None
         self.cmag = 1 + 0j
-
-    def set_target(self, *targets: str) -> Waveform:
-        super().set_target(*targets)
-        return self
 
     def func(self, t: float) -> complex:
         """正規化複素振幅 (1 + j0), ローカル時間軸 (begin=0) で iq 波形を返す．継承する時はここに関数を定義する．"""
@@ -1283,6 +1313,18 @@ class Waveform(Slot, TargetHolder):
 
     def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
+
+    def scaled(self, scale: float) -> "Waveform":
+        """Returns a copy of the waveform scaled by the given factor."""
+        new_waveform = deepcopy(self)
+        new_waveform.cmag *= scale
+        return new_waveform
+
+    def shifted(self, phase: float) -> "Waveform":
+        """Returns a copy of the waveform shifted by the given phase."""
+        new_waveform = deepcopy(self)
+        new_waveform.cmag *= np.exp(1j * phase)
+        return new_waveform
 
 
 class RaisedCosFlatTop(Waveform):
@@ -1383,10 +1425,6 @@ class Arbit(Waveform):
             self._iq = np.zeros(N).astype(complex)  # iq data
 
         return self._iq
-
-    def set_target(self, *targets: str) -> Arbit:
-        super().set_target(*targets)
-        return self
 
 
 class Sampler:
