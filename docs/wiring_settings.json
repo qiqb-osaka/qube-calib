@@ -1,0 +1,272 @@
+{
+    "clockmaster_setting": null,
+    "box_settings": {
+        "BOX1": {
+            "ipaddr_wss": "10.1.0.73",
+            "ipaddr_sss": "10.2.0.73",
+            "ipaddr_css": "10.5.0.73",
+            "boxtype": "quel1-a",
+            "config_root": null,
+            "config_options": []
+        }
+    },
+    "box_aliases": {},
+    "port_settings": {
+        "BOX1_READ_GEN": {
+            "port_name": "BOX1_READ_GEN",
+            "box_name": "BOX1",
+            "port": 1,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "BOX1_READ_CAP": {
+            "port_name": "BOX1_READ_CAP",
+            "box_name": "BOX1",
+            "port": 0,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        "BOX1_CTRL_0": {
+            "port_name": "BOX1_CTRL_0",
+            "box_name": "BOX1",
+            "port": 2,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0
+            ]
+        },
+        "BOX1_CTRL_1": {
+            "port_name": "BOX1_CTRL_1",
+            "box_name": "BOX1",
+            "port": 4,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0
+            ]
+        },
+        "BOX1_CTRL_2": {
+            "port_name": "BOX1_CTRL_2",
+            "box_name": "BOX1",
+            "port": 9,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0
+            ]
+        },
+        "BOX1_CTRL_3": {
+            "port_name": "BOX1_CTRL_3",
+            "box_name": "BOX1",
+            "port": 11,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0
+            ]
+        }
+    },
+    "target_settings": {
+        "RQ00": {
+            "frequency": 10.3426
+        },
+        "RQ01": {
+            "frequency": 10.51863
+        },
+        "RQ02": {
+            "frequency": 10.46727
+        },
+        "RQ03": {
+            "frequency": 10.20783
+        },
+        "CQ00": {
+            "frequency": 7.729161
+        },
+        "CQ01": {
+            "frequency": 8.817762
+        },
+        "CQ02": {
+            "frequency": 8.79183
+        },
+        "CQ03": {
+            "frequency": 7.761116
+        }
+    },
+    "relation_channel_target": [
+        [
+            "BOX1_READ_GEN_CH0",
+            "RQ00"
+        ],
+        [
+            "BOX1_READ_GEN_CH0",
+            "RQ01"
+        ],
+        [
+            "BOX1_READ_GEN_CH0",
+            "RQ02"
+        ],
+        [
+            "BOX1_READ_GEN_CH0",
+            "RQ03"
+        ],
+        [
+            "BOX1_READ_CAP_CH0",
+            "RQ00"
+        ],
+        [
+            "BOX1_READ_CAP_CH1",
+            "RQ01"
+        ],
+        [
+            "BOX1_READ_CAP_CH2",
+            "RQ02"
+        ],
+        [
+            "BOX1_READ_CAP_CH3",
+            "RQ03"
+        ],
+        [
+            "BOX1_CTRL_0_CH0",
+            "CQ00"
+        ],
+        [
+            "BOX1_CTRL_1_CH0",
+            "CQ01"
+        ],
+        [
+            "BOX1_CTRL_2_CH0",
+            "CQ02"
+        ],
+        [
+            "BOX1_CTRL_3_CH0",
+            "CQ03"
+        ]
+    ],
+    "relation_channel_port": [
+        [
+            "BOX1_READ_GEN_CH0",
+            {
+                "port_name": "BOX1_READ_GEN",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_READ_CAP_CH0",
+            {
+                "port_name": "BOX1_READ_CAP",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_READ_CAP_CH1",
+            {
+                "port_name": "BOX1_READ_CAP",
+                "channel_number": 1
+            }
+        ],
+        [
+            "BOX1_READ_CAP_CH2",
+            {
+                "port_name": "BOX1_READ_CAP",
+                "channel_number": 2
+            }
+        ],
+        [
+            "BOX1_READ_CAP_CH3",
+            {
+                "port_name": "BOX1_READ_CAP",
+                "channel_number": 3
+            }
+        ],
+        [
+            "BOX1_CTRL_0_CH0",
+            {
+                "port_name": "BOX1_CTRL_0",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_CTRL_0_CH0",
+            {
+                "port_name": "BOX1_CTRL_0",
+                "channel_number": 1
+            }
+        ],
+        [
+            "BOX1_CTRL_0_CH0",
+            {
+                "port_name": "BOX1_CTRL_0",
+                "channel_number": 2
+            }
+        ],
+        [
+            "BOX1_CTRL_1_CH0",
+            {
+                "port_name": "BOX1_CTRL_1",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_CTRL_1_CH0",
+            {
+                "port_name": "BOX1_CTRL_1",
+                "channel_number": 1
+            }
+        ],
+        [
+            "BOX1_CTRL_1_CH0",
+            {
+                "port_name": "BOX1_CTRL_1",
+                "channel_number": 2
+            }
+        ],
+        [
+            "BOX1_CTRL_2_CH0",
+            {
+                "port_name": "BOX1_CTRL_2",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_CTRL_2_CH0",
+            {
+                "port_name": "BOX1_CTRL_2",
+                "channel_number": 1
+            }
+        ],
+        [
+            "BOX1_CTRL_2_CH0",
+            {
+                "port_name": "BOX1_CTRL_2",
+                "channel_number": 2
+            }
+        ],
+        [
+            "BOX1_CTRL_3_CH0",
+            {
+                "port_name": "BOX1_CTRL_3",
+                "channel_number": 0
+            }
+        ],
+        [
+            "BOX1_CTRL_3_CH0",
+            {
+                "port_name": "BOX1_CTRL_3",
+                "channel_number": 1
+            }
+        ],
+        [
+            "BOX1_CTRL_3_CH0",
+            {
+                "port_name": "BOX1_CTRL_3",
+                "channel_number": 2
+            }
+        ]
+    ]
+}
