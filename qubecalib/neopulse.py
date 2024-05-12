@@ -114,6 +114,11 @@ class Item:
         )
 
 
+class Padding(Item):
+    def __init__(self, duration: Optional[float] = None) -> None:
+        super().__init__(duration)
+
+
 class Branch(Item):
     def __init__(self) -> None:
         super().__init__()
@@ -994,7 +999,7 @@ class Flushright(DequeWithContext):
             if isinstance(item, Item):
                 # Item ならばそのまま登録
                 # ただしパラレルなので注意
-                tree.append(Item(0))
+                tree.append(Padding(0))
                 tree.append(item)
                 if branch._root_node is None:
                     raise ValueError("_root_node is None")
@@ -1003,7 +1008,7 @@ class Flushright(DequeWithContext):
                 # サブツリーを見つけたら親ツリーとマージする
                 # サブツリーのルート直下第 1 アイテムは branch のはず
                 # サブツリーを抜けたら _branch._root_node に次のアイテムをぶら下げる
-                tree.append(Item(0))  # flushright は特別に branch の前に Item をつける
+                tree.append(Padding(0))  # flushright は特別に branch の前に Padding をつける
                 _tree = item  # ローカルの SequenceTree
                 offset = max(tree._tree._tree.all)
                 # ノード番号を更新してサブツリーをローカルツリーとマージする
