@@ -1008,7 +1008,9 @@ class Flushright(DequeWithContext):
                 # サブツリーを見つけたら親ツリーとマージする
                 # サブツリーのルート直下第 1 アイテムは branch のはず
                 # サブツリーを抜けたら _branch._root_node に次のアイテムをぶら下げる
-                tree.append(Padding(0))  # flushright は特別に branch の前に Padding をつける
+                tree.append(
+                    Padding(0)
+                )  # flushright は特別に branch の前に Padding をつける
                 _tree = item  # ローカルの SequenceTree
                 offset = max(tree._tree._tree.all)
                 # ノード番号を更新してサブツリーをローカルツリーとマージする
