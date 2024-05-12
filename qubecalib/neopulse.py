@@ -1387,14 +1387,19 @@ class Rectangle(Waveform):
 
 
 class Arbit(Waveform):
-    """サンプリング点を直接与えるためのオブジェクト"""
+    """
+    Arbit class for the sequence.
 
-    def __init__(
-        self,
-        duration: Optional[float] = None,
-    ):
+    Parameters
+    ----------
+    iq : list | NDArray
+        IQ data of the waveform.
+    """
+
+    def __init__(self, iq: list | NDArray):
+        duration = len(iq) * DEFAULT_SAMPLING_PERIOD
         super().__init__(duration)
-        self._iq: Optional[NDArray] = None
+        self._iq = np.array(iq).astype(complex)
 
     def func(self, t: float) -> complex:
         """iq データを格納している numpy array に従って iq(t) の値を返す"""
