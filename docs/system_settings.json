@@ -20,16 +20,16 @@
     },
     "box_aliases": {},
     "port_settings": {
-        "A25.P0": {
-            "port_name": "A25.P0",
+        "A25.P00": {
+            "port_name": "A25.P00",
             "box_name": "A25",
             "port": 0,
             "ndelay_or_nwait": [
                 0
             ]
         },
-        "A25.P1": {
-            "port_name": "A25.P1",
+        "A25.P01": {
+            "port_name": "A25.P01",
             "box_name": "A25",
             "port": 1,
             "ndelay_or_nwait": [
@@ -39,26 +39,26 @@
                 0
             ]
         },
-        "A25.P2": {
-            "port_name": "A25.P2",
+        "A25.P02": {
+            "port_name": "A25.P02",
             "box_name": "A25",
             "port": 2,
             "ndelay_or_nwait": []
         },
-        "A25.P3": {
-            "port_name": "A25.P3",
+        "A25.P03": {
+            "port_name": "A25.P03",
             "box_name": "A25",
             "port": 3,
             "ndelay_or_nwait": []
         },
-        "A25.P4": {
-            "port_name": "A25.P4",
+        "A25.P04": {
+            "port_name": "A25.P04",
             "box_name": "A25",
             "port": 4,
             "ndelay_or_nwait": []
         },
-        "A25.P5": {
-            "port_name": "A25.P5",
+        "A25.P05": {
+            "port_name": "A25.P05",
             "box_name": "A25",
             "port": 5,
             "ndelay_or_nwait": [
@@ -67,8 +67,8 @@
                 0
             ]
         },
-        "A25.P6": {
-            "port_name": "A25.P6",
+        "A25.P06": {
+            "port_name": "A25.P06",
             "box_name": "A25",
             "port": 6,
             "ndelay_or_nwait": [
@@ -77,8 +77,8 @@
                 0
             ]
         },
-        "A25.P7": {
-            "port_name": "A25.P7",
+        "A25.P07": {
+            "port_name": "A25.P07",
             "box_name": "A25",
             "port": 7,
             "ndelay_or_nwait": [
@@ -87,8 +87,8 @@
                 0
             ]
         },
-        "A25.P8": {
-            "port_name": "A25.P8",
+        "A25.P08": {
+            "port_name": "A25.P08",
             "box_name": "A25",
             "port": 8,
             "ndelay_or_nwait": [
@@ -97,8 +97,8 @@
                 0
             ]
         },
-        "A25.P9": {
-            "port_name": "A25.P9",
+        "A25.P09": {
+            "port_name": "A25.P09",
             "box_name": "A25",
             "port": 9,
             "ndelay_or_nwait": []
@@ -134,8 +134,8 @@
                 0
             ]
         },
-        "A73.P0": {
-            "port_name": "A73.P0",
+        "A73.P00": {
+            "port_name": "A73.P00",
             "box_name": "A73",
             "port": 0,
             "ndelay_or_nwait": [
@@ -145,16 +145,16 @@
                 0
             ]
         },
-        "A73.P1": {
-            "port_name": "A73.P1",
+        "A73.P01": {
+            "port_name": "A73.P01",
             "box_name": "A73",
             "port": 1,
             "ndelay_or_nwait": [
                 0
             ]
         },
-        "A73.P2": {
-            "port_name": "A73.P2",
+        "A73.P02": {
+            "port_name": "A73.P02",
             "box_name": "A73",
             "port": 2,
             "ndelay_or_nwait": [
@@ -163,14 +163,14 @@
                 0
             ]
         },
-        "A73.P3": {
-            "port_name": "A73.P3",
+        "A73.P03": {
+            "port_name": "A73.P03",
             "box_name": "A73",
             "port": 3,
             "ndelay_or_nwait": []
         },
-        "A73.P4": {
-            "port_name": "A73.P4",
+        "A73.P04": {
+            "port_name": "A73.P04",
             "box_name": "A73",
             "port": 4,
             "ndelay_or_nwait": [
@@ -179,20 +179,20 @@
                 0
             ]
         },
-        "A73.P5": {
-            "port_name": "A73.P5",
+        "A73.P05": {
+            "port_name": "A73.P05",
             "box_name": "A73",
             "port": 5,
             "ndelay_or_nwait": []
         },
-        "A73.P6": {
-            "port_name": "A73.P6",
+        "A73.P06": {
+            "port_name": "A73.P06",
             "box_name": "A73",
             "port": 6,
             "ndelay_or_nwait": []
         },
-        "A73.P7": {
-            "port_name": "A73.P7",
+        "A73.P07": {
+            "port_name": "A73.P07",
             "box_name": "A73",
             "port": 7,
             "ndelay_or_nwait": [
@@ -202,16 +202,16 @@
                 0
             ]
         },
-        "A73.P8": {
-            "port_name": "A73.P8",
+        "A73.P08": {
+            "port_name": "A73.P08",
             "box_name": "A73",
             "port": 8,
             "ndelay_or_nwait": [
                 0
             ]
         },
-        "A73.P9": {
-            "port_name": "A73.P9",
+        "A73.P09": {
+            "port_name": "A73.P09",
             "box_name": "A73",
             "port": 9,
             "ndelay_or_nwait": [
@@ -301,19 +301,19 @@
     },
     "relation_channel_target": [
         [
-            "A25.READ0.GEN",
+            "A25.READ0.GEN0",
             "RQ16"
         ],
         [
-            "A25.READ0.GEN",
+            "A25.READ0.GEN0",
             "RQ17"
         ],
         [
-            "A25.READ0.GEN",
+            "A25.READ0.GEN0",
             "RQ18"
         ],
         [
-            "A25.READ0.GEN",
+            "A25.READ0.GEN0",
             "RQ19"
         ],
         [
@@ -333,19 +333,19 @@
             "RQ19"
         ],
         [
-            "A73.READ0.GEN",
+            "A73.READ0.GEN0",
             "RQ52"
         ],
         [
-            "A73.READ0.GEN",
+            "A73.READ0.GEN0",
             "RQ53"
         ],
         [
-            "A73.READ0.GEN",
+            "A73.READ0.GEN0",
             "RQ54"
         ],
         [
-            "A73.READ0.GEN",
+            "A73.READ0.GEN0",
             "RQ55"
         ],
         [
@@ -399,42 +399,42 @@
     ],
     "relation_channel_port": [
         [
-            "A25.READ0.GEN",
+            "A25.READ0.GEN0",
             {
-                "port_name": "A25.P0",
+                "port_name": "A25.P00",
                 "channel_number": 0
             }
         ],
         [
             "A25.READ0.CAP0",
             {
-                "port_name": "A25.P1",
+                "port_name": "A25.P01",
                 "channel_number": 0
             }
         ],
         [
             "A25.READ0.CAP1",
             {
-                "port_name": "A25.P1",
+                "port_name": "A25.P01",
                 "channel_number": 1
             }
         ],
         [
             "A25.READ0.CAP2",
             {
-                "port_name": "A25.P1",
+                "port_name": "A25.P01",
                 "channel_number": 2
             }
         ],
         [
             "A25.READ0.CAP3",
             {
-                "port_name": "A25.P1",
+                "port_name": "A25.P01",
                 "channel_number": 3
             }
         ],
         [
-            "A25.READ1.GEN",
+            "A25.READ1.GEN0",
             {
                 "port_name": "A25.P13",
                 "channel_number": 0
@@ -471,217 +471,217 @@
         [
             "A25.CTRL0.CH0",
             {
-                "port_name": "A25.P5",
+                "port_name": "A25.P05",
                 "channel_number": 0
             }
         ],
         [
             "A25.CTRL0.CH1",
             {
-                "port_name": "A25.P5",
+                "port_name": "A25.P05",
                 "channel_number": 1
             }
         ],
         [
             "A25.CTRL0.CH2",
             {
-                "port_name": "A25.P5",
+                "port_name": "A25.P05",
                 "channel_number": 2
             }
         ],
         [
             "A25.CTRL1.CH0",
             {
-                "port_name": "A25.P6",
+                "port_name": "A25.P06",
                 "channel_number": 0
             }
         ],
         [
             "A25.CTRL1.CH1",
             {
-                "port_name": "A25.P6",
+                "port_name": "A25.P06",
                 "channel_number": 1
             }
         ],
         [
             "A25.CTRL1.CH2",
             {
-                "port_name": "A25.P6",
+                "port_name": "A25.P06",
                 "channel_number": 2
             }
         ],
         [
             "A25.CTRL2.CH0",
             {
-                "port_name": "A25.P7",
+                "port_name": "A25.P07",
                 "channel_number": 0
             }
         ],
         [
             "A25.CTRL2.CH1",
             {
-                "port_name": "A25.P7",
+                "port_name": "A25.P07",
                 "channel_number": 1
             }
         ],
         [
             "A25.CTRL2.CH2",
             {
-                "port_name": "A25.P7",
+                "port_name": "A25.P07",
                 "channel_number": 2
             }
         ],
         [
             "A25.CTRL3.CH0",
             {
-                "port_name": "A25.P8",
+                "port_name": "A25.P08",
                 "channel_number": 0
             }
         ],
         [
             "A25.CTRL3.CH1",
             {
-                "port_name": "A25.P8",
+                "port_name": "A25.P08",
                 "channel_number": 1
             }
         ],
         [
             "A25.CTRL3.CH2",
             {
-                "port_name": "A25.P8",
+                "port_name": "A25.P08",
                 "channel_number": 2
             }
         ],
         [
-            "A73.READ0.GEN",
+            "A73.READ0.GEN0",
             {
-                "port_name": "A73.P1",
+                "port_name": "A73.P01",
                 "channel_number": 0
             }
         ],
         [
             "A73.READ0.CAP0",
             {
-                "port_name": "A73.P0",
+                "port_name": "A73.P00",
                 "channel_number": 0
             }
         ],
         [
             "A73.READ0.CAP1",
             {
-                "port_name": "A73.P0",
+                "port_name": "A73.P00",
                 "channel_number": 1
             }
         ],
         [
             "A73.READ0.CAP2",
             {
-                "port_name": "A73.P0",
+                "port_name": "A73.P00",
                 "channel_number": 2
             }
         ],
         [
             "A73.READ0.CAP3",
             {
-                "port_name": "A73.P0",
+                "port_name": "A73.P00",
                 "channel_number": 3
             }
         ],
         [
-            "A73.READ1.GEN",
+            "A73.READ1.GEN0",
             {
-                "port_name": "A73.P8",
+                "port_name": "A73.P08",
                 "channel_number": 0
             }
         ],
         [
             "A73.READ1.CAP0",
             {
-                "port_name": "A73.P7",
+                "port_name": "A73.P07",
                 "channel_number": 0
             }
         ],
         [
             "A73.READ1.CAP1",
             {
-                "port_name": "A73.P7",
+                "port_name": "A73.P07",
                 "channel_number": 1
             }
         ],
         [
             "A73.READ1.CAP2",
             {
-                "port_name": "A73.P7",
+                "port_name": "A73.P07",
                 "channel_number": 2
             }
         ],
         [
             "A73.READ1.CAP3",
             {
-                "port_name": "A73.P7",
+                "port_name": "A73.P07",
                 "channel_number": 3
             }
         ],
         [
             "A73.CTRL0.CH0",
             {
-                "port_name": "A73.P2",
+                "port_name": "A73.P02",
                 "channel_number": 0
             }
         ],
         [
             "A73.CTRL0.CH1",
             {
-                "port_name": "A73.P2",
+                "port_name": "A73.P02",
                 "channel_number": 1
             }
         ],
         [
             "A73.CTRL0.CH2",
             {
-                "port_name": "A73.P2",
+                "port_name": "A73.P02",
                 "channel_number": 2
             }
         ],
         [
             "A73.CTRL1.CH0",
             {
-                "port_name": "A73.P4",
+                "port_name": "A73.P04",
                 "channel_number": 0
             }
         ],
         [
             "A73.CTRL1.CH1",
             {
-                "port_name": "A73.P4",
+                "port_name": "A73.P04",
                 "channel_number": 1
             }
         ],
         [
             "A73.CTRL1.CH2",
             {
-                "port_name": "A73.P4",
+                "port_name": "A73.P04",
                 "channel_number": 2
             }
         ],
         [
             "A73.CTRL2.CH0",
             {
-                "port_name": "A73.P9",
+                "port_name": "A73.P09",
                 "channel_number": 0
             }
         ],
         [
             "A73.CTRL2.CH1",
             {
-                "port_name": "A73.P9",
+                "port_name": "A73.P09",
                 "channel_number": 1
             }
         ],
         [
             "A73.CTRL2.CH2",
             {
-                "port_name": "A73.P9",
+                "port_name": "A73.P09",
                 "channel_number": 2
             }
         ],
