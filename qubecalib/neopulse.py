@@ -1133,20 +1133,17 @@ def floor(value: float, unit: float = 1) -> float:
         return retval
 
 
-class Padding(Item):
+def padding(duration: float):
     """
-    Padding class to add padding to the sequence.
+    Add padding with the specified duration to the sequence.
 
     Parameters
     ----------
     duration : float
         Duration of the padding in ns.
     """
-
-    def __init__(self, duration: float) -> None:
-        super().__init__(duration)
-        if len(_rc.contexts):
-            _rc.contexts[-1].append(self)
+    if len(_rc.contexts):
+        Blank(duration=duration).target()
 
 
 class Slot(Item):
