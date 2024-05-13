@@ -10,17 +10,19 @@ def test_inheritance():
 
 
 def test_empty_init():
-    """Arbit should initialize with no arguments."""
-    wf = Arbit()
-    assert wf.duration is None
+    """Arbit should not initialize with no arguments."""
+    with pytest.raises(TypeError):
+        Arbit()  # type: ignore
 
 
 def test_init():
     """Arbit should initialize with arguments."""
-    dt = DEFAULT_SAMPLING_PERIOD
-    wf = Arbit(duration=5 * dt)
-    assert wf.duration == 10
-    assert (wf.iq == np.array([0, 0, 0, 0, 0])).all()
+    wf_list = Arbit([1, 1j])
+    wf_array = Arbit(np.array([1, 1j]))
+    assert wf_list.duration == 4
+    assert wf_array.duration == 4
+    assert (wf_list.iq == np.array([1, 1j])).all()
+    assert (wf_array.iq == np.array([1, 1j])).all()
 
 
 def test_default_sampling_period():
@@ -28,29 +30,10 @@ def test_default_sampling_period():
     assert DEFAULT_SAMPLING_PERIOD == 2
 
 
-def test_set_iq():
-    """Arbit should set the IQ data."""
-    dt = DEFAULT_SAMPLING_PERIOD
-    wf = Arbit(duration=5 * dt)
-    wf.iq[:] = np.array([1, 2, 3, 4, 5])
-    assert (wf.iq == np.array([1, 2, 3, 4, 5])).all()
-
-
-def test_set_iq_wrong_length():
-    """Arbit should raise an error if the IQ data is the wrong length."""
-    dt = DEFAULT_SAMPLING_PERIOD
-    wf = Arbit(duration=5 * dt)
-    wf.begin = 0
-    with pytest.raises(ValueError):
-        wf.iq[:] = np.array([1, 2, 3, 4, 5, 6])
-
-
 def test_func():
     """Arbit should return the correct samples."""
-    dt = DEFAULT_SAMPLING_PERIOD
-    wf = Arbit(duration=5 * dt)
+    wf = Arbit([0.1, 0.2, 0.3, 0.4, 0.5])
     wf.begin = 0
-    wf.iq[:] = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     assert wf.func(-1) == 0.0
     assert wf.func(0) == 0.1
     assert wf.func(1) == 0.1
