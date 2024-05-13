@@ -132,9 +132,7 @@ class WaveSequenceTools:
         )
 
         s = IqWave.convert_to_iq_format(i, q, WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK)
-        total_duration_in_words = int(
-            i.shape[0] // WaveSequence.NUM_SAMPLES_IN_AWG_WORD
-        )
+        total_duration_in_words = int(len(s) // WaveSequence.NUM_SAMPLES_IN_AWG_WORD)
         wseq.add_chunk(
             iq_samples=s,
             num_blank_words=interval_words - total_duration_in_words,
