@@ -24,9 +24,6 @@ dependencies = [
     "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.8#subdirectory=quel_ic_config",
 ]
 
-[tool.setuptools]
-packages = ["qubecalib"]
-
 [tool.setuptools.dynamic]
 version = { attr = "qubecalib.__version__" }
 
