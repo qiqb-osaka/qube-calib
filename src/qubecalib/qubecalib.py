@@ -1445,15 +1445,28 @@ class Executor:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
             raise StopIteration()
-        # 波形送受信以外の処理は一括実行する
+        # Sequencer が見つかるまでコマンドを逐次実行
         while True:
+            # もしワークキューが空になったらエラーを出す
             if not self._work_queue:
-                raise ValueError("_work_queue should end with a Sequencer command")
+                raise ValueError(
+                    "command que should include at least one Sequencer command."
+                )
             next = self._work_queue.pop()
+            # 次に実行するコマンドが Sequencer ならばループを抜ける
             if isinstance(next, Sequencer):
                 break
+            # Sequencer 以外のコマンドを逐次実行
             next.execute(self._boxpool)
-        return next.execute(self._boxpool)
+        for command in self._work_queue:
+            # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
+            if isinstance(command, Sequencer):
+                return next.execute(self._boxpool)
+        # これ以上 Sequencer がなければ残りのコマンドを実行する
+        rslt = next.execute(self._boxpool)
+        for command in self._work_queue:
+            command.execute(self._boxpool)
+        return rslt
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)
