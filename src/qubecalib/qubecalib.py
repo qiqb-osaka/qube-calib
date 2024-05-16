@@ -1287,7 +1287,11 @@ class Sequencer(Command):
             for (box_name, capm), _ in iqs.items()
             for capu in _
         }
-        return _status, _iqs
+
+        # sort keys of iqs by target name
+        sorted_iqs = {key: _iqs[key] for key in sorted(_iqs)}
+
+        return _status, sorted_iqs
 
     @classmethod
     def create_triggering_pgs(
