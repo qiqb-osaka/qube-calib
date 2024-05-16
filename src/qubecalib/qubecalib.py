@@ -468,10 +468,10 @@ class QubeCalib:
             self._apply_box_config(box_name)
         return box_names
 
-    def clear_command_que(self):
+    def clear_command_queue(self):
         self._executor._work_queue.clear()
 
-    def show_command_que(self):
+    def show_command_queue(self):
         return self._executor._work_queue
 
 
