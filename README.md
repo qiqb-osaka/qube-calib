@@ -51,3 +51,8 @@ pip install git+https://github.com/qiqb-osaka/qube-calib.git@x.y.z
 ```
 
 Check available versions on the [release page](https://github.com/qiqb-osaka/qube-calib/releases).
+
+
+## Notes
+
+- `QubeServer.py` has been moved to the [qube-server](https://github.com/qiqb-osaka/qube-server) repository.
