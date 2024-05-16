@@ -1,0 +1,256 @@
+{
+    "clockmaster_setting": null,
+    "box_settings": {
+        "Q73A": {
+            "ipaddr_wss": "10.1.0.73",
+            "ipaddr_sss": "10.2.0.73",
+            "ipaddr_css": "10.5.0.73",
+            "boxtype": "quel1-a",
+            "config_root": null,
+            "config_options": []
+        }
+    },
+    "box_aliases": {},
+    "port_settings": {
+        "Q73A.READ0.IN": {
+            "port_name": "Q73A.READ0.IN",
+            "box_name": "Q73A",
+            "port": 0,
+            "ndelay_or_nwait": [
+                0,
+                0,
+                0,
+                0
+            ]
+        },
+        "Q73A.READ0.OUT": {
+            "port_name": "Q73A.READ0.OUT",
+            "box_name": "Q73A",
+            "port": 1,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "Q73A.CTRL0": {
+            "port_name": "Q73A.CTRL0",
+            "box_name": "Q73A",
+            "port": 2,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "Q73A.PUMP0": {
+            "port_name": "Q73A.PUMP0",
+            "box_name": "Q73A",
+            "port": 3,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.CTRL1": {
+            "port_name": "Q73A.CTRL1",
+            "box_name": "Q73A",
+            "port": 4,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "Q73A.MONITOR0.IN": {
+            "port_name": "Q73A.MONITOR0.IN",
+            "box_name": "Q73A",
+            "port": 5,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.MONITOR0.OUT": {
+            "port_name": "Q73A.MONITOR0.OUT",
+            "box_name": "Q73A",
+            "port": 6,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.READ1.IN": {
+            "port_name": "Q73A.READ1.IN",
+            "box_name": "Q73A",
+            "port": 7,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.READ1.OUT": {
+            "port_name": "Q73A.READ1.OUT",
+            "box_name": "Q73A",
+            "port": 8,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.CTRL2": {
+            "port_name": "Q73A.CTRL2",
+            "box_name": "Q73A",
+            "port": 9,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "Q73A.PUMP1": {
+            "port_name": "Q73A.PUMP1",
+            "box_name": "Q73A",
+            "port": 10,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.CTRL3": {
+            "port_name": "Q73A.CTRL3",
+            "box_name": "Q73A",
+            "port": 11,
+            "ndelay_or_nwait": [
+                0
+            ]
+        },
+        "Q73A.MONITOR1.IN": {
+            "port_name": "Q73A.MONITOR1.IN",
+            "box_name": "Q73A",
+            "port": 12,
+            "ndelay_or_nwait": []
+        },
+        "Q73A.MONITOR1.OUT": {
+            "port_name": "Q73A.MONITOR1.OUT",
+            "box_name": "Q73A",
+            "port": 13,
+            "ndelay_or_nwait": []
+        }
+    },
+    "target_settings": {
+        "RQ52": {
+            "frequency": 10.3426
+        },
+        "RQ53": {
+            "frequency": 10.51863
+        },
+        "RQ54": {
+            "frequency": 10.46727
+        },
+        "RQ55": {
+            "frequency": 10.20783
+        },
+        "Q52": {
+            "frequency": 7.729161
+        },
+        "Q53": {
+            "frequency": 8.817762
+        },
+        "Q54": {
+            "frequency": 8.79183
+        },
+        "Q55": {
+            "frequency": 7.761116
+        }
+    },
+    "relation_channel_target": [
+        [
+            "Q73A.READ0.OUT0",
+            "RQ52"
+        ],
+        [
+            "Q73A.READ0.OUT0",
+            "RQ53"
+        ],
+        [
+            "Q73A.READ0.OUT0",
+            "RQ54"
+        ],
+        [
+            "Q73A.READ0.OUT0",
+            "RQ55"
+        ],
+        [
+            "Q73A.READ0.IN0",
+            "RQ52"
+        ],
+        [
+            "Q73A.READ0.IN1",
+            "RQ53"
+        ],
+        [
+            "Q73A.READ0.IN2",
+            "RQ54"
+        ],
+        [
+            "Q73A.READ0.IN3",
+            "RQ55"
+        ],
+        [
+            "Q73A.CTRL0.CH0",
+            "Q52"
+        ],
+        [
+            "Q73A.CTRL1.CH0",
+            "Q53"
+        ],
+        [
+            "Q73A.CTRL2.CH0",
+            "Q54"
+        ],
+        [
+            "Q73A.CTRL3.CH0",
+            "Q55"
+        ]
+    ],
+    "relation_channel_port": [
+        [
+            "Q73A.READ0.OUT0",
+            {
+                "port_name": "Q73A.READ0.OUT",
+                "channel_number": 0
+            }
+        ],
+        [
+            "Q73A.READ0.IN0",
+            {
+                "port_name": "Q73A.READ0.IN",
+                "channel_number": 0
+            }
+        ],
+        [
+            "Q73A.READ0.IN1",
+            {
+                "port_name": "Q73A.READ0.IN",
+                "channel_number": 1
+            }
+        ],
+        [
+            "Q73A.READ0.IN2",
+            {
+                "port_name": "Q73A.READ0.IN",
+                "channel_number": 2
+            }
+        ],
+        [
+            "Q73A.READ0.IN3",
+            {
+                "port_name": "Q73A.READ0.IN",
+                "channel_number": 3
+            }
+        ],
+        [
+            "Q73A.CTRL0.CH0",
+            {
+                "port_name": "Q73A.CTRL0",
+                "channel_number": 0
+            }
+        ],
+        [
+            "Q73A.CTRL1.CH0",
+            {
+                "port_name": "Q73A.CTRL1",
+                "channel_number": 0
+            }
+        ],
+        [
+            "Q73A.CTRL2.CH0",
+            {
+                "port_name": "Q73A.CTRL2",
+                "channel_number": 0
+            }
+        ],
+        [
+            "Q73A.CTRL3.CH0",
+            {
+                "port_name": "Q73A.CTRL3",
+                "channel_number": 0
+            }
+        ]
+    ]
+}

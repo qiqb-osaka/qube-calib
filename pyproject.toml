@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qubecalib"
+dynamic = ["version"]
+requires-python = ">=3.9"
+authors = [{ name = "h403", email = "shiomi@ieee.org" }]
+description = "QuBE calibration tools"
+readme = "README.md"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: GPL",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "jupyter ~= 1.0",
+    "numpy ~= 1.0",
+    "matplotlib ~= 3.0",
+    "tqdm ~= 4.0",
+    "e7awgsw @ git+https://github.com/e-trees/e7awg_sw.git@7dccc53c",
+    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.8#subdirectory=quel_clock_master",
+    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.8#subdirectory=quel_ic_config",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "qubecalib.__version__" }
+
+[tool.pytest.ini_options]
+# cf. https://docs.pytest.org/en/6.2.x/pythonpath.html#import-modes
+addopts = "--import-mode=importlib"
