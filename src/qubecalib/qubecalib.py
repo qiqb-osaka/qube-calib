@@ -500,7 +500,11 @@ class QubeCalib:
             box.reconnect()
         return boxpool
 
-    def execute_raw_e7(self, boxpool: BoxPool, *e7_settings: Tuple[str, int, int, WaveSequence | CaptureParam]) -> Tuple:
+    def execute_raw_e7(
+        self,
+        boxpool: BoxPool,
+        *e7_settings: Tuple[str, int, int, WaveSequence | CaptureParam],
+    ) -> Tuple:
         for box_name, _, _, e7 in e7_settings:
             if box_name not in boxpool._boxes:
                 raise ValueError(f"box({box_name}) is not defined")
