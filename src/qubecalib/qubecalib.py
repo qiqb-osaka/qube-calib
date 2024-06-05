@@ -1179,6 +1179,7 @@ class Sequencer(Command):
                 {
                     "cap_e7_settings": cap_e7_settings,
                     "box_configs": box_configs,
+                    "cap_sampled_sequence": self.cap_sampled_sequence,
                     "debug": "case 2: catpure_now",
                 },
             )
@@ -1203,6 +1204,7 @@ class Sequencer(Command):
                 {},
                 {
                     "gen_e7_settings": gen_e7_settings,
+                    "gen_sampled_sequence": self.gen_sampled_sequence,
                     "box_configs": box_configs,
                     "debug": "case 3: emit_now",
                 },
@@ -1216,6 +1218,7 @@ class Sequencer(Command):
                     {},
                     {
                         "gen_e7_settings": gen_e7_settings,
+                        "gen_sampled_sequence": self.gen_sampled_sequence,
                         "box_configs": box_configs,
                         "debug": "case 5: emit_now",
                     },
@@ -1227,6 +1230,7 @@ class Sequencer(Command):
                     {},
                     {
                         "gen_e7_settings": gen_e7_settings,
+                        "gen_sampled_sequence": self.gen_sampled_sequence,
                         "box_configs": box_configs,
                         "debug": "case 5: emit_at",
                     },
@@ -1244,7 +1248,9 @@ class Sequencer(Command):
                 return (status, iqs) + (
                     {
                         "gen_e7_settings": gen_e7_settings,
+                        "gen_sampled_sequence": self.gen_sampled_sequence,
                         "cap_e7_settings": cap_e7_settings,
+                        "cap_sampled_sequence": self.cap_sampled_sequence,
                         "box_configs": box_configs,
                         "debug": "case 4: capture_at, emit_now",
                     },
@@ -1261,7 +1267,9 @@ class Sequencer(Command):
                 return (status, iqs) + (
                     {
                         "gen_e7_settings": gen_e7_settings,
+                        "gen_sampled_sequence": self.gen_sampled_sequence,
                         "cap_e7_settings": cap_e7_settings,
+                        "cap_sampled_sequence": self.cap_sampled_sequence,
                         "box_configs": box_configs,
                         "debug": "case 4: capture_at, emit_at",
                     },
