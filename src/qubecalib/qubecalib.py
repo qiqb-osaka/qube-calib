@@ -474,6 +474,99 @@ class QubeCalib:
     def show_command_queue(self):
         return self._executor._work_queue
 
+    def create_boxpool(self, *box_names: str) -> BoxPool:
+        boxpool = BoxPool()
+        if self.system_config_database._clockmaster_setting is not None:
+            boxpool.create_clock_master(
+                ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr),
+            )
+        for box_name in box_names:
+            if box_name not in self.system_config_database._box_settings:
+                raise ValueError(f"box({box_name}) is not defined")
+            setting = self.system_config_database._box_settings[box_name]
+            box = boxpool.create(
+                box_name,
+                ipaddr_wss=str(setting.ipaddr_wss),
+                ipaddr_sss=str(setting.ipaddr_sss),
+                ipaddr_css=str(setting.ipaddr_css),
+                boxtype=setting.boxtype,
+                config_root=Path(setting.config_root)
+                if setting.config_root is not None
+                else None,
+                config_options=setting.config_options,
+                # ignore_crc_error_of_mxfe=args.ignore_crc_error_of_mxfe,
+                # ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780,
+            )
+            box.reconnect()
+        return boxpool
+
+    def execute_raw_e7(
+        self,
+        boxpool: BoxPool,
+        *e7_settings: Tuple[str, int, int, WaveSequence | CaptureParam],
+    ) -> Tuple:
+        for box_name, _, _, e7 in e7_settings:
+            if box_name not in boxpool._boxes:
+                raise ValueError(f"box({box_name}) is not defined")
+            if not isinstance(e7, WaveSequence) and not isinstance(e7, CaptureParam):
+                raise ValueError(f"e7({e7}) is not supported")
+        box_names = {box_name for box_name, _, _, _ in e7_settings}
+        pg = PulseGen(boxpool)
+        pc = PulseCap(boxpool)
+        for box_name, port, channel, e7 in e7_settings:
+            if isinstance(e7, WaveSequence):
+                pg.create(
+                    box_name=box_name,
+                    port=port,
+                    channel=channel,
+                    waveseq=e7,
+                )
+            if isinstance(e7, CaptureParam):
+                pc.create(
+                    box_name=box_name,
+                    port=port,
+                    channel=channel,
+                    capprm=e7,
+                )
+        [_.init() for _ in pg.pulsegens]
+        [_.init() for _ in pc.pulsecaps]
+        if not pg.pulsegens and pc.pulsecaps:  # case 2.
+            # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
+            return pc.capture_now()
+        elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
+            # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
+            # trigger を設定
+            triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
+            futures = pc.capture_at_trigger_of(triggering_pgs)
+            pg.emit_now()
+            return pc.wait_until_capture_finishes(futures)
+        elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
+            # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
+            pg.emit_now()
+            return None, None
+        elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
+            # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
+            if boxpool._clock_master is None:
+                pg.emit_now()
+                return None, None
+            else:
+                pg.emit_at()
+                return None, None
+        elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
+            # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
+            if boxpool._clock_master is None:
+                triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
+                futures = pc.capture_at_trigger_of(triggering_pgs)
+                pg.emit_now()
+                return pc.wait_until_capture_finishes(futures)
+            else:
+                triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
+                futures = pc.capture_at_trigger_of(triggering_pgs)
+                pg.emit_at()
+                return pc.wait_until_capture_finishes(futures)
+        else:
+            raise ValueError("this setting is not supported yet")
+
 
 class Converter:
     @classmethod
