@@ -92,7 +92,15 @@ class Quel1WaveSubsystemMod:
                     _c = np.hsplit(
                         _d,
                         np.cumsum(
-                            np.array([w for w, _ in capprm.sum_section_list[:-1]])
+                            np.array(
+                                [
+                                    w
+                                    if DspUnit.DECIMATION
+                                    not in capprm.dsp_units_enabled
+                                    else int(w / 4)
+                                    for w, _ in capprm.sum_section_list[:-1]
+                                ]
+                            )
                         )
                         * capprm.NUM_SAMPLES_IN_ADC_WORD,
                     )
