@@ -10,14 +10,12 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from typing import (
     Any,
-    Dict,
     Final,
     Iterable,
     MutableMapping,
     MutableSequence,
     Optional,
     Set,
-    Tuple,
     TypedDict,
 )
 
@@ -70,7 +68,7 @@ class QubeCalib:
             SystemConfigDatabase()
         )
         self._executor: Final[Executor] = Executor()
-        self._box_configs: Dict[str, Dict[str, Any]] = {}
+        self._box_configs: dict[str, dict[str, Any]] = {}
 
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
@@ -79,7 +77,7 @@ class QubeCalib:
     def system_config_database(self) -> SystemConfigDatabase:
         return self._system_config_database
 
-    def execute(self) -> Tuple:
+    def execute(self) -> tuple:
         """queue に登録されている command を実行する（未実装）"""
         return "", "", ""
 
@@ -201,7 +199,7 @@ class QubeCalib:
         subport: int = 0,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        cnco_locked_with: Optional[int | Tuple[int, int]] = None,
+        cnco_locked_with: Optional[int | tuple[int, int]] = None,
         vatt: Optional[int] = None,
         sideband: Optional[str] = None,
         fullscale_current: Optional[int] = None,
@@ -268,7 +266,7 @@ class QubeCalib:
         ipaddr_css: Optional[str] = None,
         config_root: Optional[str] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return self.system_config_database.define_box(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -303,9 +301,9 @@ class QubeCalib:
         sideband: str = "U",
         vatt: int = 0x800,
         fnco_freq: Optional[
-            Tuple[float] | Tuple[float, float] | Tuple[float, float, float]
+            tuple[float] | tuple[float, float] | tuple[float, float, float]
         ] = None,
-        # ndelay_or_nwait: Tuple[int, ...] = (),
+        # ndelay_or_nwait: tuple[int, ...] = (),
     ) -> None:
         self.system_config_database.define_port(
             port_name=port_name,
@@ -322,8 +320,8 @@ class QubeCalib:
     def _create_target_resource_map(
         self,
         target_names: Iterable[str],
-    ) -> Dict[
-        str, Iterable[Dict[str, BoxSetting | PortSetting | int | Dict[str, Any]]]
+    ) -> dict[
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
     ]:
         # {target_name: sampled_sequence} の形式から
         # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
@@ -348,7 +346,7 @@ class QubeCalib:
             for target_name, _ in bpc_targets.items()
         }
 
-    def get_target_info(self, target_name: str) -> Dict:
+    def get_target_info(self, target_name: str) -> dict:
         return {
             "box_name": self.system_config_database.get_boxes_by_target(
                 target_name=target_name
@@ -388,7 +386,7 @@ class QubeCalib:
             reconnect=reconnect,
         )
 
-    def read_clock(self, *box_names: str) -> MutableSequence[Tuple[bool, int, int]]:
+    def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
         return [
             SequencerClient(
                 target_ipaddr=str(
@@ -400,7 +398,7 @@ class QubeCalib:
 
     def resync(
         self, *box_names: str
-    ) -> MutableSequence[Tuple[bool, int, int] | Tuple[bool, int]]:
+    ) -> MutableSequence[tuple[bool, int, int] | tuple[bool, int]]:
         db = self.system_config_database
         if db._clockmaster_setting is None:
             raise ValueError("clock master is not found")
@@ -421,7 +419,7 @@ class QubeCalib:
     ) -> float:
         return sequence_duration // constrain * constrain
 
-    def get_all_box_configs(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_box_configs(self) -> dict[str, dict[str, Any]]:
         return {
             box_name: self.system_config_database.create_box(box_name).dump_box()
             for box_name in self.system_config_database._box_settings
@@ -439,7 +437,7 @@ class QubeCalib:
         with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
             configs = json.load(fp)
         for box_name, _ in configs.items():
-            ports: Dict[int | Tuple[int, int], Dict[str, Any]] = {
+            ports: dict[int | tuple[int, int], dict[str, Any]] = {
                 int(k): v for k, v in _["ports"].items()
             }
             _["ports"] = ports
@@ -479,15 +477,15 @@ class Converter:
     @classmethod
     def convert_to_device_specific_sequence(
         cls,
-        sampled_sequence: Dict[str, SampledSequenceBase],
-        resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
-        port_config: Dict[str, PortConfigAcquirer],
+        sampled_sequence: dict[str, SampledSequenceBase],
+        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
-    ) -> Dict[Tuple[str, str, int] | Tuple[str, int, int], WaveSequence | CaptureParam]:
+    ) -> dict[tuple[str, str, int] | tuple[str, int, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
         # print(sampled_sequence)
@@ -539,16 +537,16 @@ class Converter:
     @classmethod
     def convert_to_cap_device_specific_sequence(
         cls,
-        sampled_sequence: Dict[str, CapSampledSequence],
-        resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
-        port_config: Dict[str, PortConfigAcquirer],
+        sampled_sequence: dict[str, CapSampledSequence],
+        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        port_config: dict[str, PortConfigAcquirer],
         # delay: int,
         repeats: int,
         interval: float,
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
-    ) -> Dict[Tuple[str, str, int], CaptureParam]:
+    ) -> dict[tuple[str, str, int], CaptureParam]:
         # fnco_freqs_by_target = {
         #     target_name: [
         #         _["fnco_freq"]
@@ -611,7 +609,7 @@ class Converter:
             raise ValueError(
                 "multiple access for single runit will be supported, not now"
             )
-        # 戻り値は {(box_name, port_number, channel_number): CaptureParam} の Dict
+        # 戻り値は {(box_name, port_number, channel_number): CaptureParam} の dict
         ids_e7 = {
             targets_ids[_.target_name]: CaptureParamTools.create(
                 sequence=_,
@@ -642,14 +640,14 @@ class Converter:
     @classmethod
     def convert_to_gen_device_specific_sequence(
         cls,
-        sampled_sequence: Dict[str, GenSampledSequence],
-        resource_map: Dict[str, Dict[str, BoxSetting | PortSetting | int]],
-        port_config: Dict[str, PortConfigAcquirer],
+        sampled_sequence: dict[str, GenSampledSequence],
+        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        port_config: dict[str, PortConfigAcquirer],
         # wait: float,
         repeats: int,
         interval: float,
         # integral_mode: str,
-    ) -> Dict[Tuple[str, int, int], WaveSequence]:
+    ) -> dict[tuple[str, int, int], WaveSequence]:
         # ndelay_or_nwait_by_target = {
         #     target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
         #     if _["port"].ndelay_or_wait is not None
@@ -704,7 +702,7 @@ class Converter:
         }
 
         # channel 毎に WaveSequence を生成する
-        # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の Dict
+        # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の dict
         # 周波数多重した sampled_sequence を作成する
         ids_muxed_sequences = {
             id: cls.multiplex(
@@ -866,7 +864,7 @@ class Command:
 
 class TargetBPC(TypedDict):
     box: Quel1Box
-    port: int | Tuple[int, int]
+    port: int | tuple[int, int]
     channel: int
 
 
@@ -874,7 +872,7 @@ class PortConfigAcquirer:
     def __init__(
         self,
         box: Quel1Box,
-        port: int | Tuple[int, int],
+        port: int | tuple[int, int],
         channel: int,
     ):
         self.dump_config = dp = box.dump_port(port)
@@ -910,10 +908,10 @@ class RfSwitch(Command):
 class Sequencer(Command):
     def __init__(
         self,
-        gen_sampled_sequence: Dict[str, GenSampledSequence],
-        cap_sampled_sequence: Dict[str, CapSampledSequence],
-        resource_map: Dict[
-            str, Iterable[Dict[str, BoxSetting | PortSetting | int | Dict[str, Any]]]
+        gen_sampled_sequence: dict[str, GenSampledSequence],
+        cap_sampled_sequence: dict[str, CapSampledSequence],
+        resource_map: dict[
+            str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
@@ -934,13 +932,13 @@ class Sequencer(Command):
         self.dsp_demodulation = dsp_demodulation
         self.software_demodulation = software_demodulation
 
-    # def __init__(self, e7_settings: Dict) -> None:
+    # def __init__(self, e7_settings: dict) -> None:
     #     self._e7_setting = e7_settings
 
     def execute(
         self,
         boxpool: BoxPool,
-    ) -> Tuple[Dict[str, CaptureReturnCode], Dict[str, list], Dict]:
+    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
         # print(self.gen_sampled_sequence)
         # print(self.cap_sampled_sequence)
@@ -1018,7 +1016,7 @@ class Sequencer(Command):
         }
         # e7 の生成に必要な lo_hz などをまとめた辞書を作る
         # print("eee")
-        cap_target_bpc: Dict[str, Iterable[TargetBPC]] = {
+        cap_target_bpc: dict[str, Iterable[TargetBPC]] = {
             target_name: {
                 "box": boxpool.get_box(m["box"].box_name)[0],
                 "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
@@ -1026,7 +1024,7 @@ class Sequencer(Command):
             }
             for target_name, m in cap_resource_map.items()
         }
-        gen_target_bpc: Dict[str, Iterable[TargetBPC]] = {
+        gen_target_bpc: dict[str, Iterable[TargetBPC]] = {
             target_name: {
                 "box": boxpool.get_box(m["box"].box_name)[0],
                 "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
@@ -1035,7 +1033,7 @@ class Sequencer(Command):
             for target_name, m in gen_resource_map.items()
         }
         # print("ddd")
-        # target_bpc: Dict[str, Iterable[TargetBPC]] = {
+        # target_bpc: dict[str, Iterable[TargetBPC]] = {
         #     target_name: {
         #         "box": boxpool.get_box(m["box"].box_name)[0],
         #         "port": m["port"].port if isinstance(m["port"], PortSetting) else 0,
@@ -1136,7 +1134,7 @@ class Sequencer(Command):
         # print([_ for _ in pc.pulsecaps])
         # for k, v in cap_resource_map.items():
         #     print(k, v)
-        bmc_target: Dict[Tuple[Optional[str], CaptureModule, Optional[int]], str] = {
+        bmc_target: dict[tuple[Optional[str], CaptureModule, Optional[int]], str] = {
             (
                 m["box"].box_name if isinstance(m["box"], BoxSetting) else None,
                 bpc_capmod[
@@ -1273,10 +1271,10 @@ class Sequencer(Command):
     @classmethod
     def convert_key_from_bmu_to_target(
         cls,
-        bmc_target: Dict[Tuple[Optional[str], CaptureModule, Optional[int]], str],
-        status: Dict[Tuple[str, CaptureModule], CaptureReturnCode],
-        iqs: Dict[Tuple[str, CaptureModule], Dict[int, list]],
-    ) -> Tuple[Dict[str, CaptureReturnCode], Dict[str, list]]:
+        bmc_target: dict[tuple[Optional[str], CaptureModule, Optional[int]], str],
+        status: dict[tuple[str, CaptureModule], CaptureReturnCode],
+        iqs: dict[tuple[str, CaptureModule], dict[int, list]],
+    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list]]:
         _iqs = {
             bmc_target[(box_name, capm, capu)]: __iqs
             for (box_name, capm), _ in iqs.items()
@@ -1298,7 +1296,7 @@ class Sequencer(Command):
         cls,
         pg: PulseGen,
         pc: PulseCap,
-    ) -> Dict[tuple[Any, Any], PulseGen_]:  # (box_name, capmod): PulseGen_
+    ) -> dict[tuple[Any, Any], PulseGen_]:  # (box_name, capmod): PulseGen_
         # (box_names, capmod) 毎に同一グループの trigger の何れかをを割り当てる
         # 同一グループの awg が無ければエラーを返す
         cap = {(_.box_name, _.group, _.capmod) for _ in pc.pulsecaps}
@@ -1334,7 +1332,7 @@ class ConfigPort(Command):
         subport: int = 0,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        cnco_locked_with: Optional[int | Tuple[int, int]] = None,
+        cnco_locked_with: Optional[int | tuple[int, int]] = None,
         vatt: Optional[int] = None,
         sideband: Optional[str] = None,
         fullscale_current: Optional[int] = None,
@@ -1441,7 +1439,7 @@ class Executor:
 
         return self
 
-    def __next__(self) -> Tuple[Any, Dict, Dict]:
+    def __next__(self) -> tuple[Any, dict, dict]:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
             raise StopIteration()
@@ -1477,7 +1475,7 @@ class ClockmasterSetting:
     ipaddr: str | IPv4Address | IPv6Address
     reset: bool
 
-    def asdict(self) -> Dict[str, Any]:
+    def asdict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -1539,7 +1537,7 @@ class BoxSetting:
             "config_options": self.config_options,
         }
 
-    def asjsonable(self) -> Dict[str, Any]:
+    def asjsonable(self) -> dict[str, Any]:
         dct = self.asdict()
         dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[dct["boxtype"]]
         return dct
@@ -1554,8 +1552,8 @@ class PortSetting:
     cnco_freq: Optional[float] = None  # will be obsolete
     sideband: str = "U"  # will be obsolete
     vatt: int = 0x800  # will be obsolete
-    fnco_freq: Optional[Tuple[float, ...]] = None  # will be obsolete
-    ndelay_or_nwait: Tuple[int, ...] = ()
+    fnco_freq: Optional[tuple[float, ...]] = None  # will be obsolete
+    ndelay_or_nwait: tuple[int, ...] = ()
 
     # def __post_init__(self) -> None:
     #     if self.fnco_freq is not None and self.ndelay_or_nwait is None:
@@ -1577,13 +1575,13 @@ class PortSetting:
 class SystemConfigDatabase:
     def __init__(self) -> None:
         self._clockmaster_setting: Optional[ClockmasterSetting] = None
-        self._box_settings: Final[Dict[str, BoxSetting]] = {}
-        self._box_aliases: Final[Dict[str, str]] = {}
-        self._port_settings: Final[Dict[str, PortSetting]] = {}
-        self._relation_channel_target: Final[MutableSequence[Tuple[str, str]]] = []
-        self._target_settings: Final[Dict[str, Dict[str, Any]]] = {}
+        self._box_settings: Final[dict[str, BoxSetting]] = {}
+        self._box_aliases: Final[dict[str, str]] = {}
+        self._port_settings: Final[dict[str, PortSetting]] = {}
+        self._relation_channel_target: Final[MutableSequence[tuple[str, str]]] = []
+        self._target_settings: Final[dict[str, dict[str, Any]]] = {}
         self._relation_channel_port: Final[
-            MutableSequence[Tuple[str, Dict[str, str | int]]]
+            MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
 
     def define_clockmaster(
@@ -1598,13 +1596,13 @@ class SystemConfigDatabase:
 
     def set(
         self,
-        clockmaster_setting: Optional[Dict] = None,
-        box_settings: Optional[Dict] = None,
-        box_aliases: Optional[Dict[str, str]] = None,
-        port_settings: Optional[Dict[str, Dict[str, Any]]] = None,
-        relation_channel_target: Optional[MutableSequence[Tuple[str, str]]] = None,
-        target_settings: Optional[Dict[str, Dict[str, Any]]] = None,
-        relation_channel_port: Optional[MutableSequence[Tuple[str, str]]] = None,
+        clockmaster_setting: Optional[dict] = None,
+        box_settings: Optional[dict] = None,
+        box_aliases: Optional[dict[str, str]] = None,
+        port_settings: Optional[dict[str, dict[str, Any]]] = None,
+        relation_channel_target: Optional[MutableSequence[tuple[str, str]]] = None,
+        target_settings: Optional[dict[str, dict[str, Any]]] = None,
+        relation_channel_port: Optional[MutableSequence[tuple[str, str]]] = None,
     ) -> None:
         if clockmaster_setting is not None:
             self._clockmaster_setting = ClockmasterSetting(
@@ -1697,8 +1695,8 @@ class SystemConfigDatabase:
         cnco_freq: float = 0,
         sideband: str = "",
         vatt: int = 0,
-        fnco_freq: Tuple[float] | Tuple[float, float, float] = (0.0,),
-        ndelay_or_nwait: Tuple[int, ...] = (),
+        fnco_freq: tuple[float] | tuple[float, float, float] = (0.0,),
+        ndelay_or_nwait: tuple[int, ...] = (),
     ) -> None:
         self._port_settings[port_name] = PortSetting(
             port_name=port_name,
@@ -1739,7 +1737,7 @@ class SystemConfigDatabase:
     def get_channel(
         self,
         channel_name: str,
-    ) -> Tuple[str, str, int]:
+    ) -> tuple[str, str, int]:
         port_name = self.get_port_by_channel(channel_name)
         box_name = self._port_settings[port_name].box_name
         channel_number = self.get_channel_number_by_channel(channel_name)
@@ -1795,7 +1793,7 @@ class SystemConfigDatabase:
         ipaddr_css: Optional[str] = None,
         config_root: Optional[str] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         box_setting = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -1845,9 +1843,9 @@ class SystemConfigDatabase:
         sideband: str = "U",
         vatt: int = 0x800,
         fnco_freq: Optional[
-            Tuple[float] | Tuple[float, float] | Tuple[float, float, float]
+            tuple[float] | tuple[float, float] | tuple[float, float, float]
         ] = None,
-        # ndelay_or_nwait: Tuple[int, ...] = [],
+        # ndelay_or_nwait: tuple[int, ...] = [],
     ) -> None:
         if port_name in self._port_settings:
             ndelay_or_nwait = self._port_settings[port_name].ndelay_or_nwait
@@ -1890,7 +1888,7 @@ class SystemConfigDatabase:
                     )
         return box
 
-    def asdict(self) -> Dict[str, Any]:
+    def asdict(self) -> dict[str, Any]:
         return {
             "clockmaster_setting": self._clockmaster_setting.asdict()
             if self._clockmaster_setting is not None
