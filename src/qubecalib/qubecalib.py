@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ from typing import (
 )
 
 import numpy as np
-from e7awgsw import CaptureModule, CaptureParam, WaveSequence
+from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
@@ -501,67 +502,159 @@ class QubeCalib:
     def execute_raw_e7(
         self,
         boxpool: BoxPool,
-        *e7_settings: Tuple[str, int, int, WaveSequence | CaptureParam],
-    ) -> Tuple:
-        for box_name, _, _, e7 in e7_settings:
+        e7_settings: dict[tuple[str, int, int], WaveSequence | CaptureParam],
+        diabled: list[DspUnit] = [],
+    ) -> tuple:
+        for (box_name, _, _), e7 in e7_settings.items():
             if box_name not in boxpool._boxes:
                 raise ValueError(f"box({box_name}) is not defined")
             if not isinstance(e7, WaveSequence) and not isinstance(e7, CaptureParam):
                 raise ValueError(f"e7({e7}) is not supported")
-        box_names = {box_name for box_name, _, _, _ in e7_settings}
-        pg = PulseGen(boxpool)
-        pc = PulseCap(boxpool)
-        for box_name, port, channel, e7 in e7_settings:
-            if isinstance(e7, WaveSequence):
-                pg.create(
-                    box_name=box_name,
-                    port=port,
-                    channel=channel,
-                    waveseq=e7,
-                )
-            if isinstance(e7, CaptureParam):
-                pc.create(
-                    box_name=box_name,
-                    port=port,
-                    channel=channel,
-                    capprm=e7,
-                )
-        [_.init() for _ in pg.pulsegens]
-        [_.init() for _ in pc.pulsecaps]
+        box_names = {box_name for box_name, _, _ in e7_settings}
+        pg, pc = PulseGen(boxpool), PulseCap(boxpool)
+        gen_e7_settings = {
+            (box_name, port, channel): e7
+            for (box_name, port, channel), e7 in e7_settings.items()
+            if isinstance(e7, WaveSequence)
+        }
+        for (box_name, port, channel), e7 in gen_e7_settings.items():
+            pg.create(
+                box_name=box_name,
+                port=port,
+                channel=channel,
+                waveseq=e7,
+            )
+        cap_e7_settings = {
+            (box_name, port, channel): e7
+            for (box_name, port, channel), e7 in e7_settings.items()
+            if isinstance(e7, CaptureParam)
+        }
+        for (box_name, port, channel), e7 in cap_e7_settings.items():
+            enabled = e7.dsp_units_enabled
+            for dsp_unit in diabled:
+                if dsp_unit in enabled:
+                    enabled.remove(dsp_unit)
+            e7_copied = copy.deepcopy(e7)
+            e7_copied.sel_dsp_units_to_enable(*enabled)
+            pc.create(
+                box_name=box_name,
+                port=port,
+                channel=channel,
+                capprm=e7_copied,
+            )
+        for o in pg.pulsegens + pc.pulsecaps:
+            o.init()
+
+        box_names = {box_name for (box_name, _, _), _ in e7_settings.items()}
+        box_configs = {
+            box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
+        }
+        if pc.pulsecaps:
+            capmod_by_port_channel = {
+                (p.box_name, p.port, p.channel): (p.box_name, p.capmod)
+                for p in pc.pulsecaps
+            }
         if not pg.pulsegens and pc.pulsecaps:  # case 2.
             # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
-            return pc.capture_now()
+            status, iqs = pc.capture_now()
+            return (
+                status,
+                iqs,
+                {
+                    "cap_e7_settings": cap_e7_settings,
+                    "capmod_by_port_channel": capmod_by_port_channel,
+                    "box_configs": box_configs,
+                    "debug": "case 2: capture_now",
+                },
+            )
         elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
             # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
             # trigger を設定
             triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
             futures = pc.capture_at_trigger_of(triggering_pgs)
             pg.emit_now()
-            return pc.wait_until_capture_finishes(futures)
+            status, iqs = pc.wait_until_capture_finishes(futures)
+            return (
+                status,
+                iqs,
+                {
+                    "cap_e7_settings": cap_e7_settings,
+                    "gen_e7_settings": gen_e7_settings,
+                    "capmod_by_port_channel": capmod_by_port_channel,
+                    "box_configs": box_configs,
+                    "debug": "case 1: capture_at_trigger_of, emit_now",
+                },
+            )
         elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
             # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
             pg.emit_now()
-            return None, None
+            return (
+                {},
+                {},
+                {
+                    "gen_e7_settings": gen_e7_settings,
+                    "box_configs": box_configs,
+                    "debug": "case 3: emit_now",
+                },
+            )
         elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
             # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
             if boxpool._clock_master is None:
                 pg.emit_now()
-                return None, None
+                return (
+                    {},
+                    {},
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 5: emit_now",
+                    },
+                )
             else:
                 pg.emit_at()
-                return None, None
+                return (
+                    {},
+                    {},
+                    {
+                        "gen_e7_settings": gen_e7_settings,
+                        "box_configs": box_configs,
+                        "debug": "case 5: emit_at",
+                    },
+                )
         elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
             # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
             if boxpool._clock_master is None:
                 triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
                 pg.emit_now()
-                return pc.wait_until_capture_finishes(futures)
+                status, iqs = pc.wait_until_capture_finishes(futures)
+                return (
+                    status,
+                    iqs,
+                    {
+                        "cap_e7_settings": cap_e7_settings,
+                        "gen_e7_settings": gen_e7_settings,
+                        "capmod_by_port_channel": capmod_by_port_channel,
+                        "box_configs": box_configs,
+                        "debug": "case 4: capture_at, emit_now",
+                    },
+                )
             else:
                 triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
                 pg.emit_at()
-                return pc.wait_until_capture_finishes(futures)
+                status, iqs = pc.wait_until_capture_finishes(futures)
+                return (
+                    status,
+                    iqs,
+                    {
+                        "cap_e7_settings": cap_e7_settings,
+                        "gen_e7_settings": gen_e7_settings,
+                        "capmod_by_port_channel": capmod_by_port_channel,
+                        "box_configs": box_configs,
+                        "debug": "case 4: capture_at, emit_at",
+                    },
+                )
         else:
             raise ValueError("this setting is not supported yet")
 
@@ -1218,15 +1311,10 @@ class Sequencer(Command):
             # )
             # else:
             #     raise ValueError(f"invalid object {(box_name, port, channel)}:{e7}")
-        [_.init() for _ in pg.pulsegens]
-        [_.init() for _ in pc.pulsecaps]
+        for o in pg.pulsegens + pc.pulsecaps:
+            o.init()
         #
         bpc_capmod = {(_.box_name, _.port, _.channel): _.capmod for _ in pc.pulsecaps}
-        # print(cap_e7_settings)
-        # print(bpc_capmod)
-        # print([_ for _ in pc.pulsecaps])
-        # for k, v in cap_resource_map.items():
-        #     print(k, v)
         bmc_target: dict[tuple[Optional[str], CaptureModule, Optional[int]], str] = {
             (
                 m["box"].box_name if isinstance(m["box"], BoxSetting) else None,
@@ -1240,10 +1328,6 @@ class Sequencer(Command):
                 m["channel_number"] if isinstance(m["channel_number"], int) else None,
             ): target_name
             for target_name, m in cap_resource_map.items()
-            # if isinstance(
-            #     e7_settings[(m["box"].box_name, m["port"].port, m["channel_number"])],
-            #     CaptureParam,
-            # )
         }
 
         box_names = {box_name for (box_name, _, _), _ in cap_e7_settings.items()}
