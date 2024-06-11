@@ -1286,7 +1286,14 @@ class Sequencer(Command):
             _status, _iqs = pc.wait_until_capture_finishes(futures)
             status, iqs = self.convert_key_from_bmu_to_target(bmc_target, _status, _iqs)
             return (status, iqs) + (
-                {"debug": "case 1: capture_at_trigger_of, emit_now"},
+                {
+                    "cap_e7_settings": cap_e7_settings,
+                    "cap_sampled_sequence": self.cap_sampled_sequence,
+                    "gen_e7_settings": gen_e7_settings,
+                    "gen_sampled_sequence": self.gen_sampled_sequence,
+                    "box_configs": box_configs,
+                    "debug": "case 1: capture_at_trigger_of, emit_now",
+                },
             )
             # return {}, {}, {"debug": "case 1: capture_at_trigger_of, emit_now"}
         elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
@@ -1345,7 +1352,7 @@ class Sequencer(Command):
                         "cap_e7_settings": cap_e7_settings,
                         "cap_sampled_sequence": self.cap_sampled_sequence,
                         "box_configs": box_configs,
-                        "debug": "case 4: capture_at, emit_now",
+                        "debug": "case 4: capture_at_trigger_of, emit_now",
                     },
                 )
                 # return {}, {}, {"debug": "case 4: capture_at, emit_now"}
@@ -1364,7 +1371,7 @@ class Sequencer(Command):
                         "cap_e7_settings": cap_e7_settings,
                         "cap_sampled_sequence": self.cap_sampled_sequence,
                         "box_configs": box_configs,
-                        "debug": "case 4: capture_at, emit_at",
+                        "debug": "case 4: capture_at_trigger_of, emit_at",
                     },
                 )
                 # return {}, {}, {"debug": "case 4: capture_at, emit_now"}
