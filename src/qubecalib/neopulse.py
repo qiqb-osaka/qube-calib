@@ -1412,7 +1412,7 @@ class Arbit(Waveform):
             raise ValueError("begin or duration is None")
 
         D, dt = self.duration, DEFAULT_SAMPLING_PERIOD
-        if t < D:
+        if 0 <= t < D:
             idx = math.floor(t / dt)
             return self._iq[idx]
         else:
