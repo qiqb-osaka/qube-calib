@@ -4,9 +4,10 @@ import math
 from collections import deque
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from typing import Final, MutableSequence, Optional
+from typing import Any, Final, MutableSequence, Optional
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .tree import CostedTree, Tree
 
@@ -164,9 +165,9 @@ class DequeWithContext(deque):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         _rc.contexts.pop()
 
@@ -178,13 +179,13 @@ class Sequence(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         self._tree = SequenceTree()
-        items: MutableSequence[SequenceTree | MutableSequence[any]] = []
+        items: MutableSequence[SequenceTree | MutableSequence[Any]] = []
         for item in self:
             if isinstance(item, SequenceTree):
                 tree = item
@@ -329,11 +330,11 @@ class Sequence(DequeWithContext):
     def _create_gen_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Waveform | Modifier]]],
+        targets_items: dict[str, dict[int, MutableSequence[Waveform | Modifier]]],
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> GenSampledSequence:
         # edge と item の対応マップ
-        items: Dict[int, MutableSequence[Waveform | Modifier]] = {
+        items: dict[int, MutableSequence[Waveform | Modifier]] = {
             edge: [
                 slot
                 for slot in slots
@@ -356,7 +357,7 @@ class Sequence(DequeWithContext):
             if isinstance(edges_items[_], SubSequenceBranch)
         ]
         # subseq のノード
-        nodes: MutableSequence[float] = sum(
+        nodes: list[float] = sum(
             [[0]] + [[_.begin, _.end - _.post_blank] for _ in subseqs],
             [],
         )
@@ -444,8 +445,8 @@ class Sequence(DequeWithContext):
             target_name: {num: items for num, items in num_items.items() if items}
             for target_name, num_items in _.items()
         }
-        targets_items_gen: Dict[
-            str, Dict[int, MutableSequence[Waveform | Modifier]]
+        targets_items_gen: dict[
+            str, dict[int, MutableSequence[Waveform | Modifier]]
         ] = {
             target_name: num_items for target_name, num_items in __.items() if num_items
         }
@@ -665,9 +666,9 @@ class SubSequence(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のローカルツリーを作る
@@ -780,9 +781,9 @@ class Series(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # この context 用のローカルツリーを作る
@@ -885,9 +886,9 @@ class Flushleft(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
@@ -966,9 +967,9 @@ class Flushright(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: any,
-        exception_value: any,
-        traceback: any,
+        exception_type: Any,
+        exception_value: Any,
+        traceback: Any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
@@ -1047,8 +1048,8 @@ class Utils:
         cls,
         ranges: MutableSequence[Waveform],
         frame: SubSequenceBranch,
-    ) -> Tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
-        if any([x.begin is None for x in ranges]):
+    ) -> tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
+        if [x.begin is None for x in ranges]:
             raise ValueError("begin is None")
         slots = sorted(ranges, key=lambda x: x.begin if x.begin is not None else 0)
         _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
@@ -1295,7 +1296,7 @@ class Waveform(Slot):
         duration: Optional[float] = None,
     ) -> None:
         super().__init__(duration=duration)
-        self._iq: Optional[np.ndarray] = None
+        self._iq: Optional[NDArray] = None
         self.cmag = 1 + 0j
 
     def func(self, t: float) -> complex:
@@ -1312,7 +1313,7 @@ class Waveform(Slot):
             return 0 + 0j
         return self.cmag * self.func(t - self.begin)
 
-    def ufunc(self, t: np.ndarray) -> np.ndarray:
+    def ufunc(self, t: NDArray) -> NDArray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
     def scaled(self, scale: float) -> "Waveform":
@@ -1393,11 +1394,11 @@ class Arbit(Waveform):
 
     Parameters
     ----------
-    iq : list | np.ndarray
+    iq : list | NDArray
         IQ data of the waveform.
     """
 
-    def __init__(self, iq: list | np.ndarray):
+    def __init__(self, iq: list | NDArray):
         duration = len(iq) * DEFAULT_SAMPLING_PERIOD
         super().__init__(duration)
         self._iq = np.array(iq).astype(complex)
@@ -1418,7 +1419,7 @@ class Arbit(Waveform):
             return 0 + 0j
 
     @property
-    def iq(self) -> np.ndarray:
+    def iq(self) -> NDArray:
         """iq データを格納している numpy array への参照を返す"""
         if self.duration is None:
             raise ValueError("duration is None")
@@ -1442,7 +1443,7 @@ class Sampler:
         difference_type: str = "back",
         endpoint: bool = False,
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
-    ) -> np.ndarray[np.float64]:
+    ) -> NDArray[np.float64]:
         """サンプル時系列 t 生成する。ratio 倍にオーバーサンプルする。"""
 
         dt = 1 * sampling_period / over_sampling_ratio
@@ -1506,9 +1507,9 @@ class Sampler:
         difference_type: str = "back",
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> tuple[
-        np.ndarray[np.complex128],
-        np.ndarray[np.float64],
-        Optional[np.ndarray[np.float64]],
+        NDArray[np.complex128],
+        NDArray[np.float64],
+        Optional[NDArray[np.float64]],
     ]:
         begin = self._branch.begin
         duration = self._branch._total_duration_contents
@@ -1573,8 +1574,8 @@ class GenSampledSequence(SampledSequenceBase):
 
 @dataclass
 class GenSampledSubSequence:
-    real: np.ndarray[np.float64]
-    imag: np.ndarray[np.float64]
+    real: NDArray[np.float64]
+    imag: NDArray[np.float64]
     post_blank: Optional[int]  # samples
     repeats: int
 
