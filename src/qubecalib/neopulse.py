@@ -1229,6 +1229,10 @@ class Modifier(Slot):
             return self.cmag * self.func(t)
         else:
             return 1 + 0j
+        # return self.cmag * self.func(t)
+
+    def ufunc(self, t: NDArray) -> NDArray:
+        return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
 
 class VirtualZ(Modifier):
@@ -1422,14 +1426,12 @@ class Arbit(Waveform):
         if self.begin is None or self.duration is None:
             raise ValueError("begin or duration is None")
 
-        T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
-        N = round(T // dt)
-        if 0 <= t < T:
-            t0 = np.arange(N) * dt
-            boolean = (t0 <= t) * (t - dt < t0)
-            return self._iq[boolean][0]
-
-        return 0 + 0j
+        D, dt = self.duration, DEFAULT_SAMPLING_PERIOD
+        if t < D:
+            idx = math.floor(t / dt)
+            return self._iq[idx]
+        else:
+            return 0 + 0j
 
     @property
     def iq(self) -> NDArray:
@@ -1437,7 +1439,8 @@ class Arbit(Waveform):
         if self.duration is None:
             raise ValueError("duration is None")
         T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
-        N = round(T // dt)
+        # N = round(T // dt)
+        N = math.ceil(T / dt)
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
         if self._iq is None or N != self._iq.shape[0]:
             self._iq = np.zeros(N).astype(complex)  # iq data
@@ -1471,27 +1474,111 @@ class Sampler:
         else:
             raise ValueError(f"difference_type={difference_type} is not supported")
 
+    # @classmethod
+    # def split_timing(
+    #     cls,
+    #     timing: NDArray[np.float64],
+    #     begin: float,
+    #     end: float,
+    # ) -> Sequence[NDArray[np.float64]]:
+    #     """timing を begin と end で分割する。"""
+    #     return (
+    #         timing[timing < begin],
+    #         timing[(begin <= timing) * (timing < end)],
+    #         timing[end <= timing],
+    #     )
+
+    # @classmethod
+    # def _sample_waveform(
+    #     cls,
+    #     sampling_timing: NDArray[np.float64],
+    #     waveform: Waveform,
+    # ) -> NDArray[np.complex128]:
+    #     """waveform を sampling_timing でサンプリングして返す。"""
+    #     if waveform.begin is None or waveform.duration is None:
+    #         raise ValueError(
+    #             f"begin or duration of {waveform.__class__.__name__}:{waveform} is None"
+    #         )
+    #     pre, mid, _ = cls.split_timing(
+    #         sampling_timing,
+    #         waveform.begin,
+    #         waveform.end,
+    #     )
+    #     temp = np.zeros(sampling_timing.size).astype(complex)
+    #     temp[pre.size : pre.size + mid.size] = waveform.ufunc(mid)
+    #     return temp
+
     @classmethod
     def _sample(
         cls,
         sampling_timing: NDArray[np.float64],
         slots: MutableSequence[Slot],
     ) -> NDArray[np.complex128]:
-        def func(t: float) -> complex:
-            modifiers = [_ for _ in slots if isinstance(_, Modifier)]
-            for _ in modifiers:
-                if _.begin is None:
-                    raise ValueError(f"begin of {_.__class__.__name__} is None")
-            modifier = np.array([1 + 0j] + [_._func(t) for _ in modifiers]).prod()
-            waveforms = [_ for _ in slots if isinstance(_, Waveform)]
-            for w in waveforms:
-                if w.begin is None or w.duration is None:
-                    raise ValueError("begin or duration is None")
-                if (w.begin <= t) and (t < w.begin + w.duration):
-                    return modifier * w._func(t)
-            return 0 + 0j
+        """slots を sampling_timing でサンプリングして返す。"""
+        tstart = sampling_timing[0]
+        DT = sampling_timing[1] - sampling_timing[0]
+        # サンプリング値を格納する配列を初期化
+        np_waveform = np.zeros(sampling_timing.size).astype(complex)
+        # Waveform のみを抽出
+        waveforms = [o for o in slots if isinstance(o, Waveform)]
+        # 各Waveform をサンプリングして適切な位置に加算
+        for w in waveforms:
+            if w.begin is None or w.duration is None:
+                raise ValueError(f"begin or duration of {w.__class__.__name__} is None")
+            B, E = math.ceil((w.begin - tstart) / DT), math.ceil((w.end - tstart) / DT)
+            v = w.ufunc(sampling_timing[B:E])
+            np_waveform[B:E] += v
+        # Modifier 値を格納する配列を初期化
+        np_modifier = np.ones(sampling_timing.size).astype(complex)
+        # Modifier のみを抽出
+        modifiers = [o for o in slots if isinstance(o, Modifier)]
+        for m in modifiers:
+            if m.begin is None:
+                raise ValueError(f"begin of {m.__class__.__name__} is None")
+            B = math.ceil((m.begin - tstart) / DT)
+            np_modifier[B:] *= m.ufunc(sampling_timing[B:])
+        # Modifier を Waveform に適用したものを返す
+        return np_waveform * np_modifier
 
-        return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
+        # s = [cls._sample_waveform(sampling_timing, o) for o in waveforms]
+        # for i, o in enumerate(waveforms):
+        #     start = time.time()
+        #     cls._sample_waveform(sampling_timing, o)
+        #     print(i, time.time() - start)
+
+        # s = np.append(
+        #     0 * pre.astype(complex), o.ufunc(mid), 0 * post.astype(complex)
+        # )
+        # # def func(t: float) -> complex:
+        # #     # for w in waveforms:
+        # #     #     # if w.begin is None or w.duration is None:
+        # #     #     #     raise ValueError("begin or duration is None")
+        # #     #     if (w.begin <= t) and (t < w.begin + w.duration):
+        # #     #         return modifier * w._func(t)
+        # #     # return 0 + 0j
+        # #     return o._func(t)
+
+        # # return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
+
+        # return None
+        # print(sampling_timing)
+
+        # def func(t: float) -> complex:
+        #     # modifiers = [_ for _ in slots if isinstance(_, Modifier)]
+        #     # for _ in modifiers:
+        #     #     if _.begin is None:
+        #     #         raise ValueError(f"begin of {_.__class__.__name__} is None")
+        #     # modifier = np.array([1 + 0j] + [_._func(t) for _ in modifiers]).prod()
+        #     # waveforms = [_ for _ in slots if isinstance(_, Waveform)]
+        #     for w in waveforms:
+        #         if w.begin is None or w.duration is None:
+        #             raise ValueError("begin or duration is None")
+        #         if (w.begin <= t) and (t < w.begin + w.duration):
+        #             # return modifier * w._func(t)
+        #             return w._func(t)
+        #     return 0 + 0j
+
+        # return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
 
     def __init__(
         self,
