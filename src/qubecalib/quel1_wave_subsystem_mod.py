@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future
-from typing import Dict, MutableSequence, Optional, Tuple
+from typing import MutableSequence, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -27,13 +27,13 @@ class Quel1WaveSubsystemMod:
     def _retrieve_capture_data(
         cls,
         wss: Quel1WaveSubsystem,
-        cuhwxs_capums: Dict[int, Tuple[int, int]],
-        cuhwxs_capprms: Dict[int, CaptureParam],
+        cuhwxs_capums: dict[int, Tuple[int, int]],
+        cuhwxs_capprms: dict[int, CaptureParam],
     ) -> Tuple[
         CaptureReturnCode,
-        Dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+        dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
-        data: Dict[
+        data: dict[
             Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
         ] = {}
         cuhwx__num_expected_words = {
@@ -113,12 +113,12 @@ class Quel1WaveSubsystemMod:
     def _simple_capture_thread_main(
         cls,
         wss: Quel1WaveSubsystem,
-        cuhwxs_capmus: Dict[int, Tuple[int, int]],
-        cuhwxs_capprms: Dict[int, CaptureParam],
+        cuhwxs_capmus: dict[int, Tuple[int, int]],
+        cuhwxs_capprms: dict[int, CaptureParam],
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
     ) -> Tuple[
         CaptureReturnCode,
-        Dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+        dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
         ready: bool = wss._wait_for_capture_data(cuhwxs_capmus, timeout)
         if not ready:
@@ -138,12 +138,12 @@ class Quel1WaveSubsystemMod:
         cls,
         wss: Quel1WaveSubsystem,
         capmod: int,
-        capunits_capprms: Dict[int, CaptureParam],
+        capunits_capprms: dict[int, CaptureParam],
         *,
         delay: Optional[int] = None,
         triggering_awg: Optional[int] = None,
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
-    ) -> Future[Tuple[CaptureReturnCode, Dict[int, npt.NDArray[np.complex64]]]]:
+    ) -> Future[Tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]]:
         # capmod に所属する capunits 達の測定を開始する
         wss.validate_installed_e7awgsw()
 
@@ -179,7 +179,7 @@ class Quel1WaveSubsystemMod:
         cls,
         wss: Quel1WaveSubsystem,
         capmod: int,
-        cuhwxs_capprms: Dict[int, CaptureParam],
+        cuhwxs_capprms: dict[int, CaptureParam],
         triggering_awg: Optional[int] = None,
     ) -> None:
         # capctrl を初期化し capture_param を cuhwx に設定する
@@ -213,7 +213,7 @@ class Quel1WaveSubsystemMod:
     def _setup_capture_units_first_half(
         cls,
         wss: Quel1WaveSubsystem,
-        cuhwxs_capprms: Dict[int, CaptureParam],
+        cuhwxs_capprms: dict[int, CaptureParam],
     ) -> None:
         cuhwxs = [_ for _ in cuhwxs_capprms]
         with wss._capctrl_lock:
@@ -227,7 +227,7 @@ class Quel1WaveSubsystemMod:
         cls,
         wss: Quel1WaveSubsystem,
         capmod: int,
-        cuhwxs_capprms: Dict[int, CaptureParam],
+        cuhwxs_capprms: dict[int, CaptureParam],
         triggering_awg: Optional[int] = None,
     ) -> None:
         cuhwxs = [_ for _ in cuhwxs_capprms]
