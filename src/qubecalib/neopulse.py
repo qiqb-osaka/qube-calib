@@ -4,7 +4,7 @@ import math
 from collections import deque
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Final, List, MutableSequence, Optional, Tuple
+from typing import Any, Final, MutableSequence, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -27,7 +27,7 @@ class SequenceTree:
         self._tree = CostedTree()
         self._active_node = 0
         self._latest_node = 0
-        self._nodes_items: Dict[int, Item] = {}
+        self._nodes_items: dict[int, Item] = {}
 
     def append(self, item: Item) -> int:
         self._latest_node += 1
@@ -81,7 +81,7 @@ class SequenceTree:
     def parentof(self, child: int) -> int:
         return self._tree.parentof(child)
 
-    def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
+    def breadth_first_search(self, start: Optional[int] = None) -> MutableSequence[int]:
         return self._tree.breadth_first_search(start)
 
 
@@ -185,7 +185,7 @@ class Sequence(DequeWithContext):
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         self._tree = SequenceTree()
-        items: List[SequenceTree | List[Any]] = []
+        items: MutableSequence[SequenceTree | MutableSequence[Any]] = []
         for item in self:
             if isinstance(item, SequenceTree):
                 tree = item
@@ -293,7 +293,7 @@ class Sequence(DequeWithContext):
 
     def _get_group_items_by_target(
         self,
-    ) -> Dict[str, Dict[int, MutableSequence[Slot]]]:
+    ) -> dict[str, dict[int, MutableSequence[Slot]]]:
         nodes_items = self._tree._nodes_items
         subsequences = [
             _
@@ -330,11 +330,11 @@ class Sequence(DequeWithContext):
     def _create_gen_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Waveform]]],
+        targets_items: dict[str, dict[int, MutableSequence[Waveform | Modifier]]],
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> GenSampledSequence:
         # edge と item の対応マップ
-        items: Dict[int, MutableSequence[Waveform]] = {
+        items: dict[int, MutableSequence[Waveform | Modifier]] = {
             edge: [
                 slot
                 for slot in slots
@@ -357,7 +357,7 @@ class Sequence(DequeWithContext):
             if isinstance(edges_items[_], SubSequenceBranch)
         ]
         # subseq のノード
-        nodes: List[float] = sum(
+        nodes: list[float] = sum(
             [[0]] + [[_.begin, _.end - _.post_blank] for _ in subseqs],
             [],
         )
@@ -400,7 +400,7 @@ class Sequence(DequeWithContext):
     @classmethod
     def _is_cap_target(
         cls,
-        sub_seq_edges__items: Dict[int, MutableSequence[Item]],
+        sub_seq_edges__items: dict[int, MutableSequence[Item]],
     ) -> bool:
         # 各々の subseq 配下の items が Capture のみを含むか 空[] である
         return all(
@@ -413,7 +413,7 @@ class Sequence(DequeWithContext):
     @classmethod
     def _is_gen_target(
         cls,
-        sub_seq_edges__items: Dict[int, MutableSequence[Item]],
+        sub_seq_edges__items: dict[int, MutableSequence[Item]],
     ) -> bool:
         # 各々の subseq 配下の items が Waveform のみを含むか 空[] である
         return all(
@@ -425,9 +425,9 @@ class Sequence(DequeWithContext):
 
     def _create_sampled_sequence(
         self,
-    ) -> Tuple[
-        Dict[str, GenSampledSequence],
-        Dict[str, CapSampledSequence],
+    ) -> tuple[
+        dict[str, GenSampledSequence],
+        dict[str, CapSampledSequence],
     ]:
         group_items = self._get_group_items_by_target()
         _ = {
@@ -445,7 +445,9 @@ class Sequence(DequeWithContext):
             target_name: {num: items for num, items in num_items.items() if items}
             for target_name, num_items in _.items()
         }
-        targets_items_gen: Dict[str, Dict[int, MutableSequence[Waveform]]] = {
+        targets_items_gen: dict[
+            str, dict[int, MutableSequence[Waveform | Modifier]]
+        ] = {
             target_name: num_items for target_name, num_items in __.items() if num_items
         }
         _ = {
@@ -459,11 +461,9 @@ class Sequence(DequeWithContext):
             target_name: {num: items for num, items in num_items.items() if items}
             for target_name, num_items in _.items()
         }
-        targets_items_cap: Dict[str, Dict[int, MutableSequence[Capture]]] = {
+        targets_items_cap: dict[str, dict[int, MutableSequence[Capture]]] = {
             target_name: num_items for target_name, num_items in __.items() if num_items
         }
-        # print(targets_items_gen)
-        # print(targets_items_cap)
         return (
             {
                 _: self._create_gen_sampled_sequence(_, targets_items_gen)
@@ -474,38 +474,28 @@ class Sequence(DequeWithContext):
                 for _ in targets_items_cap
             },
         )
-        # targets_items = targets_items_gen | targets_items_cap
-        # # targets_items = self._get_group_items_by_target()
-        # # for _, sub_seq_edges__items in targets_items.items():
-        # #     if sub_seq_edges__items is None:
-        # #         raise ValueError(f"{_} empty")
-        # #     if not self._is_cap_target(
-        # #         sub_seq_edges__items
-        # #     ) and not self._is_gen_target(sub_seq_edges__items):
-        # #         raise ValueError(f"{_} both Waveform and Capture is appeared")
-        # return {
-        #     _: self._create_cap_sampled_sequence(_, targets_items)
-        #     if self._is_cap_target(subseq_edges__items)
-        #     else self._create_gen_sampled_sequence(_, targets_items)
-        #     if self._is_gen_target(subseq_edges__items)
-        #     else None
-        #     for _, subseq_edges__items in targets_items.items()
-        # }
 
     def _create_cap_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Capture]]],
+        targets_items: dict[str, dict[int, MutableSequence[Capture]]],
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> CapSampledSequence:
-        edges_items = self._tree._nodes_items
+        edges_items: dict[int, Item] = self._tree._nodes_items
+
         # waveform を保持する（空でない） subseq の edge_number を begin に対して昇順に並べたもの
+        def sort_key(x: int) -> float:
+            b = edges_items[x].begin
+            if b is None:
+                raise ValueError("begin is None")
+            return b
+
         subseq_edges = sorted(
             [edge for edge, _ in targets_items[target_name].items() if _],
-            key=lambda x: edges_items[x].begin,
+            key=sort_key,
         )
         # waveform を保持する subseq
-        subseqs: Dict[int, SubSequenceBranch] = {
+        subseqs: dict[int, SubSequenceBranch] = {
             edge: _
             for edge, _ in [[edge, edges_items[edge]] for edge in subseq_edges]
             if isinstance(_, SubSequenceBranch) and isinstance(edge, int)
@@ -535,13 +525,13 @@ class Sequence(DequeWithContext):
                         Item(duration=_.duration, begin=_.begin)
                         for _ in targets_items[target_name][subseq_edge]
                     ],
-                    key=lambda x: x.begin,
+                    key=lambda x: x.begin if x.begin is not None else -math.inf,
                 )
             )
             for subseq_edge in subseq_edges
         }
         # subseq 毎に slot を含んだ blank と duration の境界 node リストを生成する
-        _nodes: Dict[int, MutableSequence[float] | MutableSequence] = {
+        _nodes: dict[int, MutableSequence[float] | MutableSequence] = {
             _: sum(
                 [[_subseqs[_].begin]]
                 + [[__.begin, __.end] for __ in _slots[_]]
@@ -594,7 +584,7 @@ class Sequence(DequeWithContext):
 
     def convert_to_sampled_sequence(
         self,
-    ) -> Tuple[Dict[str, GenSampledSequence], Dict[str, CapSampledSequence]]:
+    ) -> tuple[dict[str, GenSampledSequence], dict[str, CapSampledSequence]]:
         # 念の為 sequence 内の各要素を配置
         self._tree.place_slots()
         # 中間形式に変換
@@ -610,7 +600,7 @@ class SubSequenceBranch(Branch):
         super().__init__()
         self.repeats = repeats
         self._fixed_duration = fixed_duration
-        self._total_duration_contents = None
+        self._total_duration_contents: Optional[float] = None
 
     @property
     def repeats(self) -> int:
@@ -628,9 +618,6 @@ class SubSequenceBranch(Branch):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, post_blank={self.post_blank}, repeats={self.repeats})"
-
-    # def __repr__(self) -> str:
-    #     return f"{self.__class__.__name__}(duration={self.duration}, begin={self.begin}, next_node={self._next_node}, root_node={self._root_node}, repeats={self.repeats})"
 
     def place(self, tree: SequenceTree) -> None:
         # 最大長を計算する
@@ -655,10 +642,6 @@ class SubSequenceBranch(Branch):
 
     @property
     def post_blank(self) -> Optional[float]:
-        # # 最大長を計算する
-        # for _ in tree.breadth_first_search(self._root_node)[1:]:
-        #     tree._tree._cost[_] = tree._nodes_items[_].duration
-        # max_duration = max([_ for _ in tree._tree.evaluate(self._root_node).values()])
         if self.duration is None:
             raise ValueError("duration is None")
         if self._total_duration_contents is None:
@@ -1065,8 +1048,10 @@ class Utils:
         cls,
         ranges: MutableSequence[Waveform],
         frame: SubSequenceBranch,
-    ) -> Tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
-        slots = sorted(ranges, key=lambda x: x.begin)
+    ) -> tuple[MutableSequence[float], MutableSequence[Optional[float]]]:
+        if [x.begin is None for x in ranges]:
+            raise ValueError("begin is None")
+        slots = sorted(ranges, key=lambda x: x.begin if x.begin is not None else 0)
         _slots = Utils.align_items([_ for _ in slots if isinstance(_, Item)])
         _durations = [_.duration for _ in _slots if isinstance(_.duration, float)]
         _blanks = [
@@ -1140,7 +1125,7 @@ def floor(value: float, unit: float = 1) -> float:
         return retval
 
 
-def padding(duration: float):
+def padding(duration: float) -> None:
     """
     Add padding with the specified duration to the sequence.
 
@@ -1177,7 +1162,7 @@ class Slot(Item):
     def __init__(self, duration: Optional[float] = None) -> None:
         super().__init__(duration)
 
-    def target(self, *targets: str):
+    def target(self, *targets: str) -> None:
         """
         Set the target qubits of the slot.
         """
@@ -1229,6 +1214,10 @@ class Modifier(Slot):
             return self.cmag * self.func(t)
         else:
             return 1 + 0j
+        # return self.cmag * self.func(t)
+
+    def ufunc(self, t: NDArray) -> NDArray:
+        return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
 
 class VirtualZ(Modifier):
@@ -1422,14 +1411,12 @@ class Arbit(Waveform):
         if self.begin is None or self.duration is None:
             raise ValueError("begin or duration is None")
 
-        T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
-        N = round(T // dt)
-        if 0 <= t < T:
-            t0 = np.arange(N) * dt
-            boolean = (t0 <= t) * (t - dt < t0)
-            return self._iq[boolean][0]
-
-        return 0 + 0j
+        D, dt = self.duration, DEFAULT_SAMPLING_PERIOD
+        if 0 <= t < D:
+            idx = math.floor(t / dt)
+            return self._iq[idx]
+        else:
+            return 0 + 0j
 
     @property
     def iq(self) -> NDArray:
@@ -1437,7 +1424,8 @@ class Arbit(Waveform):
         if self.duration is None:
             raise ValueError("duration is None")
         T, dt = self.duration, DEFAULT_SAMPLING_PERIOD
-        N = round(T // dt)
+        # N = round(T // dt)
+        N = math.ceil(T / dt)
         # 初回アクセス or 前回アクセスから duration が更新されていれば ndarray を 0 + j0 で再生成
         if self._iq is None or N != self._iq.shape[0]:
             self._iq = np.zeros(N).astype(complex)  # iq data
@@ -1475,28 +1463,38 @@ class Sampler:
     def _sample(
         cls,
         sampling_timing: NDArray[np.float64],
-        slots: MutableSequence[Slot],
+        slots: MutableSequence[Waveform | Modifier],
     ) -> NDArray[np.complex128]:
-        def func(t: float) -> complex:
-            modifiers = [_ for _ in slots if isinstance(_, Modifier)]
-            for _ in modifiers:
-                if _.begin is None:
-                    raise ValueError(f"begin of {_.__class__.__name__} is None")
-            modifier = np.array([1 + 0j] + [_._func(t) for _ in modifiers]).prod()
-            waveforms = [_ for _ in slots if isinstance(_, Waveform)]
-            for w in waveforms:
-                if w.begin is None or w.duration is None:
-                    raise ValueError("begin or duration is None")
-                if (w.begin <= t) and (t < w.begin + w.duration):
-                    return modifier * w._func(t)
-            return 0 + 0j
-
-        return np.frompyfunc(func, 1, 1)(sampling_timing).astype(complex)
+        """slots を sampling_timing でサンプリングして返す。"""
+        tstart = sampling_timing[0]
+        DT = sampling_timing[1] - sampling_timing[0]
+        # サンプリング値を格納する配列を初期化
+        np_waveform = np.zeros(sampling_timing.size).astype(complex)
+        # Waveform のみを抽出
+        waveforms = [o for o in slots if isinstance(o, Waveform)]
+        # 各Waveform をサンプリングして適切な位置に加算
+        for w in waveforms:
+            if w.begin is None or w.duration is None:
+                raise ValueError(f"begin or duration of {w.__class__.__name__} is None")
+            B, E = math.ceil((w.begin - tstart) / DT), math.ceil((w.end - tstart) / DT)
+            v = w.ufunc(sampling_timing[B:E])
+            np_waveform[B:E] += v
+        # Modifier 値を格納する配列を初期化
+        np_modifier = np.ones(sampling_timing.size).astype(complex)
+        # Modifier のみを抽出
+        modifiers = [o for o in slots if isinstance(o, Modifier)]
+        for m in modifiers:
+            if m.begin is None:
+                raise ValueError(f"begin of {m.__class__.__name__} is None")
+            B = math.ceil((m.begin - tstart) / DT)
+            np_modifier[B:] *= m.ufunc(sampling_timing[B:])
+        # Modifier を Waveform に適用したものを返す
+        return np_waveform * np_modifier
 
     def __init__(
         self,
         branch: SubSequenceBranch,
-        waveforms: MutableSequence[Waveform],
+        waveforms: MutableSequence[Waveform | Modifier],
     ) -> None:
         if not isinstance(branch, SubSequenceBranch):
             raise ValueError("branch should be SubSequenceBranch")
@@ -1508,7 +1506,7 @@ class Sampler:
         over_sampling_ratio: int = 1,
         difference_type: str = "back",
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
-    ) -> Tuple[
+    ) -> tuple[
         NDArray[np.complex128],
         NDArray[np.float64],
         Optional[NDArray[np.float64]],
@@ -1551,15 +1549,6 @@ class Sampler:
 # TODO subsequence の repeats 処理が曖昧なので追加する
 
 
-# @dataclass
-# class CapSampledSubSequence:
-#     duration: float  # second
-#     bost_blank: float  # second
-
-#     def asdict(self) -> Dict:
-#         return {}
-
-
 @dataclass
 class SampledSequenceBase:
     target_name: str
@@ -1568,15 +1557,15 @@ class SampledSequenceBase:
     repeats: Optional[int] = None
     sampling_period: float = DEFAULT_SAMPLING_PERIOD
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return asdict(self)
 
 
 @dataclass
 class GenSampledSequence(SampledSequenceBase):
-    sub_sequences: List[GenSampledSubSequence] = field(default_factory=list)
+    sub_sequences: MutableSequence[GenSampledSubSequence] = field(default_factory=list)
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return super().asdict() | {
             "sub_sequences": [_.asdict() for _ in self.sub_sequences],
             "class": self.__class__.__name__,
@@ -1590,7 +1579,7 @@ class GenSampledSubSequence:
     post_blank: Optional[int]  # samples
     repeats: int
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {
             "real": self.real.tolist(),
             "imag": self.imag.tolist(),
@@ -1601,7 +1590,7 @@ class GenSampledSubSequence:
 
 @dataclass
 class CapSampledSequence(SampledSequenceBase):
-    sub_sequences: List[CapSampledSubSequence] = field(default_factory=list)
+    sub_sequences: MutableSequence[CapSampledSubSequence] = field(default_factory=list)
 
 
 @dataclass
@@ -1612,7 +1601,7 @@ class CapSampledSubSequence:
     post_blank: Optional[int]  # samples
     repeats: Optional[int]
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {}
 
 
@@ -1621,5 +1610,5 @@ class CaptureSlots:
     duration: int  # samples
     post_blank: Optional[int]  # samples
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {}

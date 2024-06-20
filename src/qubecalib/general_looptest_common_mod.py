@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-import socket
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Any, Collection, Dict, Mapping, MutableSequence, Optional, Tuple
+from typing import Any, Collection, MutableSequence, Optional
 
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
@@ -17,8 +16,6 @@ from quel_ic_config import (
 
 from .quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
 
-socket, Any, Mapping, SequencerClient
-
 logger = logging.getLogger(__name__)
 
 
@@ -27,8 +24,8 @@ class BoxPool:
         self._clock_master = (
             None  # QuBEMasterClient(settings["CLOCK_MASTER"]["ipaddr"])
         )
-        self._boxes: Dict[str, Tuple[Quel1Box, SequencerClient]] = {}
-        self._linkstatus: Dict[str, bool] = {}
+        self._boxes: dict[str, tuple[Quel1Box, SequencerClient]] = {}
+        self._linkstatus: dict[str, bool] = {}
 
     def create_clock_master(
         self,
@@ -117,7 +114,7 @@ class BoxPool:
     def get_box(
         self,
         name: str,
-    ) -> Tuple[Quel1Box, SequencerClient]:
+    ) -> tuple[Quel1Box, SequencerClient]:
         if name in self._boxes:
             box, sqc = self._boxes[name]
             return box, sqc
@@ -282,7 +279,7 @@ class PulseCap:
 
     def capture_now(
         self,
-    ) -> Tuple[Dict[Tuple[str, int], CaptureReturnCode], Dict[Tuple[str, int], Any]]:
+    ) -> tuple[dict[tuple[str, int], CaptureReturnCode], dict[tuple[str, int], Any]]:
         # box_name, capmod 毎に pulsecaps をまとめる
         box_names_capms = {(_.box_name, _.capmod) for _ in self.pulsecaps}
         box_names_capms__pulsecaps = {
@@ -308,10 +305,10 @@ class PulseCap:
 
     def capture_at_trigger_of(
         self,
-        triggering_pgs: Dict[
-            Tuple[str, int], PulseGen_  # (box_name, capmod): PulseGen_
+        triggering_pgs: dict[
+            tuple[str, int], PulseGen_  # (box_name, capmod): PulseGen_
         ],
-    ) -> Dict[Tuple[str, int], Future]:
+    ) -> dict[tuple[str, int], Future]:
         # box_name, capmod 毎に pulsecaps をまとめる
         box_names_capms = {(_.box_name, _.capmod) for _ in self.pulsecaps}
         box_names_capms__pulsecaps = {
@@ -337,8 +334,8 @@ class PulseCap:
 
     def wait_until_capture_finishes(
         self,
-        futures: Dict[Tuple[str, int], Future],
-    ) -> Tuple[Dict[Tuple[str, int], CaptureReturnCode], Dict[Tuple[str, int], Dict]]:
+        futures: dict[tuple[str, int], Future],
+    ) -> tuple[dict[tuple[str, int], CaptureReturnCode], dict[tuple[str, int], dict]]:
         result = {
             (box_name, capm): future.result()
             for (box_name, capm), future in futures.items()
