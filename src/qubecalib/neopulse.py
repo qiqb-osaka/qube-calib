@@ -4,10 +4,9 @@ import math
 from collections import deque
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Final, List, MutableSequence, Optional, Tuple
+from typing import Final, MutableSequence, Optional
 
 import numpy as np
-from numpy.typing import NDArray
 
 from .tree import CostedTree, Tree
 
@@ -27,7 +26,7 @@ class SequenceTree:
         self._tree = CostedTree()
         self._active_node = 0
         self._latest_node = 0
-        self._nodes_items: Dict[int, Item] = {}
+        self._nodes_items: dict[int, Item] = {}
 
     def append(self, item: Item) -> int:
         self._latest_node += 1
@@ -81,7 +80,7 @@ class SequenceTree:
     def parentof(self, child: int) -> int:
         return self._tree.parentof(child)
 
-    def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
+    def breadth_first_search(self, start: Optional[int] = None) -> MutableSequence[int]:
         return self._tree.breadth_first_search(start)
 
 
@@ -165,9 +164,9 @@ class DequeWithContext(deque):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         _rc.contexts.pop()
 
@@ -179,13 +178,13 @@ class Sequence(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         self._tree = SequenceTree()
-        items: List[SequenceTree | List[Any]] = []
+        items: MutableSequence[SequenceTree | MutableSequence[any]] = []
         for item in self:
             if isinstance(item, SequenceTree):
                 tree = item
@@ -293,7 +292,7 @@ class Sequence(DequeWithContext):
 
     def _get_group_items_by_target(
         self,
-    ) -> Dict[str, Dict[int, MutableSequence[Slot]]]:
+    ) -> dict[str, dict[int, MutableSequence[Slot]]]:
         nodes_items = self._tree._nodes_items
         subsequences = [
             _
@@ -357,7 +356,7 @@ class Sequence(DequeWithContext):
             if isinstance(edges_items[_], SubSequenceBranch)
         ]
         # subseq のノード
-        nodes: List[float] = sum(
+        nodes: MutableSequence[float] = sum(
             [[0]] + [[_.begin, _.end - _.post_blank] for _ in subseqs],
             [],
         )
@@ -400,7 +399,7 @@ class Sequence(DequeWithContext):
     @classmethod
     def _is_cap_target(
         cls,
-        sub_seq_edges__items: Dict[int, MutableSequence[Item]],
+        sub_seq_edges__items: dict[int, MutableSequence[Item]],
     ) -> bool:
         # 各々の subseq 配下の items が Capture のみを含むか 空[] である
         return all(
@@ -413,7 +412,7 @@ class Sequence(DequeWithContext):
     @classmethod
     def _is_gen_target(
         cls,
-        sub_seq_edges__items: Dict[int, MutableSequence[Item]],
+        sub_seq_edges__items: dict[int, MutableSequence[Item]],
     ) -> bool:
         # 各々の subseq 配下の items が Waveform のみを含むか 空[] である
         return all(
@@ -425,9 +424,9 @@ class Sequence(DequeWithContext):
 
     def _create_sampled_sequence(
         self,
-    ) -> Tuple[
-        Dict[str, GenSampledSequence],
-        Dict[str, CapSampledSequence],
+    ) -> tuple[
+        dict[str, GenSampledSequence],
+        dict[str, CapSampledSequence],
     ]:
         group_items = self._get_group_items_by_target()
         _ = {
@@ -461,7 +460,7 @@ class Sequence(DequeWithContext):
             target_name: {num: items for num, items in num_items.items() if items}
             for target_name, num_items in _.items()
         }
-        targets_items_cap: Dict[str, Dict[int, MutableSequence[Capture]]] = {
+        targets_items_cap: dict[str, dict[int, MutableSequence[Capture]]] = {
             target_name: num_items for target_name, num_items in __.items() if num_items
         }
         return (
@@ -478,7 +477,7 @@ class Sequence(DequeWithContext):
     def _create_cap_sampled_sequence(
         self,
         target_name: str,
-        targets_items: Dict[str, Dict[int, MutableSequence[Capture]]],
+        targets_items: dict[str, dict[int, MutableSequence[Capture]]],
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
     ) -> CapSampledSequence:
         edges_items: dict[int, Item] = self._tree._nodes_items
@@ -495,7 +494,7 @@ class Sequence(DequeWithContext):
             key=sort_key,
         )
         # waveform を保持する subseq
-        subseqs: Dict[int, SubSequenceBranch] = {
+        subseqs: dict[int, SubSequenceBranch] = {
             edge: _
             for edge, _ in [[edge, edges_items[edge]] for edge in subseq_edges]
             if isinstance(_, SubSequenceBranch) and isinstance(edge, int)
@@ -531,7 +530,7 @@ class Sequence(DequeWithContext):
             for subseq_edge in subseq_edges
         }
         # subseq 毎に slot を含んだ blank と duration の境界 node リストを生成する
-        _nodes: Dict[int, MutableSequence[float] | MutableSequence] = {
+        _nodes: dict[int, MutableSequence[float] | MutableSequence] = {
             _: sum(
                 [[_subseqs[_].begin]]
                 + [[__.begin, __.end] for __ in _slots[_]]
@@ -584,7 +583,7 @@ class Sequence(DequeWithContext):
 
     def convert_to_sampled_sequence(
         self,
-    ) -> Tuple[Dict[str, GenSampledSequence], Dict[str, CapSampledSequence]]:
+    ) -> tuple[dict[str, GenSampledSequence], dict[str, CapSampledSequence]]:
         # 念の為 sequence 内の各要素を配置
         self._tree.place_slots()
         # 中間形式に変換
@@ -666,9 +665,9 @@ class SubSequence(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のローカルツリーを作る
@@ -781,9 +780,9 @@ class Series(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # この context 用のローカルツリーを作る
@@ -886,9 +885,9 @@ class Flushleft(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
@@ -967,9 +966,9 @@ class Flushright(DequeWithContext):
 
     def __exit__(
         self,
-        exception_type: Any,
-        exception_value: Any,
-        traceback: Any,
+        exception_type: any,
+        exception_value: any,
+        traceback: any,
     ) -> None:
         super().__exit__(exception_type, exception_value, traceback)
         # このブランチ用のサブツリーを作る
@@ -1296,7 +1295,7 @@ class Waveform(Slot):
         duration: Optional[float] = None,
     ) -> None:
         super().__init__(duration=duration)
-        self._iq: Optional[NDArray] = None
+        self._iq: Optional[np.ndarray] = None
         self.cmag = 1 + 0j
 
     def func(self, t: float) -> complex:
@@ -1313,7 +1312,7 @@ class Waveform(Slot):
             return 0 + 0j
         return self.cmag * self.func(t - self.begin)
 
-    def ufunc(self, t: NDArray) -> NDArray:
+    def ufunc(self, t: np.ndarray) -> np.ndarray:
         return np.frompyfunc(self._func, 1, 1)(t).astype(complex)
 
     def scaled(self, scale: float) -> "Waveform":
@@ -1394,11 +1393,11 @@ class Arbit(Waveform):
 
     Parameters
     ----------
-    iq : list | NDArray
+    iq : list | np.ndarray
         IQ data of the waveform.
     """
 
-    def __init__(self, iq: list | NDArray):
+    def __init__(self, iq: list | np.ndarray):
         duration = len(iq) * DEFAULT_SAMPLING_PERIOD
         super().__init__(duration)
         self._iq = np.array(iq).astype(complex)
@@ -1419,7 +1418,7 @@ class Arbit(Waveform):
             return 0 + 0j
 
     @property
-    def iq(self) -> NDArray:
+    def iq(self) -> np.ndarray:
         """iq データを格納している numpy array への参照を返す"""
         if self.duration is None:
             raise ValueError("duration is None")
@@ -1443,7 +1442,7 @@ class Sampler:
         difference_type: str = "back",
         endpoint: bool = False,
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
-    ) -> NDArray[np.float64]:
+    ) -> np.ndarray[np.float64]:
         """サンプル時系列 t 生成する。ratio 倍にオーバーサンプルする。"""
 
         dt = 1 * sampling_period / over_sampling_ratio
@@ -1506,10 +1505,10 @@ class Sampler:
         over_sampling_ratio: int = 1,
         difference_type: str = "back",
         sampling_period: float = DEFAULT_SAMPLING_PERIOD,
-    ) -> Tuple[
-        NDArray[np.complex128],
-        NDArray[np.float64],
-        Optional[NDArray[np.float64]],
+    ) -> tuple[
+        np.ndarray[np.complex128],
+        np.ndarray[np.float64],
+        Optional[np.ndarray[np.float64]],
     ]:
         begin = self._branch.begin
         duration = self._branch._total_duration_contents
@@ -1557,15 +1556,15 @@ class SampledSequenceBase:
     repeats: Optional[int] = None
     sampling_period: float = DEFAULT_SAMPLING_PERIOD
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return asdict(self)
 
 
 @dataclass
 class GenSampledSequence(SampledSequenceBase):
-    sub_sequences: List[GenSampledSubSequence] = field(default_factory=list)
+    sub_sequences: MutableSequence[GenSampledSubSequence] = field(default_factory=list)
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return super().asdict() | {
             "sub_sequences": [_.asdict() for _ in self.sub_sequences],
             "class": self.__class__.__name__,
@@ -1574,12 +1573,12 @@ class GenSampledSequence(SampledSequenceBase):
 
 @dataclass
 class GenSampledSubSequence:
-    real: NDArray[np.float64]
-    imag: NDArray[np.float64]
+    real: np.ndarray[np.float64]
+    imag: np.ndarray[np.float64]
     post_blank: Optional[int]  # samples
     repeats: int
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {
             "real": self.real.tolist(),
             "imag": self.imag.tolist(),
@@ -1590,7 +1589,7 @@ class GenSampledSubSequence:
 
 @dataclass
 class CapSampledSequence(SampledSequenceBase):
-    sub_sequences: List[CapSampledSubSequence] = field(default_factory=list)
+    sub_sequences: MutableSequence[CapSampledSubSequence] = field(default_factory=list)
 
 
 @dataclass
@@ -1601,7 +1600,7 @@ class CapSampledSubSequence:
     post_blank: Optional[int]  # samples
     repeats: Optional[int]
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {}
 
 
@@ -1610,5 +1609,5 @@ class CaptureSlots:
     duration: int  # samples
     post_blank: Optional[int]  # samples
 
-    def asdict(self) -> Dict:
+    def asdict(self) -> dict:
         return {}

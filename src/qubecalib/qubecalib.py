@@ -10,13 +10,11 @@ from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from typing import (
-    Any,
     Final,
     Iterable,
     MutableMapping,
     MutableSequence,
     Optional,
-    Set,
     TypedDict,
 )
 
@@ -69,7 +67,7 @@ class QubeCalib:
             SystemConfigDatabase()
         )
         self._executor: Final[Executor] = Executor()
-        self._box_configs: dict[str, dict[str, Any]] = {}
+        self._box_configs: dict[str, dict[str, any]] = {}
 
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
@@ -231,7 +229,7 @@ class QubeCalib:
         ipaddr_css: Optional[str] = None,
         config_root: Optional[str] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
-    ) -> dict[str, Any]:
+    ) -> dict[str, any]:
         return self.system_config_database.define_box(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -284,7 +282,7 @@ class QubeCalib:
         self,
         target_names: Iterable[str],
     ) -> dict[
-        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, any]]]
     ]:
         # {target_name: sampled_sequence} の形式から
         # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
@@ -324,7 +322,7 @@ class QubeCalib:
             ]["frequency"],
         }
 
-    def get_box_names_by_targets(self, *target_names: str) -> Set[str]:
+    def get_box_names_by_targets(self, *target_names: str) -> set[str]:
         return set(
             sum(
                 [
@@ -381,7 +379,7 @@ class QubeCalib:
     ) -> float:
         return sequence_duration // constrain * constrain
 
-    def get_all_box_configs(self) -> dict[str, dict[str, Any]]:
+    def get_all_box_configs(self) -> dict[str, dict[str, any]]:
         return {
             box_name: self.system_config_database.create_box(box_name).dump_box()
             for box_name in self.system_config_database._box_settings
@@ -399,7 +397,7 @@ class QubeCalib:
         with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
             configs = json.load(fp)
         for box_name, _ in configs.items():
-            ports: dict[int | tuple[int, int], dict[str, Any]] = {
+            ports: dict[int | tuple[int, int], dict[str, any]] = {
                 int(k): v for k, v in _["ports"].items()
             }
             _["ports"] = ports
@@ -422,7 +420,7 @@ class QubeCalib:
         box = self.create_box(box_name)
         box.config_box(self._box_configs[box_name]["ports"])
 
-    def apply_box_config(self, *target_names: str) -> Set[str]:
+    def apply_box_config(self, *target_names: str) -> set[str]:
         box_names = self.get_box_names_by_targets(*target_names)
         for box_name in box_names:
             self._apply_box_config(box_name)
@@ -963,7 +961,7 @@ class Command:
     def execute(
         self,
         boxpool: BoxPool,
-    ) -> Any:
+    ) -> any:
         pass
 
 
@@ -1016,7 +1014,7 @@ class Sequencer(Command):
         gen_sampled_sequence: dict[str, GenSampledSequence],
         cap_sampled_sequence: dict[str, CapSampledSequence],
         resource_map: dict[
-            str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
+            str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, any]]]
         ],
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
@@ -1313,7 +1311,7 @@ class Sequencer(Command):
         cls,
         pg: PulseGen,
         pc: PulseCap,
-    ) -> dict[tuple[Any, Any], PulseGen_]:  # (box_name, capmod): PulseGen_
+    ) -> dict[tuple[any, any], PulseGen_]:  # (box_name, capmod): PulseGen_
         # (box_names, capmod) 毎に同一グループの trigger の何れかをを割り当てる
         # 同一グループの awg が無ければエラーを返す
         cap = {(_.box_name, _.group, _.capmod) for _ in pc.pulsecaps}
@@ -1409,7 +1407,7 @@ class Executor:
         self._work_queue.clear()
         self._boxpool = BoxPool()
 
-    def collect_boxes(self) -> set[Any]:
+    def collect_boxes(self) -> set[any]:
         return set(
             sum(
                 [
@@ -1437,7 +1435,7 @@ class Executor:
 
         return self
 
-    def __next__(self) -> tuple[Any, dict, dict]:
+    def __next__(self) -> tuple[any, dict, dict]:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
             raise StopIteration()
@@ -1473,7 +1471,7 @@ class ClockmasterSetting:
     ipaddr: str | IPv4Address | IPv6Address
     reset: bool
 
-    def asdict(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, any]:
         return asdict(self)
 
 
@@ -1509,7 +1507,7 @@ class BoxSetting:
 
         self.config_options = []
 
-    def asdict(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, any]:
         return {
             "ipaddr_wss": str(self.ipaddr_wss),
             "ipaddr_sss": str(self.ipaddr_sss),
@@ -1521,7 +1519,7 @@ class BoxSetting:
             "config_options": self.config_options,
         }
 
-    def asjsonable(self) -> dict[str, Any]:
+    def asjsonable(self) -> dict[str, any]:
         dct = self.asdict()
         dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[dct["boxtype"]]
         return dct
@@ -1539,7 +1537,7 @@ class PortSetting:
     fnco_freq: Optional[tuple[float, ...]] = None  # will be obsolete
     ndelay_or_nwait: tuple[int, ...] = ()
 
-    def asdict(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, any]:
         return {
             "port_name": self.port_name,
             "box_name": self.box_name,
@@ -1555,7 +1553,7 @@ class SystemConfigDatabase:
         self._box_aliases: Final[dict[str, str]] = {}
         self._port_settings: Final[dict[str, PortSetting]] = {}
         self._relation_channel_target: Final[MutableSequence[tuple[str, str]]] = []
-        self._target_settings: Final[dict[str, dict[str, Any]]] = {}
+        self._target_settings: Final[dict[str, dict[str, any]]] = {}
         self._relation_channel_port: Final[
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
@@ -1575,9 +1573,9 @@ class SystemConfigDatabase:
         clockmaster_setting: Optional[dict] = None,
         box_settings: Optional[dict] = None,
         box_aliases: Optional[dict[str, str]] = None,
-        port_settings: Optional[dict[str, dict[str, Any]]] = None,
+        port_settings: Optional[dict[str, dict[str, any]]] = None,
         relation_channel_target: Optional[MutableSequence[tuple[str, str]]] = None,
-        target_settings: Optional[dict[str, dict[str, Any]]] = None,
+        target_settings: Optional[dict[str, dict[str, any]]] = None,
         relation_channel_port: Optional[MutableSequence[tuple[str, str]]] = None,
     ) -> None:
         if clockmaster_setting is not None:
@@ -1678,7 +1676,7 @@ class SystemConfigDatabase:
     def get_channels_by_target(
         self,
         target_name: str,
-    ) -> Set[str]:
+    ) -> set[str]:
         return {
             channel
             for channel, target in self._relation_channel_target
@@ -1688,7 +1686,7 @@ class SystemConfigDatabase:
     def get_channel_numbers_by_target(
         self,
         target_name: str,
-    ) -> Set[int]:
+    ) -> set[int]:
         channels = self.get_channels_by_target(target_name)
         return {
             int(
@@ -1723,7 +1721,7 @@ class SystemConfigDatabase:
     def get_ports_by_target(
         self,
         target_name: str,
-    ) -> Set[str]:
+    ) -> set[str]:
         channels = self.get_channels_by_target(target_name)
         return {
             str(
@@ -1737,7 +1735,7 @@ class SystemConfigDatabase:
     def get_port_numbers_by_target(
         self,
         target_name: str,
-    ) -> Set[int]:
+    ) -> set[int]:
         return {
             self._port_settings[_].port for _ in self.get_ports_by_target(target_name)
         }
@@ -1745,7 +1743,7 @@ class SystemConfigDatabase:
     def get_boxes_by_target(
         self,
         target_name: str,
-    ) -> Set[str]:
+    ) -> set[str]:
         ports = self.get_ports_by_target(target_name)
         return {self._port_settings[port].box_name for port in ports}
 
@@ -1758,7 +1756,7 @@ class SystemConfigDatabase:
         ipaddr_css: Optional[str] = None,
         config_root: Optional[str] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
-    ) -> dict[str, Any]:
+    ) -> dict[str, any]:
         box_setting = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -1853,7 +1851,7 @@ class SystemConfigDatabase:
                     )
         return box
 
-    def asdict(self) -> dict[str, Any]:
+    def asdict(self) -> dict[str, any]:
         return {
             "clockmaster_setting": self._clockmaster_setting.asdict()
             if self._clockmaster_setting is not None

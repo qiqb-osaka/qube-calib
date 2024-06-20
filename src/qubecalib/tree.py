@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque  # , namedtuple
-from typing import Dict, List, Optional
+from typing import Optional
 
 # from copy import copy
 
@@ -28,7 +28,7 @@ class Tree(defaultdict):
         else:
             raise ValueError("The child object is already adopted to another parent.")
 
-    def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
+    def breadth_first_search(self, start: Optional[int] = None) -> list[int]:
         t = self
         lst = []
         if start is None:
@@ -41,7 +41,7 @@ class Tree(defaultdict):
                 q.append(c)
         return lst
 
-    def bfs(self, start: Optional[int] = None) -> List[int]:
+    def bfs(self, start: Optional[int] = None) -> list[int]:
         return self.breadth_first_search(start)
 
     def parentof(self, child: int) -> int:
@@ -64,15 +64,15 @@ class Tree(defaultdict):
         self.adopt(p, parent)
 
     @property
-    def parents(self) -> List[int]:
+    def parents(self) -> list[int]:
         return [k for k in self.keys() if self[k]]
 
     @property
-    def children(self) -> List[int]:
+    def children(self) -> list[int]:
         return list(set([i for v in self.values() for i in v]))
 
     @property
-    def all(self) -> List[int]:
+    def all(self) -> list[int]:
         return list(set(self.parents + self.children))
 
     def duplicate(self) -> Tree:
@@ -86,14 +86,14 @@ class Tree(defaultdict):
 class CostedTree:
     def __init__(self) -> None:
         self._tree = Tree()
-        self._cost: Dict[int, Optional[float]] = dict()
-        # self._total_cost: Dict[int, Optional[float]] = dict()
+        self._cost: dict[int, Optional[float]] = dict()
+        # self._total_cost: dict[int, Optional[float]] = dict()
 
     def adopt(self, parent: int, child: int, cost: float) -> None:
         self._tree.adopt(parent, child)
         self._cost[child] = cost
 
-    def evaluate(self, root: Optional[int] = None) -> Dict[int, float]:
+    def evaluate(self, root: Optional[int] = None) -> dict[int, float]:
         total_costs = dict()
         if root is None:
             if self._tree.root is None:
@@ -114,7 +114,7 @@ class CostedTree:
     def parentof(self, child: int) -> int:
         return self._tree.parentof(child)
 
-    def breadth_first_search(self, start: Optional[int] = None) -> List[int]:
+    def breadth_first_search(self, start: Optional[int] = None) -> list[int]:
         return self._tree.breadth_first_search(start)
 
 
