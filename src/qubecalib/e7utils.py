@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import MutableMapping, MutableSequence
+from typing import Any, MutableMapping, MutableSequence
 
 import numpy as np
 
@@ -40,7 +40,7 @@ class WaveSequenceTools:
         return False
 
     @classmethod
-    def create_chunk(cls) -> MutableMapping[str, any]:
+    def create_chunk(cls) -> MutableMapping[str, Any]:
         return {}
 
     @classmethod

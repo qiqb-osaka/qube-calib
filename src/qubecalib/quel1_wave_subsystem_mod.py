@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future
-from typing import MutableSequence, Optional, Tuple
+from typing import MutableSequence, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -27,14 +27,14 @@ class Quel1WaveSubsystemMod:
     def _retrieve_capture_data(
         cls,
         wss: Quel1WaveSubsystem,
-        cuhwxs_capums: dict[int, Tuple[int, int]],
+        cuhwxs_capums: dict[int, tuple[int, int]],
         cuhwxs_capprms: dict[int, CaptureParam],
-    ) -> Tuple[
+    ) -> tuple[
         CaptureReturnCode,
-        dict[Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+        dict[tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
         data: dict[
-            Tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
+            tuple[int, int], MutableSequence[npt.NDArray[np.complex64 | np.int16]]
         ] = {}
         cuhwx__num_expected_words = {
             cuhwx: capprm.calc_capture_samples()
@@ -113,10 +113,10 @@ class Quel1WaveSubsystemMod:
     def _simple_capture_thread_main(
         cls,
         wss: Quel1WaveSubsystem,
-        cuhwxs_capmus: dict[int, Tuple[int, int]],
+        cuhwxs_capmus: dict[int, tuple[int, int]],
         cuhwxs_capprms: dict[int, CaptureParam],
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
-    ) -> Tuple[
+    ) -> tuple[
         CaptureReturnCode,
         dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
     ]:
@@ -143,7 +143,12 @@ class Quel1WaveSubsystemMod:
         delay: Optional[int] = None,
         triggering_awg: Optional[int] = None,
         timeout: float = Quel1WaveSubsystem.DEFAULT_CAPTURE_TIMEOUT,
-    ) -> Future[Tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]]:
+    ) -> Future[
+        tuple[
+            CaptureReturnCode,
+            dict[int, MutableSequence[npt.NDArray[np.complex64 | np.int16]]],
+        ]
+    ]:
         # capmod に所属する capunits 達の測定を開始する
         wss.validate_installed_e7awgsw()
 
