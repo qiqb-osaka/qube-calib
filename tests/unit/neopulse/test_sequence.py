@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from qubecalib import neopulse
 from qubecalib.neopulse import (
     Blank,
@@ -166,7 +165,7 @@ def test_series_as_default():
     """Series should be the default slot."""
     target0 = "RQ00"
     target1 = "RQ01"
-    duration = 10e-9
+    duration = 10
 
     with Sequence() as seq1:
         Rectangle(duration=duration).target(target0)

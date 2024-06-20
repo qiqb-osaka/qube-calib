@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Collection, MutableSequence, Optional, Tuple
+from typing import Any, Collection, MutableSequence, Optional, Tuple
 
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
@@ -279,7 +279,7 @@ class PulseCap:
 
     def capture_now(
         self,
-    ) -> Tuple[dict[Tuple[str, int], CaptureReturnCode], dict[Tuple[str, int], any]]:
+    ) -> Tuple[dict[Tuple[str, int], CaptureReturnCode], dict[Tuple[str, int], Any]]:
         # box_name, capmod 毎に pulsecaps をまとめる
         box_names_capms = {(_.box_name, _.capmod) for _ in self.pulsecaps}
         box_names_capms__pulsecaps = {
