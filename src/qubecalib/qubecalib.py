@@ -464,7 +464,7 @@ class QubeCalib:
         self,
         boxpool: BoxPool,
         e7_settings: dict[tuple[str, int, int], WaveSequence | CaptureParam],
-        diabled: list[DspUnit] = [],
+        disabled: list[DspUnit] = [],
     ) -> tuple:
         for (box_name, _, _), e7 in e7_settings.items():
             if box_name not in boxpool._boxes:
@@ -492,7 +492,7 @@ class QubeCalib:
         }
         for (box_name, port, channel), e7 in cap_e7_settings.items():
             enabled = e7.dsp_units_enabled
-            for dsp_unit in diabled:
+            for dsp_unit in disabled:
                 if dsp_unit in enabled:
                     enabled.remove(dsp_unit)
             e7_copied = copy.deepcopy(e7)
