@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-
 from qubecalib.neopulse import Frequency, Magnifier, Rectangle, Sequence, VirtualZ
 
 
@@ -36,7 +35,7 @@ def test_virtual_z():
         np.array([1.0, 1.0, 0.0, 0.0, -1.0 / np.sqrt(2), -1.0 / np.sqrt(2)])
     )
     assert subseq.imag == pytest.approx(
-        np.array([0.0, 0.0, 1.0, 1.0, 1.0 / np.sqrt(2), 1.0 / np.sqrt(2)])
+        np.array([0.0, 0.0, -1.0, -1.0, -1.0 / np.sqrt(2), -1.0 / np.sqrt(2)])
     )
 
 
