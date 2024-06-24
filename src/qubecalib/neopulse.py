@@ -1227,12 +1227,12 @@ class VirtualZ(Modifier):
     Parameters
     ----------
     theta : float, optional
-        Phase angle in radian. Default is 0.0.
+        Phase angle in radian. Default is 0.0. Theta is defined as the rotation angle around the z-axis following the right-handed rule.
     """
 
     def __init__(self, theta: float = 0.0):
         super().__init__()
-        self.cmag = np.exp(1j * theta)
+        self.cmag = np.exp(-1j * theta)  # theta は z 軸方向に右ネジの回転方向を正とする
 
 
 class Magnifier(Modifier):

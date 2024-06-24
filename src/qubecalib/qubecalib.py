@@ -44,8 +44,6 @@ from .neopulse import (
     SampledSequenceBase,
 )
 
-PulseGen, PulseCap
-
 logger = logging.getLogger(__name__)
 
 
@@ -466,7 +464,7 @@ class QubeCalib:
         self,
         boxpool: BoxPool,
         e7_settings: dict[tuple[str, int, int], WaveSequence | CaptureParam],
-        diabled: list[DspUnit] = [],
+        disabled: list[DspUnit] = [],
     ) -> tuple:
         for (box_name, _, _), e7 in e7_settings.items():
             if box_name not in boxpool._boxes:
@@ -494,7 +492,7 @@ class QubeCalib:
         }
         for (box_name, port, channel), e7 in cap_e7_settings.items():
             enabled = e7.dsp_units_enabled
-            for dsp_unit in diabled:
+            for dsp_unit in disabled:
                 if dsp_unit in enabled:
                     enabled.remove(dsp_unit)
             e7_copied = copy.deepcopy(e7)
@@ -1052,7 +1050,7 @@ class Sequencer(Command):
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
 
-        _cap_resource_map = {}
+        _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
                 if isinstance(m["box"], BoxSetting):
@@ -1067,13 +1065,16 @@ class Sequencer(Command):
                     boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "in"
                     and target_name in self.cap_sampled_sequence
                 ):
-                    _cap_resource_map[target_name] = m
+                    if target_name in _cap_resource_map:
+                        _cap_resource_map[target_name].append(m)
+                    else:
+                        _cap_resource_map[target_name] = [m]
         cap_resource_map: dict[str, Any] = {
             target_name: next(iter(maps))
             for target_name, maps in _cap_resource_map.items()
             if maps
         }
-        _gen_resource_map = {}
+        _gen_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
                 if isinstance(m["box"], BoxSetting):
@@ -1088,7 +1089,10 @@ class Sequencer(Command):
                     boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "out"
                     and target_name in self.gen_sampled_sequence
                 ):
-                    _gen_resource_map[target_name] = m
+                    if target_name in _gen_resource_map:
+                        _gen_resource_map[target_name].append(m)
+                    else:
+                        _gen_resource_map[target_name] = [m]
         gen_resource_map: dict[str, Any] = {
             target_name: next(iter(maps))
             for target_name, maps in _gen_resource_map.items()
