@@ -300,25 +300,31 @@ class Sequence(DequeWithContext):
             for _ in self._tree._nodes_items.values()
             if isinstance(_, SubSequenceBranch)
         ]
-        return {
-            target: {
-                sub._next_node: [
-                    item
-                    for node, item in nodes_items.items()
-                    if isinstance(item, Slot)
-                    if target in item.targets
-                    if node
-                    in self._tree.breadth_first_search(
-                        sub._root_node
-                    )  # node が sub に属し
-                ]
-                for sub in subsequences  # 空でない subsequence 毎に
-                if sub._next_node is not None
-            }
-            for _ in nodes_items.values()  # Sequence に属する Slot 毎に
-            if isinstance(_, Slot)
-            for target in _.targets
+        nodes_by_sub = {
+            sub: self._tree.breadth_first_search(sub._root_node)
+            for sub in subsequences
+            if sub._next_node is not None
         }
+        result: dict[str, dict[int, MutableSequence[Slot]]] = {}
+        for node, item in nodes_items.items():  # Sequence に属する Slot 毎に
+            if not isinstance(item, Slot):
+                continue
+            for target in item.targets:
+                if target not in result:
+                    result[target] = {}
+                for sub in subsequences:  # 空でない subsequence 毎に
+                    if sub._next_node is None:
+                        continue
+                    if sub._next_node not in result[target]:
+                        result[target][sub._next_node] = []
+                    if (
+                        isinstance(item, Slot)
+                        and target in item.targets
+                        and node in nodes_by_sub[sub]
+                    ):
+                        result[target][sub._next_node].append(item)
+
+        return result
 
     def _validate_nodes_items(self) -> None:
         for node, item in self._tree._nodes_items.items():
