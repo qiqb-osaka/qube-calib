@@ -161,53 +161,64 @@ class CaptureParamTools:
         capture_delay_words: int,
         repeats: int,
         interval_samples: int,
+        padding: int = 0,
     ) -> CaptureParam:
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        # print(sequence)
         # 市松模様チェーンを生成
+        # WaveChunk に相当するものがないので subsequence はマージする
         chain = _convert_cap_sampled_sequence_to_blanks_and_durations_chain(sequence)
-        # print(chain)
+        # 最初のブランクは Block = 16 words 単位でしか反応しないので 16 の整数倍数に合うよう拡大する
+        # WaveSequence の単位に合わせた先頭 padding
+        chain[0] += padding
         # 境界を抽出
         bounds = [sum(chain[:i]) for i, _ in enumerate(chain)]
-        # print(bounds)
         # アライメント境界を生成
-        grid = [math.floor(_ / unit) * unit for _ in bounds]
-        lower = [
-            align - unit if bound < align else align
-            for bound, align in zip(bounds[1::2], grid[1::2])
-        ]
-        upper = [
-            align + unit if bound > align else align
-            for bound, align in zip(bounds[2::2], grid[2::2])
-        ]
-        # print(bounds[1::2], aligns[1::2], lower)
-        # print(bounds[2::2], aligns[2::2], upper)
-        aligned: MutableSequence = sum(
-            [[bounds[0]]] + [[low, up] for low, up in zip(lower, upper)],
-            [],
-        )
-        # print(aligned)
+        # delay と sum_section の長さは ADC_WORD が最小単位
+        # ただし pre_blank は 1 block = 16 words が最小単位
+        # ticks = [0, math.floor(bounds[1] / (16 * unit)) * 16 * unit] + [
+        #     math.floor(bound / unit) * unit for bound in bounds[2:]
+        # ]
+        # lower = [
+        #     tick - unit if bound < tick else tick
+        #     for bound, tick in zip(bounds[1::2], ticks[1::2])
+        # ]
+        # upper = [
+        #     tick - unit if bound < tick else tick
+        #     for bound, tick in zip(bounds[2::2], ticks[2::2])
+        # ]
+        # aligned: MutableSequence = sum(
+        #     [[bounds[0]]] + [[low, up] for low, up in zip(lower, upper)],
+        #     [],
+        # )
+        aligned: MutableSequence[int] = [
+            0,
+            math.floor(bounds[1] / (16 * unit)) * 16 * unit,
+        ] + [math.floor(bound / unit) * unit for bound in bounds[2:]]
+        # アライメントされた境界を使って新しい市松模様チェーンを生成
+        # 最後の要素が None だと以降の処理でエラーにならないよう 0 へ変換
         new_chain = [
             int((up - low) / unit) if low is not None and up is not None else None
             for low, up in zip(aligned[:-1], aligned[1:])
         ] + [chain[-1] if chain[-1] is not None else 0]
-        total_duration_words = (
-            sum(new_chain[:-1]) if chain[-1] is None else sum(new_chain)
-        )
+        total_duration_words = sum(new_chain)
         interval_words = int(interval_samples // unit)
-        # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる
-        # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ）
-        new_chain[-1] += interval_words - total_duration_words + new_chain[0]
-        if new_chain[-1] == 0:
-            new_chain[-2] -= 1
-            new_chain[-1] = 1
+        # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる TOOO ?
+        # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ） <- これはダメ　 X wait は先頭のみ
+        new_chain[-1] = interval_words - total_duration_words + new_chain[0]
+        for i in range(2, len(new_chain), 2):
+            if new_chain[i] == 0:
+                if new_chain[i - 1] == 1:
+                    raise ValueError("Capture is too short")
+                new_chain[i - 1] -= 1
+                new_chain[i] = 1
+        # if new_chain[-1] == 0:
+        #     new_chain[-2] -= 1
+        #     new_chain[-1] = 1
         # TODO new_chain の blank 要素が潰れることがある（capt は拡張なので潰れない）この処理を追加しないといけない
-        # TODO 最終の post_blank の処理をまだ入れていない
         # TODO post_blank は 1 以上の制約がある
         capprm = CaptureParam()
         capprm.capture_delay = capture_delay_words + new_chain[0]
         capprm.num_integ_sections = repeats
-        # print("capture_delay", capprm.capture_delay, new_chain[0])
         for duration, blank in zip(new_chain[1::2], new_chain[2::2]):
             capprm.add_sum_section(
                 num_words=duration,

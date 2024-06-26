@@ -689,7 +689,9 @@ class Converter:
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
+        padding: int = 0,
     ) -> dict[tuple[str, int, int], CaptureParam]:
+        # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
             target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
             if _["port"].ndelay_or_nwait is not None
@@ -728,14 +730,22 @@ class Converter:
                 "multiple access for single runit will be supported, not now"
             )
         # 戻り値は {(box_name, port_number, channel_number): CaptureParam} の dict
+        sseqs = [seq for seq in sampled_sequence.values()]
+        # fps = [padding] + len(sseqs[1:]) * [0]
+        # lbs = len(sseqs[:-1]) * [0] + [padding]
+        # padding は WaveSequence の長さと合わせるために設けた
+        # 原則 WaveSequence は wait = 0 とする
+        # TODO Skew の調整はこれから実装する。　wait の単位を確認すること。1Saで調整できるように。
         ids_e7 = {
-            targets_ids[_.target_name]: CaptureParamTools.create(
-                sequence=_,
-                capture_delay_words=ndelay_or_nwait_by_target[_.target_name] * 16,
+            targets_ids[sseq.target_name]: CaptureParamTools.create(
+                sequence=sseq,
+                capture_delay_words=ndelay_or_nwait_by_target[sseq.target_name]
+                * 16,  # ndelay は 16 words = 1 block の単位
                 repeats=repeats,
-                interval_samples=int(interval / _.sampling_period),  # samples
+                interval_samples=int(interval / sseq.sampling_period),  # samples
+                padding=padding,
             )
-            for _ in sampled_sequence.values()
+            for sseq in sseqs
         }
         if integral_mode == "integral":
             ids_e7 = {
@@ -750,7 +760,6 @@ class Converter:
                 )
                 for id, e7 in ids_e7.items()
             }
-
         return ids_e7
 
     @classmethod
@@ -761,8 +770,11 @@ class Converter:
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
+        padding: int = 0,
     ) -> dict[tuple[str, int, int], WaveSequence]:
         # WaveSequence の生成
+        # TODO padding の適用
+
         # target 毎の変調周波数の計算
         targets_freqs = {
             target_name: cls.calc_modulation_frequency(
