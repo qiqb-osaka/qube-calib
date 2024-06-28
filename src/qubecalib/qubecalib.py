@@ -1293,7 +1293,7 @@ class Sequencer(Command):
         first_blank = min(
             [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
         )
-        first_padding = (first_blank // 64 + 1) * 64 - first_blank  # Sa
+        first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
         # ref_sequence = next(iter(csseq.values()))
 
         for target_name, cseq in self.cap_sampled_sequence.items():
@@ -1416,6 +1416,7 @@ class Sequencer(Command):
                     "box_configs": box_configs,
                     "cap_sampled_sequence": self.cap_sampled_sequence,
                     "modulation_frequencies_for_capture": cap_fmod,
+                    "first_padding": first_padding,
                     "drive_mode": "case 2: catpure_now",
                 },
             )
@@ -1437,6 +1438,7 @@ class Sequencer(Command):
                     "gen_sampled_sequence": self.gen_sampled_sequence,
                     "modulation_frequencies_for_generator": gen_fmod,
                     "box_configs": box_configs,
+                    "first_padding": first_padding,
                     "drive_mode": "case 1: capture_at_trigger_of, emit_now",
                 },
             )
@@ -1451,6 +1453,7 @@ class Sequencer(Command):
                     "gen_sampled_sequence": self.gen_sampled_sequence,
                     "modulation_frequencies_for_generator": gen_fmod,
                     "box_configs": box_configs,
+                    "first_padding": first_padding,
                     "drive_mode": "case 3: emit_now",
                 },
             )
@@ -1466,6 +1469,7 @@ class Sequencer(Command):
                         "gen_sampled_sequence": self.gen_sampled_sequence,
                         "modulation_frequencies_for_generator": gen_fmod,
                         "box_configs": box_configs,
+                        "first_padding": first_padding,
                         "drive_mode": "case 5: emit_now",
                     },
                 )
@@ -1479,6 +1483,7 @@ class Sequencer(Command):
                         "gen_sampled_sequence": self.gen_sampled_sequence,
                         "modulation_frequencies_for_generator": gen_fmod,
                         "box_configs": box_configs,
+                        "first_padding": first_padding,
                         "drive_mode": "case 5: emit_at",
                     },
                 )
@@ -1502,6 +1507,7 @@ class Sequencer(Command):
                         "modulation_frequencies_for_capture": cap_fmod,
                         "reference_time_for_capture": reference_time_list_by_target,
                         "box_configs": box_configs,
+                        "first_padding": first_padding,
                         "drive_mode": "case 4: capture_at_trigger_of, emit_now",
                     },
                 )
@@ -1523,6 +1529,7 @@ class Sequencer(Command):
                         "modulation_frequencies_for_capture": cap_fmod,
                         "reference_time_for_capture": reference_time_list_by_target,
                         "box_configs": box_configs,
+                        "first_padding": first_padding,
                         "drive_mode": "case 4: capture_at_trigger_of, emit_at",
                     },
                 )
