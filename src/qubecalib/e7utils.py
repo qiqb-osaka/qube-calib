@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from typing import Any, MutableMapping, MutableSequence
 
 import numpy as np
@@ -120,8 +121,9 @@ class WaveSequenceTools:
         bounds = [sum(chain[: i + 1]) for i, _ in enumerate(chain)]
         # print(bounds)
         i, q = np.zeros(bounds[-1]).astype(int), np.zeros(bounds[-1]).astype(int)
+        EPS = sys.float_info.epsilon
         for begin, subseq in zip(bounds[::2], sequence.sub_sequences):
-            if max(np.abs(subseq.real)) > 1 or max(np.abs(subseq.imag)) > 1:
+            if max(np.abs(subseq.real)) - 1 > EPS or max(np.abs(subseq.imag)) - 1 > EPS:
                 raise ValueError("magnitude of iq signal must not exceed 1")
             i[begin : begin + subseq.real.shape[0]] = (32767 * subseq.real).astype(int)
             q[begin : begin + subseq.imag.shape[0]] = (32767 * subseq.imag).astype(int)
@@ -161,7 +163,6 @@ class CaptureParamTools:
         capture_delay_words: int,
         repeats: int,
         interval_samples: int,
-        padding: int = 0,
     ) -> CaptureParam:
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
         # 市松模様チェーンを生成
@@ -169,7 +170,7 @@ class CaptureParamTools:
         chain = _convert_cap_sampled_sequence_to_blanks_and_durations_chain(sequence)
         # 最初のブランクは Block = 16 words 単位でしか反応しないので 16 の整数倍数に合うよう拡大する
         # WaveSequence の単位に合わせた先頭 padding
-        chain[0] += padding
+        chain[0] += sequence.padding
         # 境界を抽出
         bounds = [sum(chain[:i]) for i, _ in enumerate(chain)]
         # アライメント境界を生成
@@ -423,5 +424,72 @@ def _convert_cap_sampled_sequence_to_blanks_and_durations_chain(
         ]
         # お尻につく wave, blank
         + [[seq.sub_sequences[-1].capture_slots[-1].duration, last_blank]],
+        [],
+    )
+
+
+def _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
+    sequence: CapSampledSequence,
+) -> MutableSequence:
+    """cap sampled sequence を blank - duration チェーンに変換する（ただし、オリジナルの値を使う）"""
+    seq = sequence
+
+    # sub sequence 間を橋渡しするブランクのリスト MutableSequence[Optional[int|float]]
+    # 最終スロットの blank, 前 subseq の post_blank, 後 subseq の prev_blank
+    blank_bridges = [
+        (
+            lo.capture_slots[-1].original_post_blank
+            + lo.original_post_blank
+            + hi.original_prev_blank
+            if lo.capture_slots[-1].original_post_blank is not None
+            and lo.original_post_blank is not None
+            and hi.original_prev_blank is not None
+            else None
+        )
+        for lo, hi in zip(seq.sub_sequences[:-1], seq.sub_sequences[1:])
+    ]
+
+    # お尻につく blank
+    last_blank = (
+        seq.sub_sequences[-1].capture_slots[-1].original_post_blank
+        + seq.sub_sequences[-1].original_post_blank
+        + seq.original_post_blank
+        if seq.sub_sequences[-1].capture_slots[-1].original_post_blank is not None
+        and seq.sub_sequences[-1].original_post_blank is not None
+        and seq.original_post_blank is not None
+        else None
+    )
+
+    prev_blank = seq.original_prev_blank
+    if prev_blank is None:
+        raise ValueError("original_prev_blank must be set")
+    subseq_prev_blank = seq.sub_sequences[0].original_prev_blank
+    if subseq_prev_blank is None:
+        raise ValueError("original_prev_blank of subseq must be set")
+
+    return sum(
+        # 先頭の blank
+        [[prev_blank + subseq_prev_blank]]
+        + [
+            sum(
+                # 最終以外の subseq の 最終以外の slot の wave, blank chain
+                [
+                    [slot.original_duration, slot.original_post_blank]
+                    for slot in subseq.capture_slots[:-1]
+                ]
+                # 最終以外の subseq の 最終 slot の wave, blank
+                # blank は 橋渡し blank の値を使う
+                + [[subseq.capture_slots[-1].original_duration, blank]],
+                [],
+            )
+            for subseq, blank in zip(seq.sub_sequences[:-1], blank_bridges)
+        ]
+        # 最終 subseq の 最終以外の slot の wave, blank chain
+        + [
+            [slot.original_duration, slot.original_post_blank]
+            for slot in seq.sub_sequences[-1].capture_slots[:-1]
+        ]
+        # お尻につく wave, blank
+        + [[seq.sub_sequences[-1].capture_slots[-1].original_duration, last_blank]],
         [],
     )
