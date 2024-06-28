@@ -548,6 +548,62 @@ class Sequence(DequeWithContext):
             _: [end - begin for begin, end in zip(_nodes[_][1:-1:2], _nodes[_][2::2])]
             for _ in subseq_edges
         }
+        _subseqs_original = {
+            edge: items
+            for edge, items in zip(
+                subseq_edges,
+                [
+                    Item(
+                        duration=_._total_duration_contents,
+                        begin=_.begin,
+                    )
+                    for _ in [subseqs[edge] for edge in subseq_edges]
+                    if isinstance(_, SubSequenceBranch)
+                    if _._total_duration_contents is not None
+                ],
+            )
+        }
+        _slots_original = {
+            subseq_edge: sorted(
+                [
+                    Item(
+                        duration=item.duration,
+                        begin=item.begin,
+                    )
+                    for item in targets_items[target_name][subseq_edge]
+                ],
+                key=lambda x: x.begin if x.begin is not None else -math.inf,
+            )
+            for subseq_edge in subseq_edges
+        }
+        _nodes_original: dict[int, MutableSequence[float] | MutableSequence] = {
+            _: sum(
+                [[_subseqs_original[_].begin]]
+                + [[__.begin, __.end] for __ in _slots_original[_]]
+                + [[_subseqs_original[_].end]],
+                [],
+            )
+            for _ in subseq_edges
+        }
+        _blanks_original = {
+            _: [
+                end - begin
+                for begin, end in zip(
+                    _nodes_original[_][:-1:2], _nodes_original[_][1::2]
+                )
+            ]
+            for _ in subseq_edges
+        }
+        _durations_original = {
+            _: [
+                end - begin
+                for begin, end in zip(
+                    _nodes_original[_][1:-1:2], _nodes_original[_][2::2]
+                )
+            ]
+            for _ in subseq_edges
+        }
+
         toplevel_prev_blank = 0
         toplevel_post_blank: Optional[float] = None
         return CapSampledSequence(
@@ -558,6 +614,8 @@ class Sequence(DequeWithContext):
                 if toplevel_post_blank is not None
                 else None
             ),
+            original_prev_blank=toplevel_prev_blank,
+            original_post_blank=toplevel_post_blank,
             repeats=None,
             sub_sequences=[
                 CapSampledSubSequence(
@@ -565,8 +623,15 @@ class Sequence(DequeWithContext):
                         CaptureSlots(
                             duration=round(duration / sampling_period),
                             post_blank=round(blank / sampling_period),
+                            original_duration=duration_original,
+                            original_post_blank=blank_original,
                         )
-                        for blank, duration in zip(blanks[1:], durations)
+                        for blank, blank_original, duration, duration_original in zip(
+                            blanks[1:],
+                            blanks_original[1:],
+                            durations,
+                            durations_original,
+                        )
                     ],
                     prev_blank=round(blanks[0] / sampling_period),
                     post_blank=(
@@ -574,10 +639,22 @@ class Sequence(DequeWithContext):
                         if subseq.post_blank is not None
                         else None
                     ),
+                    original_prev_blank=blanks_original[0],
+                    original_post_blank=(
+                        subseq.post_blank if subseq.post_blank is not None else None
+                    ),
                     repeats=subseq.repeats,
                 )
-                for edge, subseq, blanks, durations in [
-                    [_, subseqs[_], _blanks[_], _durations[_]] for _ in subseq_edges
+                for edgeid, subseq, blanks, durations, blanks_original, durations_original in [
+                    [
+                        _,
+                        subseqs[_],
+                        _blanks[_],
+                        _durations[_],
+                        _blanks_original[_],
+                        _durations_original[_],
+                    ]
+                    for _ in subseq_edges
                 ]
             ],
         )
@@ -1553,9 +1630,13 @@ class Sampler:
 class SampledSequenceBase:
     target_name: str
     prev_blank: int = 0  # words
-    post_blank: Optional[int] = None
-    repeats: Optional[int] = None
+    padding: int = 0  # Sa
     sampling_period: float = DEFAULT_SAMPLING_PERIOD
+    post_blank: Optional[int] = None  # words
+    repeats: Optional[int] = None
+    original_prev_blank: Optional[float] = None  # ns
+    original_post_blank: Optional[float] = None  # ns
+    modulation_frequency: Optional[float] = None  # GHz
 
     def asdict(self) -> dict:
         return asdict(self)
@@ -1564,10 +1645,12 @@ class SampledSequenceBase:
 @dataclass
 class GenSampledSequence(SampledSequenceBase):
     sub_sequences: MutableSequence[GenSampledSubSequence] = field(default_factory=list)
+    readout_timings: Optional[MutableSequence[list[tuple[float, float]]]] = None  # ns
 
     def asdict(self) -> dict:
         return super().asdict() | {
             "sub_sequences": [_.asdict() for _ in self.sub_sequences],
+            "readout_timings": None,
             "class": self.__class__.__name__,
         }
 
@@ -1576,21 +1659,31 @@ class GenSampledSequence(SampledSequenceBase):
 class GenSampledSubSequence:
     real: NDArray[np.float64]
     imag: NDArray[np.float64]
-    post_blank: Optional[int]  # samples
     repeats: int
+    post_blank: Optional[int] = None  # samples
+    original_post_blank: Optional[float] = None  # ns
 
     def asdict(self) -> dict:
         return {
             "real": self.real.tolist(),
             "imag": self.imag.tolist(),
-            "post_blank": self.post_blank,
             "repeats": self.repeats,
+            "post_blank": self.post_blank,
+            "original_post_blank": self.original_post_blank,
         }
 
 
 @dataclass
 class CapSampledSequence(SampledSequenceBase):
     sub_sequences: MutableSequence[CapSampledSubSequence] = field(default_factory=list)
+    readin_offsets: Optional[MutableSequence[list[tuple[float, float]]]] = None  # ns
+
+    def asdict(self) -> dict:
+        return super().asdict() | {
+            "sub_sequences": [_.asdict() for _ in self.sub_sequences],
+            "readin_offsets": None,
+            "class": self.__class__.__name__,
+        }
 
 
 @dataclass
@@ -1599,16 +1692,20 @@ class CapSampledSubSequence:
     # duration: int  # samples
     prev_blank: int  # samples
     post_blank: Optional[int]  # samples
+    original_prev_blank: float  # ns
+    original_post_blank: Optional[float]  # ns
     repeats: Optional[int]
 
     def asdict(self) -> dict:
-        return {}
+        return asdict(self)
 
 
 @dataclass
 class CaptureSlots:
     duration: int  # samples
     post_blank: Optional[int]  # samples
+    original_duration: float  # ns
+    original_post_blank: Optional[float]  # ns
 
     def asdict(self) -> dict:
         return {}
