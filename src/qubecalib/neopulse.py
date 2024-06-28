@@ -1636,12 +1636,13 @@ class Sampler:
 class SampledSequenceBase:
     target_name: str
     prev_blank: int = 0  # words
-    padding: int = 0  # Sa
     sampling_period: float = DEFAULT_SAMPLING_PERIOD
     post_blank: Optional[int] = None  # words
     repeats: Optional[int] = None
     original_prev_blank: Optional[float] = None  # ns
     original_post_blank: Optional[float] = None  # ns
+    # これは本来外に出すべき
+    padding: int = 0  # Sa
     modulation_frequency: Optional[float] = None  # GHz
 
     def asdict(self) -> dict:
@@ -1651,6 +1652,7 @@ class SampledSequenceBase:
 @dataclass
 class GenSampledSequence(SampledSequenceBase):
     sub_sequences: MutableSequence[GenSampledSubSequence] = field(default_factory=list)
+    # これは本来外に出すべき
     readout_timings: Optional[MutableSequence[list[tuple[float, float]]]] = None  # ns
 
     def asdict(self) -> dict:
@@ -1682,6 +1684,7 @@ class GenSampledSubSequence:
 @dataclass
 class CapSampledSequence(SampledSequenceBase):
     sub_sequences: MutableSequence[CapSampledSubSequence] = field(default_factory=list)
+    # これは本来外に出すべき
     readin_offsets: Optional[MutableSequence[list[tuple[float, float]]]] = None  # ns
 
     def asdict(self) -> dict:
