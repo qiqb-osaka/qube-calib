@@ -1457,11 +1457,11 @@ class Executor:
         return {_ for _ in self._work_queue if isinstance(_, Sequencer)}
 
     def __iter__(self) -> Executor:
-        if not self._work_queue:
-            return self
-        last_command = self._work_queue[-1]
-        if not isinstance(last_command, Sequencer):
-            raise ValueError("_work_queue should end with a Sequencer command")
+        # if not self._work_queue:
+        #     return self
+        # last_command = self._work_queue[-1]
+        # if not isinstance(last_command, Sequencer):
+        #     raise ValueError("_work_queue should end with a Sequencer command")
 
         return self
 
@@ -1485,12 +1485,13 @@ class Executor:
         for command in self._work_queue:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
-                return next.execute(self._boxpool)
+                status, iqs, config = next.execute(self._boxpool)
+                return status, iqs, config
         # これ以上 Sequencer がなければ残りのコマンドを実行する
-        rslt = next.execute(self._boxpool)
+        status, iqs, config = next.execute(self._boxpool)
         for command in self._work_queue:
             command.execute(self._boxpool)
-        return rslt
+        return status, iqs, config
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)
