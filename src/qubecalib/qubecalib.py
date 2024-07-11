@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import json
 import logging
 import os
+import pathlib
+import pickle
+import time
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -30,7 +34,7 @@ from quel_ic_config import (
     Quel1ConfigOption,
 )
 
-from . import neopulse
+from . import __version__, neopulse
 from .e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
@@ -618,6 +622,17 @@ class QubeCalib:
                 )
         else:
             raise ValueError("this setting is not supported yet")
+
+    def pickle_log(self, path_to_log_file: str | os.PathLike) -> None:
+        mypath = pathlib.Path(path_to_log_file)
+        with open(mypath, "wb") as fp:
+            fp.write(pickle.dumps(self._executor.get_log()))
+
+    def unpickle_log(self, path_to_log_file: str | os.PathLike) -> list:
+        mypath = pathlib.Path(path_to_log_file)
+        with open(mypath, "rb") as fp:
+            log = pickle.load(fp)
+        return log
 
 
 class Converter:
@@ -1432,6 +1447,7 @@ class Executor:
     def __init__(self) -> None:
         self._work_queue: Final[deque] = deque()
         self._boxpool: BoxPool = BoxPool()
+        self._config_buffer: Final[deque] = deque()
 
     def reset(self) -> None:
         self._work_queue.clear()
@@ -1457,12 +1473,12 @@ class Executor:
         return {_ for _ in self._work_queue if isinstance(_, Sequencer)}
 
     def __iter__(self) -> Executor:
-        if not self._work_queue:
-            return self
-        last_command = self._work_queue[-1]
-        if not isinstance(last_command, Sequencer):
-            raise ValueError("_work_queue should end with a Sequencer command")
-
+        # if not self._work_queue:
+        #     return self
+        # last_command = self._work_queue[-1]
+        # if not isinstance(last_command, Sequencer):
+        #     raise ValueError("_work_queue should end with a Sequencer command")
+        self.clear_log()  # clear config for last execution
         return self
 
     def __next__(self) -> tuple[Any, dict, dict]:
@@ -1479,21 +1495,58 @@ class Executor:
             next = self._work_queue.pop()
             # 次に実行するコマンドが Sequencer ならばループを抜ける
             if isinstance(next, Sequencer):
+                for box, _ in self._boxpool._boxes.values():
+                    box.initialize_all_awgs()
                 break
             # Sequencer 以外のコマンドを逐次実行
             next.execute(self._boxpool)
         for command in self._work_queue:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
-                return next.execute(self._boxpool)
+                status, iqs, config = next.execute(self._boxpool)
+                user_name = os.getlogin()
+                current_pyfile = os.path.abspath(__file__)
+                date_time = datetime.datetime.now()
+                clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
+                self._config_buffer.append(
+                    (
+                        config,
+                        user_name,
+                        current_pyfile,
+                        __version__,
+                        date_time,
+                        clock_ns,
+                    )
+                )
+                return status, iqs, config
         # これ以上 Sequencer がなければ残りのコマンドを実行する
-        rslt = next.execute(self._boxpool)
+        status, iqs, config = next.execute(self._boxpool)
+        user_name = os.getlogin()
+        current_pyfile = os.path.abspath(__file__)
+        date_time = datetime.datetime.now()
+        clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
+        self._config_buffer.append(
+            (
+                config,
+                user_name,
+                current_pyfile,
+                __version__,
+                date_time,
+                clock_ns,
+            )
+        )
         for command in self._work_queue:
             command.execute(self._boxpool)
-        return rslt
+        return status, iqs, config
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)
+
+    def get_log(self) -> list:
+        return list(self._config_buffer)
+
+    def clear_log(self) -> None:
+        self._config_buffer.clear()
 
 
 @dataclass
