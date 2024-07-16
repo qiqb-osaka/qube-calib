@@ -1495,8 +1495,8 @@ class Executor:
             next = self._work_queue.pop()
             # 次に実行するコマンドが Sequencer ならばループを抜ける
             if isinstance(next, Sequencer):
-                for box, _ in self._boxpool._boxes.values():
-                    box.initialize_all_awgs()
+                # for box, _ in self._boxpool._boxes.values():
+                #     box.initialize_all_awgs()
                 break
             # Sequencer 以外のコマンドを逐次実行
             next.execute(self._boxpool)
