@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Collection, MutableSequence, Optional
 
@@ -122,6 +124,15 @@ class BoxPool:
             raise ValueError(f"invalid name of box: '{name}'")
 
 
+@dataclass
+class Resource:
+    box: Quel1Box
+    sqc: SequencerClient
+    awgs: set[int]
+    awgbitmap: int
+    offset: int  # tap
+
+
 class PulseGen:
     def __init__(
         self,
@@ -147,7 +158,7 @@ class PulseGen:
         self.pulsegens.append(pg)
 
     def emit_now(self) -> None:
-        """単体のボックス毎に複数のポートから PulseGen に従ったパルスを出射する．ボックスの単位でパルスは同期して出射されるが，ボックス館では同期されない．"""
+        """単体のボックス毎に複数のポートから PulseGen に従ったパルスを出射する．ボックスの単位でパルスは同期して出射されるが，ボックス間では同期されない．"""
         if not self.pulsegens:
             logger.warn("no pulse generator to activate")
             return
@@ -156,32 +167,85 @@ class PulseGen:
             box, _ = self.boxpool.get_box(box_name)
             box.wss.start_emission([_.awg for _ in self.pulsegens])
 
-    def emit_at(self) -> None:
-        min_time_offset = 125_000_000
-        time_counts = [i * 125_000_000 for i in range(1)]
-
+    def emit_at(self, offset: dict[str, int] = {}) -> None:
         if not len(self.pulsegens):
             logger.warning("no pulse generator to activate")
 
-        box_names = set([_.box_name for _ in self.pulsegens])
-        for box_name in box_names:
-            box = next(iter({_.box for _ in self.pulsegens if _.box_name == box_name}))
-            sqc = next(iter({_.sqc for _ in self.pulsegens if _.box_name == box_name}))
-            awgs = {_.awg for _ in self.pulsegens if _.box_name == box_name}
-            box.wss.clear_before_starting_emission(awgs)
-            valid_read, current_time, last_sysref_time = sqc.read_clock()
-            if valid_read:
-                logger.info(
-                    f"current time: {current_time},  last sysref time: {last_sysref_time}"
-                )
-            else:
-                raise RuntimeError("failed to read current clock")
+        MIN_TIME_OFFSET = 12_500_000
+        time_counts = [i * MIN_TIME_OFFSET for i in range(1)]
 
-            base_time = (
-                current_time + min_time_offset
-            )  # TODO: implement constraints of the start timing
-            for i, time_count in enumerate(time_counts):
-                valid_sched = sqc.add_sequencer(base_time + time_count)
+        box_names = set([pg.box_name for pg in self.pulsegens])
+        sqc = next(
+            iter({g.sqc for g in self.pulsegens if g.box_name == next(iter(box_names))})
+        )
+        valid_read, current_time, last_sysref_time = sqc.read_clock()
+        if valid_read:
+            logger.info(
+                f"current time: {current_time},  last sysref time: {last_sysref_time}"
+            )
+        else:
+            raise RuntimeError("failed to read current clock")
+        base_time = current_time + MIN_TIME_OFFSET
+        tamate_offset = (16 - base_time % 16) % 16
+        base_time += tamate_offset
+
+        awgs_by_boxname = {}
+        for boxname in box_names:
+            awgs_by_boxname[boxname] = {
+                g.awg for g in self.pulsegens if g.box_name == boxname
+            }
+
+        awgbitmap_by_boxname: dict[str, int] = defaultdict(int)
+        for boxname, awgs in awgs_by_boxname.items():
+            for awg in awgs:
+                awgbitmap_by_boxname[boxname] |= 1 << awg
+
+        # sqc_by_boxname = {
+        #     boxname: next(
+        #         iter({g.sqc for g in self.pulsegens if g.box_name == boxname})
+        #     )
+        #     for boxname in box_names
+        # }
+
+        # box_by_boxname = {
+        #     boxname: next(
+        #         iter({g.box for g in self.pulsegens if g.box_name == boxname})
+        #     )
+        #     for boxname in box_names
+        # }
+
+        # basetime_by_boxname = {}
+        # for boxname, sqc in sqc_by_boxname.items():
+        #     valid_read, current_time, last_sysref_time = sqc.read_clock()
+        #     if valid_read:
+        #         logger.info(
+        #             f"current time: {current_time},  last sysref time: {last_sysref_time}"
+        #         )
+        #     else:
+        #         raise RuntimeError("failed to read current clock")
+        #     base_time = current_time + MIN_TIME_OFFSET
+        #     tamate_offset = (16 - base_time % 16) % 16
+        #     base_time += tamate_offset
+        #     basetime_by_boxname[boxname] = base_time
+
+        resources_by_boxname: dict[str, Resource] = {}
+        for g in self.pulsegens:
+            resources_by_boxname[g.box_name] = Resource(
+                box=g.box,
+                sqc=g.sqc,
+                awgs=awgs_by_boxname[g.box_name],
+                awgbitmap=awgbitmap_by_boxname[g.box_name],
+                offset=offset[g.box_name] if g.box_name in offset else 0,
+            )
+
+        for _, r in resources_by_boxname.items():
+            r.box.wss.clear_before_starting_emission(r.awgs)
+
+        for _, r in resources_by_boxname.items():
+            for _, time_count in enumerate(time_counts):
+                valid_sched = r.sqc.add_sequencer(
+                    base_time + 16 * r.offset + time_count, awg_bitmap=r.awgbitmap
+                )
                 if not valid_sched:
                     raise RuntimeError("failed to schedule AWG start")
             logger.info("scheduling completed")

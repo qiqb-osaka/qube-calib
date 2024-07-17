@@ -146,6 +146,7 @@ class QubeCalib:
     def add_sequence(
         self,
         sequence: neopulse.Sequence,
+        time_offset: dict[str, int] = {},  # {box_name: time_offset}
     ) -> None:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
@@ -159,6 +160,7 @@ class QubeCalib:
                 gen_sampled_sequence=gen_sampled_sequence,
                 cap_sampled_sequence=cap_sampled_sequence,
                 resource_map=resource_map,
+                time_offset=time_offset,
             )
         )
 
@@ -1033,10 +1035,12 @@ class Sequencer(Command):
         resource_map: dict[
             str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
+        time_offset: dict[str, int] = {},
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
         self.cap_sampled_sequence = cap_sampled_sequence
         self.resource_map = resource_map
+        self.syncoffset_by_boxname = time_offset  # taps
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
@@ -1276,7 +1280,7 @@ class Sequencer(Command):
                     },
                 )
             else:
-                pg.emit_at()
+                pg.emit_at(offset=self.syncoffset_by_boxname)
                 return (
                     {},
                     {},
@@ -1310,7 +1314,7 @@ class Sequencer(Command):
             else:
                 triggering_pgs = self.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_at()
+                pg.emit_at(offset=self.syncoffset_by_boxname)
                 _status, _iqs = pc.wait_until_capture_finishes(futures)
                 status, iqs = self.convert_key_from_bmu_to_target(
                     bmc_target, _status, _iqs
@@ -1495,8 +1499,8 @@ class Executor:
             next = self._work_queue.pop()
             # 次に実行するコマンドが Sequencer ならばループを抜ける
             if isinstance(next, Sequencer):
-                for box, _ in self._boxpool._boxes.values():
-                    box.initialize_all_awgs()
+                # for box, _ in self._boxpool._boxes.values():
+                #     box.initialize_all_awgs()
                 break
             # Sequencer 以外のコマンドを逐次実行
             next.execute(self._boxpool)
