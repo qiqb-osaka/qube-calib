@@ -130,6 +130,7 @@ class Resource:
     sqc: SequencerClient
     awgs: set[int]
     awgbitmap: int
+    offset: int  # tap
 
 
 class PulseGen:
@@ -166,7 +167,7 @@ class PulseGen:
             box, _ = self.boxpool.get_box(box_name)
             box.wss.start_emission([_.awg for _ in self.pulsegens])
 
-    def emit_at(self) -> None:
+    def emit_at(self, offset: dict[str, int] = {}) -> None:
         if not len(self.pulsegens):
             logger.warning("no pulse generator to activate")
 
@@ -193,10 +194,39 @@ class PulseGen:
             awgs_by_boxname[boxname] = {
                 g.awg for g in self.pulsegens if g.box_name == boxname
             }
+
         awgbitmap_by_boxname: dict[str, int] = defaultdict(int)
         for boxname, awgs in awgs_by_boxname.items():
             for awg in awgs:
                 awgbitmap_by_boxname[boxname] |= 1 << awg
+
+        # sqc_by_boxname = {
+        #     boxname: next(
+        #         iter({g.sqc for g in self.pulsegens if g.box_name == boxname})
+        #     )
+        #     for boxname in box_names
+        # }
+
+        # box_by_boxname = {
+        #     boxname: next(
+        #         iter({g.box for g in self.pulsegens if g.box_name == boxname})
+        #     )
+        #     for boxname in box_names
+        # }
+
+        # basetime_by_boxname = {}
+        # for boxname, sqc in sqc_by_boxname.items():
+        #     valid_read, current_time, last_sysref_time = sqc.read_clock()
+        #     if valid_read:
+        #         logger.info(
+        #             f"current time: {current_time},  last sysref time: {last_sysref_time}"
+        #         )
+        #     else:
+        #         raise RuntimeError("failed to read current clock")
+        #     base_time = current_time + MIN_TIME_OFFSET
+        #     tamate_offset = (16 - base_time % 16) % 16
+        #     base_time += tamate_offset
+        #     basetime_by_boxname[boxname] = base_time
 
         resources_by_boxname: dict[str, Resource] = {}
         for g in self.pulsegens:
@@ -205,13 +235,16 @@ class PulseGen:
                 sqc=g.sqc,
                 awgs=awgs_by_boxname[g.box_name],
                 awgbitmap=awgbitmap_by_boxname[g.box_name],
+                offset=offset[g.box_name] if g.box_name in offset else 0,
             )
 
         for _, r in resources_by_boxname.items():
             r.box.wss.clear_before_starting_emission(r.awgs)
+
+        for _, r in resources_by_boxname.items():
             for _, time_count in enumerate(time_counts):
                 valid_sched = r.sqc.add_sequencer(
-                    base_time + time_count, awg_bitmap=r.awgbitmap
+                    base_time + 16 * r.offset + time_count, awg_bitmap=r.awgbitmap
                 )
                 if not valid_sched:
                     raise RuntimeError("failed to schedule AWG start")
