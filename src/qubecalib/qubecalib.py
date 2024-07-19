@@ -24,6 +24,7 @@ from typing import (
 )
 
 import numpy as np
+import numpy.typing as npt
 from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
@@ -2008,3 +2009,17 @@ class SystemConfigDatabase:
             },
             indent=4,
         )
+
+
+def find_primary_component(
+    x: npt.NDArray[np.float], y: npt.NDArray[np.float]
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+    s = np.stack([x, y])
+    m = np.stack([s[0, :].mean(), s[1, :].mean()]).reshape(s.shape[0], 1)
+    x = s - m
+    r = np.dot(x, x.transpose()) / x.shape[1]
+    dd, ee = np.linalg.eig(r)
+    idx = dd.argsort()
+    d, e = dd[idx], ee[:, idx]
+    y = np.dot(e.transpose(), s)
+    return d, e, y
