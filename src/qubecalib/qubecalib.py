@@ -79,6 +79,9 @@ class QubeCalib:
 
         self._backend = Qube()
 
+        # polymorphic methods
+        self.append_sequence = self.backend.append_sequence
+
     @property
     def backend(self) -> Backend:
         return self._backend

@@ -5,8 +5,9 @@ from typing import Final
 
 from quel_ic_config import Quel1Box, Quel1BoxType
 
+from ... import neopulse as pls
 from ..baseclasses import Backend
-from ..e7awg.driver import Driver as BoxDriver
+# from ..e7awg.driver import Driver as BoxDriver
 
 DEFAULT_NUM_WORKERS: Final[int] = 4
 DEFAULT_CAPTURE_TIMEOUT: Final[float] = 60.0
@@ -37,11 +38,21 @@ class Qube(Backend):
     # def __init__(self) -> None:
     #     self._driver: Optional[Driver] = None
 
-    def create_e7driver(self, ipaddr: str) -> BoxDriver:
-        return BoxDriver(ip_address(ipaddr))
+    # def create_e7driver(self, ipaddr: str) -> BoxDriver:
+    #     return BoxDriver(ip_address(ipaddr))
 
     def create_box(self, ipaddr: str, boxtype: Quel1BoxType) -> Quel1Box:
         return Quel1Box.create(ipaddr_wss=ipaddr, boxtype=boxtype)
+
+    def append_sequence(
+        self,
+        sequence: pls.Sequence,
+        time_offset: dict[str, int] = {},
+        time_to_start: dict[str, int] = {},
+    ) -> None:
+        print(sequence)
+        print(time_offset)
+        print(time_to_start)
 
 
 # class Driver:
