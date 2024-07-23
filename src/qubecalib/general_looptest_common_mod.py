@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Collection, MutableSequence, Optional
+from typing import Any, Collection, Final, MutableSequence, Optional
 
+import numpy as np
+import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
@@ -20,18 +24,44 @@ logger = logging.getLogger(__name__)
 
 
 class BoxPool:
+    SYSREF_PERIOD: int = 2_000
+    DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
+
     def __init__(self) -> None:
         self._clock_master = (
             None  # QuBEMasterClient(settings["CLOCK_MASTER"]["ipaddr"])
         )
         self._boxes: dict[str, tuple[Quel1Box, SequencerClient]] = {}
         self._linkstatus: dict[str, bool] = {}
+        self._estimated_timediff: dict[str, int] = {}
+        self._cap_sysref_time_offset: int = 0
 
     def create_clock_master(
         self,
         ipaddr: str,
     ) -> None:
         self._clock_master = QuBEMasterClient(master_ipaddr=ipaddr)
+
+    def measure_timediff(
+        self, num_iters: int = DEFAULT_NUM_SYSREF_MEASUREMENTS
+    ) -> tuple[str, int]:
+        sqcs = {name: sqc for name, (_, sqc) in self._boxes.items()}
+        counter_at_sysref_clk = {name: 0 for name in self._boxes}
+        for _ in range(num_iters):
+            for name, sqc in sqcs.items():
+                m = sqc.read_clock()
+                if len(m) < 2:
+                    raise RuntimeError("firmware doesn't support this measurement")
+                counter_at_sysref_clk[name] += m[2] % self.SYSREF_PERIOD
+        avg: dict[str, int] = {
+            name: round(cntr / num_iters)
+            for name, cntr in counter_at_sysref_clk.items()
+        }
+        refname = list(self._boxes.keys())[0]
+        adj = avg[refname]
+        self._estimated_timediff = {name: cntr - adj for ipaddr, cntr in avg.items()}
+        self._cap_sysref_time_offset = avg[refname]
+        return refname, avg[refname]
 
     def create(
         self,
@@ -122,6 +152,18 @@ class BoxPool:
             raise ValueError(f"invalid name of box: '{name}'")
 
 
+@dataclass
+class Resource:
+    name: str
+    box: Quel1Box
+    sqc: SequencerClient
+    awgs: set[int]
+    awgbitmap: int
+    timediff: int
+    offset: int  # tap
+    tts: int
+
+
 class PulseGen:
     def __init__(
         self,
@@ -147,7 +189,7 @@ class PulseGen:
         self.pulsegens.append(pg)
 
     def emit_now(self) -> None:
-        """単体のボックス毎に複数のポートから PulseGen に従ったパルスを出射する．ボックスの単位でパルスは同期して出射されるが，ボックス館では同期されない．"""
+        """単体のボックス毎に複数のポートから PulseGen に従ったパルスを出射する．ボックスの単位でパルスは同期して出射されるが，ボックス間では同期されない．"""
         if not self.pulsegens:
             logger.warn("no pulse generator to activate")
             return
@@ -156,34 +198,67 @@ class PulseGen:
             box, _ = self.boxpool.get_box(box_name)
             box.wss.start_emission([_.awg for _ in self.pulsegens])
 
-    def emit_at(self) -> None:
-        min_time_offset = 125_000_000
-        time_counts = [i * 125_000_000 for i in range(1)]
-
+    def emit_at(
+        self,
+        offset: dict[str, int] = {},
+        tts: dict[str, int] = {},
+    ) -> None:
         if not len(self.pulsegens):
             logger.warning("no pulse generator to activate")
 
-        box_names = set([_.box_name for _ in self.pulsegens])
-        for box_name in box_names:
-            box = next(iter({_.box for _ in self.pulsegens if _.box_name == box_name}))
-            sqc = next(iter({_.sqc for _ in self.pulsegens if _.box_name == box_name}))
-            awgs = {_.awg for _ in self.pulsegens if _.box_name == box_name}
-            box.wss.clear_before_starting_emission(awgs)
-            valid_read, current_time, last_sysref_time = sqc.read_clock()
-            if valid_read:
-                logger.info(
-                    f"current time: {current_time},  last sysref time: {last_sysref_time}"
-                )
-            else:
-                raise RuntimeError("failed to read current clock")
+        MIN_TIME_OFFSET = 12_500_000
 
-            base_time = (
-                current_time + min_time_offset
-            )  # TODO: implement constraints of the start timing
-            for i, time_count in enumerate(time_counts):
-                valid_sched = sqc.add_sequencer(base_time + time_count)
-                if not valid_sched:
-                    raise RuntimeError("failed to schedule AWG start")
+        box_names = set([pg.box_name for pg in self.pulsegens])
+        sqc = next(
+            iter({g.sqc for g in self.pulsegens if g.box_name == next(iter(box_names))})
+        )
+        valid_read, current_time, last_sysref_time = sqc.read_clock()
+        if valid_read:
+            logger.info(
+                f"current time: {current_time},  last sysref time: {last_sysref_time}"
+            )
+        else:
+            raise RuntimeError("failed to read current clock")
+        base_time = current_time + MIN_TIME_OFFSET
+        tamate_offset = (
+            16 - (base_time - self.boxpool._cap_sysref_time_offset) % 16
+        ) % 16
+        base_time += tamate_offset
+
+        awgs_by_boxname = {}
+        for boxname in box_names:
+            awgs_by_boxname[boxname] = {
+                g.awg for g in self.pulsegens if g.box_name == boxname
+            }
+
+        awgbitmap_by_boxname: dict[str, int] = defaultdict(int)
+        for boxname, awgs in awgs_by_boxname.items():
+            for awg in awgs:
+                awgbitmap_by_boxname[boxname] |= 1 << awg
+
+        resources_by_boxname: dict[str, Resource] = {}
+        for g in self.pulsegens:
+            resources_by_boxname[g.box_name] = Resource(
+                name=g.box_name,
+                box=g.box,
+                sqc=g.sqc,
+                awgs=awgs_by_boxname[g.box_name],
+                awgbitmap=awgbitmap_by_boxname[g.box_name],
+                timediff=self.boxpool._estimated_timediff[g.box_name]
+                if g.box_name in self.boxpool._estimated_timediff
+                else 0,
+                offset=offset[g.box_name] if g.box_name in offset else 0,
+                tts=tts[g.box_name] if g.box_name in tts else 0,
+            )
+
+        for _, r in resources_by_boxname.items():
+            r.box.wss.clear_before_starting_emission(r.awgs)
+
+        for _, r in resources_by_boxname.items():
+            schedule = base_time - r.timediff + r.tts + 16 * r.offset
+            valid_sched = r.sqc.add_sequencer(schedule, awg_bitmap=r.awgbitmap)
+            if not valid_sched:
+                raise RuntimeError("failed to schedule AWG start")
             logger.info("scheduling completed")
 
 
@@ -343,6 +418,35 @@ class PulseCap:
         status = {k: v[0] for k, v in result.items()}
         iqs = {k: v[1] for k, v in result.items()}
         return status, iqs
+
+    def measure_background_noise(
+        self,
+    ) -> dict[tuple[str, int, int], tuple[float, float, npt.NDArray[np.complex64]]]:
+        cprm = CaptureParam()
+        cprm.add_sum_section(
+            num_words=4096 // CaptureParam.NUM_SAMPLES_IN_ADC_WORD,
+            num_post_blank_words=1,
+        )
+        # backup capprm
+        backup = {(c.box_name, c.port, c.channel): c.capprm for c in self.pulsecaps}
+        # load capprm
+        for c in self.pulsecaps:
+            c.capprm = cprm
+        status, iq = self.capture_now()
+        # restore capprm
+        for c in self.pulsecaps:
+            c.capprm = backup[(c.box_name, c.port, c.channel)]
+
+        result = {}
+        for c in self.pulsecaps:
+            idx = (c.box_name, c.capmod)
+            if status[idx] == CaptureReturnCode.SUCCESS:
+                data = iq[idx][c.channel][0].squeeze()
+                noise_avg, noise_max = np.average(abs(data)), max(abs(data))
+                result[(c.box_name, c.port, c.channel)] = (noise_avg, noise_max, data)
+            else:
+                raise RuntimeError(f"capture failure due to {status}")
+        return result
 
 
 class PulseCap_:
