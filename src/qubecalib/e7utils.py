@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any, MutableMapping, MutableSequence
 
@@ -13,6 +14,201 @@ from .neopulse import CapSampledSequence, GenSampledSequence
 # import json
 
 SAMPLING_PERIOD = 2  # [ns]
+
+
+class CaptureParamModifier:
+    def __init__(self, capture_param: CaptureParam) -> None:
+        self.capture_param = copy.deepcopy(capture_param)
+        self._saved_num_words_to_sum = 0
+        self._saved_sum_start_word_no = 0
+
+    def finish(self) -> CaptureParam:
+        return self.capture_param
+
+    def replaced_capture_delay(self, delay: int) -> "CaptureParamModifier":
+        self.capture_param.capture_delay = delay
+        return self
+
+    def enabled_sum_module(
+        self, sum_start_word_no: int, num_words_to_sum: int
+    ) -> "CaptureParamModifier":
+        enabled = self.capture_param.dsp_units_enabled
+        enabled.append(DspUnit.SUM)
+        self.capture_param.sel_dsp_units_to_enable(*enabled)
+        self.capture_param.sum_start_word_no = sum_start_word_no
+        self.capture_param.num_words_to_sum = num_words_to_sum
+        return self
+
+    def disabled_sum_module(self) -> "CaptureParamModifier":
+        self._disable_dspunits(DspUnit.SUM)
+        return self
+
+    def enabled_integration(self, num_integ_sections: int) -> "CaptureParamModifier":
+        enabled = self.capture_param.dsp_units_enabled
+        enabled.append(DspUnit.INTEGRATION)
+        self.capture_param.sel_dsp_units_to_enable(*enabled)
+        self.capture_param.num_integ_sections = num_integ_sections
+        return self
+
+    def disabled_integration(self) -> "CaptureParamModifier":
+        self._disable_dspunits(DspUnit.INTEGRATION)
+        return self
+
+    def enabled_demodulation(
+        self, demodulation_frequency_in_hz: float
+    ) -> "CaptureParamModifier":
+        CaptureParamTools.enable_demodulation(
+            self.capture_param, demodulation_frequency_in_hz * 1e-9
+        )
+        self._saved_sum_start_word_no = self.capture_param.sum_start_word_no
+        self._saved_num_words_to_sum = self.capture_param.num_words_to_sum
+        self.capture_param.sum_start_word_no = self._saved_sum_start_word_no // 4
+        self.capture_param.num_words_to_sum = self._saved_num_words_to_sum // 4
+        return self
+
+    def disabled_demodulation(self) -> "CaptureParamModifier":
+        self._disable_dspunits(
+            DspUnit.COMPLEX_FIR, DspUnit.DECIMATION, DspUnit.COMPLEX_WINDOW
+        )
+        self.capture_param.sum_start_word_no = self._saved_sum_start_word_no
+        self.capture_param.num_words_to_sum = self._saved_num_words_to_sum
+        return self
+
+    def enabled_decimation(self) -> "CaptureParamModifier":
+        self._enable_dspunit(DspUnit.DECIMATION)
+        self._saved_sum_start_word_no = self.capture_param.sum_start_word_no
+        self._saved_num_words_to_sum = self.capture_param.num_words_to_sum
+        self.capture_param.sum_start_word_no = self._saved_sum_start_word_no // 4
+        self.capture_param.num_words_to_sum = self._saved_num_words_to_sum // 4
+        return self
+
+    def disabled_decimation(self) -> "CaptureParamModifier":
+        self._disable_dspunits(DspUnit.DECIMATION)
+        self.capture_param.sum_start_word_no = self._saved_sum_start_word_no
+        self.capture_param.num_words_to_sum = self._saved_num_words_to_sum
+        return self
+
+    def _enable_dspunit(self, *dsp_units: DspUnit) -> "CaptureParamModifier":
+        enabled = self.capture_param.dsp_units_enabled
+        for dsp_unit in dsp_units:
+            if dsp_unit not in enabled:
+                enabled.append(dsp_unit)
+            else:
+                raise ValueError(f"{dsp_unit} is already enabled")
+        self.capture_param.sel_dsp_units_to_enable(*enabled)
+        return self
+
+    def _disable_dspunits(self, *dsp_units: DspUnit) -> "CaptureParamModifier":
+        enabled = self.capture_param.dsp_units_enabled
+        for dsp_unit in dsp_units:
+            if dsp_unit in enabled:
+                enabled.remove(dsp_unit)
+            else:
+                raise ValueError(f"{dsp_unit} is not enabled")
+        self.capture_param.sel_dsp_units_to_enable(*enabled)
+        return self
+
+
+class WaveSequenceModifier:
+    SAMPLING_PERIOD = 2e-9  # s
+    SAMPLEs = SAMPLING_PERIOD  # s
+    WORDs = 4 * SAMPLEs  # s
+    BLOCKs = 16 * WORDs  # s
+
+    def __init__(self, wave_sequence: WaveSequence) -> None:
+        """WaveSequence の複製を保存する"""
+        self.wave_sequence = copy.deepcopy(wave_sequence)
+
+    def finish(self) -> WaveSequence:
+        return self.wave_sequence
+
+    def modulated(
+        self, modulation_frequency_in_hz: float, continuous: bool = False
+    ) -> "WaveSequenceModifier":
+        timings = self._create_timing(continuous)
+        phase = [
+            np.exp(2j * np.pi * modulation_frequency_in_hz * timing)
+            for timing in timings
+        ]
+        chunk_list = self.wave_sequence.chunk_list
+        for index, (c, p) in enumerate(zip(chunk_list, phase)):
+            w = np.array(c.wave_data.samples)
+            iq = (w[:, 0] + 1j * w[:, 1]) * p
+            s = IqWave.convert_to_iq_format(
+                np.real(iq).astype(int),
+                np.imag(iq).astype(int),
+                WaveSequence.NUM_SAMPLES_IN_AWG_WORD,
+            )
+            self._replace_chunk(
+                index,
+                s,
+                chunk_list[index].num_blank_words,
+                chunk_list[index].num_repeats,
+            )
+        return self
+
+    def _replace_chunk(
+        self, index: int, iq_samples: int, num_blank_words: int, num_repeats: int
+    ) -> None:
+        """
+        WaveChunk を置き換える
+        """
+        # 置き換え対象以降の WaveChunk のインデックス
+        after_index = range(index, self.wave_sequence.num_chunks)
+        # WaveChunk を退避
+        saved_chunks = [
+            {
+                "iq_samples": chunk.wave_data.samples,
+                "num_blank_words": chunk.num_blank_words,
+                "num_repeats": chunk.num_repeats,
+            }
+            for chunk in self.wave_sequence.chunk_list
+        ]
+        # 置き換え対象以降の WaveChunk を削除
+        for _ in after_index:
+            self.wave_sequence.del_chunk(index)
+        # 置き換え対象以降の WaveChunk を追加・復元
+        for i in after_index:
+            if i == index:
+                self.wave_sequence.add_chunk(
+                    iq_samples=iq_samples,
+                    num_blank_words=num_blank_words,
+                    num_repeats=num_repeats,
+                )
+            else:
+                self.wave_sequence.add_chunk(**saved_chunks[i])
+
+    def _create_timing(self, continuous: bool = False) -> list[np.ndarray]:
+        """
+        WaveChunk を変調するためのタイミングを生成する
+        contunuous: bool = False    各 Chunk のタイミングを WaveSequence 全体で連続にするかどうか。RF 信号の連続性を考慮する場合は True にする。
+        例えば、独立した測定を異なる WaveChunk に割り当てる場合は False に、関連する場合は True にする。
+        """
+        num_chunks = self.wave_sequence.num_chunks
+        chunk_list = self.wave_sequence.chunk_list  # ここで返ってくるのはコピーなので、元のWaveSequenceには影響しない？ deepcopy でないけど大丈夫？
+        num_wave_words = [chunk.num_wave_words for chunk in chunk_list]
+        num_blank_words = [chunk.num_blank_words for chunk in chunk_list]
+        total_in_words = [
+            wave + blank for wave, blank in zip(num_wave_words, num_blank_words)
+        ]
+        total_in_sec = [total * self.WORDs for total in total_in_words]
+        duration_in_words = [wave for wave in num_wave_words]
+        duration_in_samples = [duration * 4 for duration in duration_in_words]
+        if continuous:
+            beginning_time_in_sec = [
+                sum(total_in_sec[:index]) for index in range(num_chunks)
+            ]
+            timings = [
+                beginning + self.SAMPLEs * np.arange(duration)
+                for beginning, duration in zip(
+                    beginning_time_in_sec, duration_in_samples
+                )
+            ]
+        else:
+            timings = [
+                self.SAMPLEs * np.arange(duration) for duration in duration_in_samples
+            ]
+        return timings
 
 
 class WaveSequenceTools:
