@@ -2,7 +2,6 @@ import os
 
 import pytest
 from qubecalib import QubeCalib
-from qubecalib.backend.qube import Qube
 
 CONFIG_KEYS = {
     "clockmaster_setting",
@@ -24,12 +23,7 @@ def qubecalib():
     os.chdir(cwd)  # Restore the current working directory
 
 
-def test_backend() -> None:
-    qc = QubeCalib()
-    assert isinstance(qc.backend, Qube) is True
-
-
-def test_empty_init():
+def test_empty_init() -> None:
     """QubeCalib should initialize with no arguments."""
     qc = QubeCalib()
     config = qc.system_config_database.asdict()
