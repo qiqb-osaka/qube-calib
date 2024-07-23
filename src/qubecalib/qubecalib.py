@@ -24,6 +24,7 @@ from typing import (
 )
 
 import numpy as np
+import numpy.typing as npt
 from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
@@ -147,6 +148,7 @@ class QubeCalib:
         self,
         sequence: neopulse.Sequence,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
+        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
     ) -> None:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
@@ -161,6 +163,7 @@ class QubeCalib:
                 cap_sampled_sequence=cap_sampled_sequence,
                 resource_map=resource_map,
                 time_offset=time_offset,
+                time_to_start=time_to_start,
             )
         )
 
@@ -201,6 +204,12 @@ class QubeCalib:
                 rfswitch=rfswitch,
             )
         )
+
+    def create_pulsecap(self, boxpool: BoxPool) -> PulseCap:
+        return PulseCap(boxpool)
+
+    def create_pulsegen(self, boxpool: BoxPool) -> PulseGen:
+        return PulseGen(boxpool)
 
     def define_target(
         self,
@@ -471,6 +480,8 @@ class QubeCalib:
         boxpool: BoxPool,
         e7_settings: dict[tuple[str, int, int], WaveSequence | CaptureParam],
         disabled: list[DspUnit] = [],
+        time_offset: dict[str, int] = {},  # {box_name: time_offset}
+        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
     ) -> tuple:
         for (box_name, _, _), e7 in e7_settings.items():
             if box_name not in boxpool._boxes:
@@ -578,7 +589,11 @@ class QubeCalib:
                     },
                 )
             else:
-                pg.emit_at()
+                boxpool.measure_timediff()
+                pg.emit_at(
+                    offset=time_offset,
+                    tts=time_to_start,
+                )
                 return (
                     {},
                     {},
@@ -607,9 +622,13 @@ class QubeCalib:
                     },
                 )
             else:
+                boxpool.measure_timediff()
                 triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_at()
+                pg.emit_at(
+                    offset=time_offset,
+                    tts=time_to_start,
+                )
                 status, iqs = pc.wait_until_capture_finishes(futures)
                 return (
                     status,
@@ -1036,11 +1055,13 @@ class Sequencer(Command):
             str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
         time_offset: dict[str, int] = {},
+        time_to_start: dict[str, int] = {},
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
         self.cap_sampled_sequence = cap_sampled_sequence
         self.resource_map = resource_map
         self.syncoffset_by_boxname = time_offset  # taps
+        self.timetostart_by_boxname = time_to_start  # sysref
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
@@ -1280,7 +1301,11 @@ class Sequencer(Command):
                     },
                 )
             else:
-                pg.emit_at(offset=self.syncoffset_by_boxname)
+                boxpool.measure_timediff()
+                pg.emit_at(
+                    offset=self.syncoffset_by_boxname,
+                    tts=self.timetostart_by_boxname,
+                )
                 return (
                     {},
                     {},
@@ -1312,9 +1337,13 @@ class Sequencer(Command):
                     },
                 )
             else:
+                boxpool.measure_timediff()
                 triggering_pgs = self.create_triggering_pgs(pg, pc)
                 futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_at(offset=self.syncoffset_by_boxname)
+                pg.emit_at(
+                    offset=self.syncoffset_by_boxname,
+                    tts=self.timetostart_by_boxname,
+                )
                 _status, _iqs = pc.wait_until_capture_finishes(futures)
                 status, iqs = self.convert_key_from_bmu_to_target(
                     bmc_target, _status, _iqs
@@ -1980,3 +2009,17 @@ class SystemConfigDatabase:
             },
             indent=4,
         )
+
+
+def find_primary_component(
+    x: npt.NDArray[np.float], y: npt.NDArray[np.float]
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+    s = np.stack([x, y])
+    m = np.stack([s[0, :].mean(), s[1, :].mean()]).reshape(s.shape[0], 1)
+    x = s - m
+    r = np.dot(x, x.transpose()) / x.shape[1]
+    dd, ee = np.linalg.eig(r)
+    idx = dd.argsort()
+    d, e = dd[idx], ee[:, idx]
+    y = np.dot(e.transpose(), s)
+    return d, e, y
