@@ -159,6 +159,7 @@ class Resource:
     sqc: SequencerClient
     awgs: set[int]
     awgbitmap: int
+    timediff: int
     offset: int  # tap
     tts: int
 
@@ -219,7 +220,9 @@ class PulseGen:
         else:
             raise RuntimeError("failed to read current clock")
         base_time = current_time + MIN_TIME_OFFSET
-        tamate_offset = (16 - base_time % 16) % 16
+        tamate_offset = (
+            16 - (base_time - self.boxpool._cap_sysref_time_offset) % 16
+        ) % 16
         base_time += tamate_offset
 
         awgs_by_boxname = {}
@@ -241,23 +244,19 @@ class PulseGen:
                 sqc=g.sqc,
                 awgs=awgs_by_boxname[g.box_name],
                 awgbitmap=awgbitmap_by_boxname[g.box_name],
+                timediff=self.boxpool._estimated_timediff[g.box_name]
+                if g.box_name in self.boxpool._estimated_timediff
+                else 0,
                 offset=offset[g.box_name] if g.box_name in offset else 0,
-                tts=16 + (tts[g.box_name] if g.box_name in tts else 0),
+                tts=tts[g.box_name] if g.box_name in tts else 0,
             )
 
         for _, r in resources_by_boxname.items():
             r.box.wss.clear_before_starting_emission(r.awgs)
 
         for _, r in resources_by_boxname.items():
-            timediff = (
-                self.boxpool._estimated_timediff[r.name]
-                if r.name in self.boxpool._estimated_timediff
-                else 0
-            )
-            valid_sched = r.sqc.add_sequencer(
-                base_time + 16 * r.offset + r.tts + timediff,
-                awg_bitmap=r.awgbitmap,
-            )
+            schedule = base_time - r.timediff + r.tts + 16 * r.offset
+            valid_sched = r.sqc.add_sequencer(schedule, awg_bitmap=r.awgbitmap)
             if not valid_sched:
                 raise RuntimeError("failed to schedule AWG start")
             logger.info("scheduling completed")
