@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Type
 
-from e7awgsw import AWG, CaptureUnit, WaveSequence
+from e7awgsw import AWG, CaptureParam, CaptureUnit, WaveSequence
 from pytest_mock import MockerFixture
 from qubecalib.general_looptest_common_mod import BoxPool
-from qubecalib.neopulse import DEFAULT_SAMPLING_PERIOD, Capture, Rectangle, Sequence
-from qubecalib.qubecalib import BoxSetting, PortSetting, Sequencer
+from qubecalib.neopulse import (
+    DEFAULT_SAMPLING_PERIOD,
+    CapSampledSequence,
+    Capture,
+    Flushleft,
+    Modifier,
+    MutableSequence,
+    Rectangle,
+    Sequence,
+    Slot,
+    Waveform,
+    padding,
+)
+from qubecalib.qubecalib import (
+    BoxSetting,
+    Converter,
+    PortConfigAcquirer,
+    PortSetting,
+    Sequencer,
+    TargetBPC,
+)
 from quel_ic_config import Quel1BoxType
 
 
@@ -167,3 +186,270 @@ def test_execute(mocker: MockerFixture) -> None:
     boxpool = BoxPool()
 
     sequencer.execute(boxpool)
+
+
+def property_of_capture_slot(
+    csseq: CapSampledSequence,
+    target_name: str,
+    subseq_index: int,
+    slot_index: int,
+) -> tuple[int, int]:
+    slot = csseq[target_name].sub_sequences[subseq_index].capture_slots[slot_index]
+    return slot.duration, slot.post_blank
+
+
+# def property_of_generator_slot(
+#     gsseq: GenSampledSequence,
+#     target_name: str,
+#     subseqid: int,
+#     slotid: int,
+# ) -> tuple[int, int]:
+#     slot = gsseq[target_name]
+
+
+def property_of_slot(slot: Slot) -> tuple[Type[Slot], int, int]:
+    return slot.__class__, slot.duration, slot.begin
+
+
+def test_make_cap_e7_settings(mocker: MockerFixture) -> None:
+    with Sequence() as seq:
+        Rectangle(duration=21).target("Q00")
+        with Flushleft():
+            Rectangle(duration=9).target("RQ00")
+            Capture(duration=9).target("RQ00")
+            Capture(duration=9).target("RQ02")
+        padding(10.5)
+        with Flushleft():
+            Rectangle(duration=121).target("RQ00")
+            Capture(duration=121).target("RQ00")
+        with Flushleft():
+            Rectangle(duration=31).target("RQ01")
+            Capture(duration=31).target("RQ01")
+        with Flushleft():
+            Rectangle(duration=51).target("RQ01")
+            Capture(duration=51).target("RQ01")
+    seq._tree.place_slots()
+    group_items = (
+        seq._get_group_items_by_target()
+    )  # target, nodeid of SubSequence 毎に属する item をまとめる
+    assert property_of_slot(group_items["Q00"][1][0]) == (Rectangle, 21, 0.0)
+    assert property_of_slot(group_items["RQ00"][1][0]) == (Rectangle, 9, 21.0)
+    assert property_of_slot(group_items["RQ00"][1][1]) == (Capture, 9, 21.0)
+    assert property_of_slot(group_items["RQ00"][1][2]) == (Rectangle, 121, 40.5)
+    assert property_of_slot(group_items["RQ00"][1][3]) == (Capture, 121, 40.5)
+    assert property_of_slot(group_items["RQ01"][1][0]) == (Rectangle, 31, 161.5)
+    assert property_of_slot(group_items["RQ01"][1][1]) == (Capture, 31, 161.5)
+    assert property_of_slot(group_items["RQ01"][1][2]) == (Rectangle, 51, 192.5)
+    assert property_of_slot(group_items["RQ01"][1][3]) == (Capture, 51, 192.5)
+    genitems_by_target_with_empty_subseqids = {
+        target_name: {
+            subseqid: [item for item in items if isinstance(item, (Waveform, Modifier))]
+            for subseqid, items in items_by_subseqids.items()
+        }
+        for target_name, items_by_subseqids in group_items.items()
+    }  # group_items の中から gen に関係する item のみを取り出す
+    genitems_by_target_with_empty_targets: dict[
+        str, dict[int, MutableSequence[Waveform | Modifier]]
+    ] = {
+        target_name: {
+            subseqid: items for subseqid, items in items_by_subseqids.items() if items
+        }
+        for target_name, items_by_subseqids in genitems_by_target_with_empty_subseqids.items()
+    }  # gen に関係しない item を削除したので空の subseqid を削除
+    genitems_by_target: dict[str, dict[int, MutableSequence[Waveform | Modifier]]] = {
+        target_name: {
+            subseqid: items for subseqid, items in items_by_subseqids.items() if items
+        }
+        for target_name, items_by_subseqids in genitems_by_target_with_empty_targets.items()
+        if items_by_subseqids
+    }  # gen に関係しない subseq を削除したので空の target を削除
+    gsseq = {
+        target: seq._create_gen_sampled_sequence(target, genitems_by_target)
+        for target in genitems_by_target
+    }
+
+    capitems_by_target_with_empty_subseqids = {
+        target_name: {
+            subseqid: [item for item in items if isinstance(item, Capture)]
+            for subseqid, items in items_by_subseqids.items()
+        }
+        for target_name, items_by_subseqids in group_items.items()
+    }  # group_items の中から gen に関係する item のみを取り出す
+    capitems_by_target_with_empty_targets: dict[
+        str, dict[int, MutableSequence[Waveform | Modifier]]
+    ] = {
+        target_name: {
+            subseqid: items for subseqid, items in items_by_subseqids.items() if items
+        }
+        for target_name, items_by_subseqids in capitems_by_target_with_empty_subseqids.items()
+    }  # gen に関係しない item を削除したので空の subseqid を削除
+    capitems_by_target: dict[str, dict[int, MutableSequence[Waveform | Modifier]]] = {
+        target_name: {
+            subseqid: items for subseqid, items in items_by_subseqids.items() if items
+        }
+        for target_name, items_by_subseqids in capitems_by_target_with_empty_targets.items()
+        if items_by_subseqids
+    }  # gen に関係しない subseq を削除したので空の target を削除
+    csseq = {
+        target: seq._create_cap_sampled_sequence(target, capitems_by_target)
+        for target in capitems_by_target
+    }
+
+    # targets = set([target for target in gsseq] + [target for target in csseq])
+
+    # channels_by_targets: MutableSequence[tuple[str, set[str]]] = []
+
+    # bpc_targets = {target_name: [] for target_name, channels in channels_by_targets}
+
+    # resource_map = {target_name: [{"box": BoxSetting}] for target_name in targets}
+    # gsseq, csseq = seq.convert_to_sampled_sequence()
+
+    assert csseq["RQ00"].sub_sequences[0].prev_blank == 10
+    assert property_of_capture_slot(csseq, "RQ00", 0, 0) == (5, 5)  # Sa
+    assert property_of_capture_slot(csseq, "RQ00", 0, 1) == (60, 41)  # Sa
+    assert csseq["RQ01"].sub_sequences[0].prev_blank == 80  # Sa
+    assert property_of_capture_slot(csseq, "RQ01", 0, 0) == (16, 0)  # Sa
+    assert property_of_capture_slot(csseq, "RQ01", 0, 1) == (25, 0)  # Sa
+    assert csseq["RQ02"].sub_sequences[0].prev_blank == 10  # Sa
+    assert property_of_capture_slot(csseq, "RQ02", 0, 0) == (5, 106)  # Sa
+
+    # Converter.convert_to_cap_device_specific_sequence(csseq)
+
+    # bpc_targets = {target_name: [] for target_name, channels in targets_channels}
+
+    # _create_target_resource_map
+    box = BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA)
+    port1 = PortSetting("QUBE.PORT1", "QUBE", 1, ndelay_or_nwait=(1, 1, 1, 1))
+    caprmap = {
+        "RQ00": {
+            "box": box,
+            "port": port1,
+            "channel_number": 0,
+            "target": {"frequency": 9.8},
+        },
+        "RQ01": {
+            "box": box,
+            "port": port1,
+            "channel_number": 1,
+            "target": {"frequency": 9.9},
+        },
+        "RQ02": {
+            "box": box,
+            "port": port1,
+            "channel_number": 2,
+            "target": {"frequency": 10.1},
+        },
+    }
+
+    cap_target_bpc: dict[str, TargetBPC] = {
+        target_name: TargetBPC(
+            box=Box(),
+            port=m["port"].port if isinstance(m["port"], PortSetting) else m["port"],
+            channel=m["channel_number"],
+        )
+        for target_name, m in caprmap.items()
+    }
+
+    cap_target_portconf = {
+        target_name: PortConfigAcquirer(
+            box=m["box"],
+            port=m["port"],
+            channel=m["channel"],
+        )
+        for target_name, m in cap_target_bpc.items()
+    }
+
+    first_blank = min(
+        [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
+    )
+    # WaveSequence の単位に合わせた先頭 padding
+    # 暗黙に CaptureParam でも同じ処理が入る
+    first_padding = (first_blank // 64 + 1) * 64 - first_blank  # Sa
+
+    cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
+        Converter.convert_to_cap_device_specific_sequence(
+            sampled_sequence=csseq,
+            resource_map=caprmap,
+            port_config=cap_target_portconf,
+            repeats=1,
+            interval=10240,
+            integral_mode="integral",
+            dsp_demodulation=True,
+            software_demodulation=False,
+            padding=first_padding,
+        )
+    )  # convert_to_device_specific_sequence
+
+    # ndelay_or_nwait_by_target = {
+    #     target_name: rmap["port"].ndelay_or_nwait[rmap["channel_number"]]
+    #     if rmap["port"].ndelay_or_nwait is not None
+    #     else 0
+    #     for target_name, rmap in cap_resource_map.items()
+    # }
+
+    E7_RQ00 = cap_e7_settings[("QUBE", 1, 0)]
+    assert E7_RQ00.capture_delay == 32
+    E7_RQ01 = cap_e7_settings[("QUBE", 1, 1)]
+    assert E7_RQ01.capture_delay == 48
+    E7_RQ02 = cap_e7_settings[("QUBE", 1, 2)]
+    assert E7_RQ02.capture_delay == 32
+
+    port0 = PortSetting("QUBE.PORT0", "QUBE", 0, ndelay_or_nwait=(0,))
+    port5 = PortSetting("QUBE.PORT5", "QUBE", 5, ndelay_or_nwait=(0, 0, 0))
+    port13 = PortSetting("QUBE.PORT13", "QUBE", 13, ndelay_or_nwait=(0,))
+    genrmap = {
+        "RQ00": {
+            "box": box,
+            "port": port0,
+            "channel_number": 0,
+            "target": {"frequency": 9.8},
+        },
+        "RQ01": {
+            "box": box,
+            "port": port0,
+            "channel_number": 0,
+            "target": {"frequency": 9.9},
+        },
+        "RQ02": {
+            "box": box,
+            "port": port13,
+            "channel_number": 0,
+            "target": {"frequency": 10.1},
+        },
+        "Q00": {
+            "box": box,
+            "port": port5,
+            "channel_number": 0,
+            "target": {"frequency": 10.2},
+        },
+    }
+    gen_target_bpc: dict[str, TargetBPC] = {
+        target_name: TargetBPC(
+            box=Box(),
+            port=m["port"].port
+            if isinstance(m["port"], PortSetting)
+            else m["port"].port,
+            channel=m["channel_number"],
+        )
+        for target_name, m in genrmap.items()
+    }
+
+    gen_target_portconf = {
+        target_name: PortConfigAcquirer(
+            box=m["box"], port=m["port"], channel=m["channel"]
+        )
+        for target_name, m in gen_target_bpc.items()
+    }
+
+    # gen_e7_settings
+
+    # gen_e7_settings: dict[tuple[str, int, int], WaveSequence] = (
+    #     Converter.convert_to_gen_device_specific_sequence(
+    #         sampled_sequence=gsseq,
+    #         resource_map=genrmap,
+    #         port_config=gen_target_portconf,
+    #         repeats=1,
+    #         interval=10240,
+    #         padding=first_padding,
+    #     )
+    # )
