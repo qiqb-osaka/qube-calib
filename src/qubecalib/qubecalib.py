@@ -36,10 +36,7 @@ from quel_ic_config import (
     Quel1ConfigOption,
 )
 
-<<<<<<< HEAD
 from . import __version__, neopulse
-=======
->>>>>>> Fix phase offset
 from .e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
@@ -52,7 +49,6 @@ from .neopulse import (
     Capture,
     GenSampledSequence,
     GenSampledSubSequence,
-    Sequence,
     Slot,
     Waveform,
 )
@@ -154,13 +150,9 @@ class QubeCalib:
 
     def add_sequence(
         self,
-<<<<<<< HEAD
         sequence: neopulse.Sequence,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
-=======
-        sequence: Sequence,
->>>>>>> Fix phase offset
     ) -> None:
         # TODO ここは仕様変更が必要
         # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
