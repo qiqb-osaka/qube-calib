@@ -8,6 +8,7 @@ import os
 import pathlib
 import pickle
 import time
+import getpass
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -1537,7 +1538,7 @@ class Executor:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
                 status, iqs, config = next.execute(self._boxpool)
-                user_name = os.getlogin()
+                user_name = getpass.getuser()
                 current_pyfile = os.path.abspath(__file__)
                 date_time = datetime.datetime.now()
                 clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
@@ -1554,7 +1555,7 @@ class Executor:
                 return status, iqs, config
         # これ以上 Sequencer がなければ残りのコマンドを実行する
         status, iqs, config = next.execute(self._boxpool)
-        user_name = os.getlogin()
+        user_name = getpass.getuser()
         current_pyfile = os.path.abspath(__file__)
         date_time = datetime.datetime.now()
         clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
