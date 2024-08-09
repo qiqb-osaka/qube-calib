@@ -67,16 +67,22 @@ def test_gen_sampled_sequence():
         "target_name": target,
         "prev_blank": 0,
         "post_blank": None,
-        "repeats": None,
+        "padding": 0,
         "sampling_period": dt,
+        "repeats": None,
+        "original_prev_blank": None,
+        "original_post_blank": None,
+        "modulation_frequency": None,
         "sub_sequences": [
             {
                 "real": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                "post_blank": None,
                 "repeats": 1,
+                "post_blank": None,
+                "original_post_blank": None,
             }
         ],
+        "readout_timings": None,
         "class": "GenSampledSequence",
     }
 
@@ -97,17 +103,32 @@ def test_cap_sampled_sequence():
     assert cap_sampled_sequence.asdict() == {
         "target_name": target,
         "prev_blank": 0,
+        "padding": 0,
+        "sampling_period": dt,
         "post_blank": None,
         "repeats": None,
-        "sampling_period": dt,
+        "original_prev_blank": 0,
+        "original_post_blank": None,
+        "modulation_frequency": None,
         "sub_sequences": [
             {
-                "capture_slots": [{"duration": n_capture, "post_blank": 0}],
+                "capture_slots": [
+                    {
+                        "duration": n_capture,
+                        "original_duration": 20.0,
+                        "original_post_blank": 0.0,
+                        "post_blank": 0,
+                    }
+                ],
                 "prev_blank": n_blank,
                 "post_blank": 0,
+                "original_prev_blank": 10.0,
+                "original_post_blank": 0.0,
                 "repeats": 1,
             }
         ],
+        "readin_offsets": None,
+        "class": "CapSampledSequence",
     }
 
 
@@ -136,11 +157,17 @@ def test_series():
             {
                 "real": [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
 
     assert target1_sequence == {
@@ -153,11 +180,17 @@ def test_series():
             {
                 "real": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
 
 
@@ -210,11 +243,17 @@ def test_flushleft():
             {
                 "real": [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
 
     assert target1_sequence == {
@@ -227,11 +266,17 @@ def test_flushleft():
             {
                 "real": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
 
 
@@ -261,11 +306,17 @@ def test_flushright():
             {
                 "real": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
 
     assert target1_sequence == {
@@ -278,9 +329,15 @@ def test_flushright():
             {
                 "real": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
                 "imag": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "original_post_blank": None,
                 "post_blank": None,
                 "repeats": 1,
             }
         ],
         "class": "GenSampledSequence",
+        "modulation_frequency": None,
+        "original_post_blank": None,
+        "original_prev_blank": None,
+        "padding": 0,
+        "readout_timings": None,
     }
