@@ -862,17 +862,21 @@ class Converter:
                 rmap_channel_number,
             )
 
+        # readout のタイミングを考慮して位相補償を行う
         for target_name, freq in targets_freqs.items():
             gen_sampled_sequence[target_name].modulation_frequency = freq
-        # readout のタイミングを考慮して位相補償を行う
         for target, seq in gen_sampled_sequence.items():
+            # readout target でない場合はスキップ
             if target not in cap_sampled_sequence:
                 continue
             modulation_angular_frequency = 2 * np.pi * targets_freqs[target]
             timing_list = seq.readout_timings
+            offset_list = cap_sampled_sequence[target].readin_offsets
+            # もし readout_timings と readin_offsets が None なら後方互換でスキップ
+            if timing_list is None and offset_list is None:
+                continue
             if timing_list is None:
                 raise ValueError("readout_timings is not defined")
-            offset_list = cap_sampled_sequence[target].readin_offsets
             if offset_list is None:
                 raise ValueError("readin_offsets is not defined")
             for subseq, timings, offsets in zip(
@@ -1147,12 +1151,13 @@ class Sequencer(Command):
         self,
         gen_sampled_sequence: dict[str, GenSampledSequence],
         cap_sampled_sequence: dict[str, CapSampledSequence],
-        group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]],
         resource_map: dict[
             str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
+        *,
+        group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
         self.cap_sampled_sequence = cap_sampled_sequence
@@ -1169,6 +1174,7 @@ class Sequencer(Command):
         #   "target": db._target_settings[target_name],
         # }
 
+        # readout の target set を作る
         readout_targets = {
             target
             for target, subseq in group_items_by_target.items()
@@ -1176,6 +1182,7 @@ class Sequencer(Command):
             for item in items
             if isinstance(item, Waveform)
         }
+        # readout のタイミング (begin, end) 辞書を作る
         readout_timings: dict[str, MutableSequence[list[tuple[float, float]]]] = {
             target: [
                 [
@@ -1198,8 +1205,11 @@ class Sequencer(Command):
         readout_timings = {
             target: items for target, items in readout_timings.items() if items
         }
-        for target_name, gseq in gen_sampled_sequence.items():
-            gseq.readout_timings = readout_timings[target_name]
+        # readout_timings が 空なら後方互換
+        if readout_timings:
+            for target_name, gseq in gen_sampled_sequence.items():
+                # readout_timings に target_name は含まれているはず
+                gseq.readout_timings = readout_timings[target_name]
 
         readin_targets = {
             target
@@ -1230,8 +1240,9 @@ class Sequencer(Command):
         readin_offsets = {
             target: items for target, items in readin_offsets.items() if items
         }
-        for target_name, cseq in cap_sampled_sequence.items():
-            cseq.readin_offsets = readin_offsets[target_name]
+        if readin_offsets:
+            for target_name, cseq in cap_sampled_sequence.items():
+                cseq.readin_offsets = readin_offsets[target_name]
 
     def set_measurement_option(
         self,

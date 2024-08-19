@@ -4,6 +4,8 @@ from typing import Any, Type
 
 from e7awgsw import AWG, CaptureUnit, WaveSequence
 from pytest_mock import MockerFixture
+from quel_ic_config import Quel1BoxType
+
 from qubecalib.general_looptest_common_mod import BoxPool
 from qubecalib.neopulse import (
     DEFAULT_SAMPLING_PERIOD,
@@ -20,7 +22,6 @@ from qubecalib.qubecalib import (
     PortSetting,
     Sequencer,
 )
-from quel_ic_config import Quel1BoxType
 
 
 class ResourceMap:
@@ -178,6 +179,77 @@ def test_execute(mocker: MockerFixture) -> None:
         gen_sampled_sequence=gen_sampled_sequence,
         cap_sampled_sequence=cap_sampled_sequence,
         group_items_by_target=seq._get_group_items_by_target(),
+        resource_map=resource_map,
+    )
+    sequencer.set_measurement_option(
+        repeats=1000,
+        interval=10024,
+        integral_mode="",
+        dsp_demodulation=True,
+        software_demodulation=False,
+    )
+
+    boxpool = BoxPool()
+
+    sequencer.execute(boxpool)
+
+
+def test_execute_backward_compat(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "qubecalib.general_looptest_common_mod.BoxPool.get_box",
+        return_value=(Box(), None),
+    )
+    mocker.patch(
+        "qubecalib.quel1_wave_subsystem_mod.Quel1WaveSubsystemMod.set_wave",
+        return_value=None,
+    )
+    mocker.patch(
+        "qubecalib.general_looptest_common_mod.PulseCap.capture_at_trigger_of",
+        return_value=None,
+    )
+    mocker.patch(
+        "qubecalib.general_looptest_common_mod.PulseGen.emit_now",
+        return_value=None,
+    )
+    mocker.patch(
+        "qubecalib.general_looptest_common_mod.PulseCap.wait_until_capture_finishes",
+        return_value=(None, None),
+    )
+    mocker.patch(
+        "qubecalib.Sequencer.convert_key_from_bmu_to_target",
+        return_value=(None, None),
+    )
+
+    TARGET = "RQ00"
+    DT = DEFAULT_SAMPLING_PERIOD
+    N_BLANK = 5
+    N_CAPTURE = 10
+    with Sequence() as seq:
+        Rectangle(duration=N_BLANK * DT).target(TARGET)
+        Capture(duration=N_CAPTURE * DT).target(TARGET)
+
+    gen_sampled_sequence, cap_sampled_sequence = seq.convert_to_sampled_sequence()
+    resource_map = {
+        TARGET: [
+            {
+                "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
+                "port": PortSetting("QUBE.PORT0", "QUBE", 0, ndelay_or_nwait=(0,)),
+                "channel_number": 0,
+                "target": {"frequency": 1000},
+            },
+            {
+                "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
+                "port": PortSetting(
+                    "QUBE.PORT1", "QUBE", 1, ndelay_or_nwait=(0, 0, 0, 0)
+                ),
+                "channel_number": 0,
+                "target": {"frequency": 1000},
+            },
+        ]
+    }
+    sequencer = Sequencer(
+        gen_sampled_sequence=gen_sampled_sequence,
+        cap_sampled_sequence=cap_sampled_sequence,
         resource_map=resource_map,
     )
     sequencer.set_measurement_option(
@@ -590,8 +662,8 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
     sequencer = Sequencer(
         gen_sampled_sequence,
         cap_sampled_sequence,
-        group_items_by_target,
         resource_map,
+        group_items_by_target=group_items_by_target,
     )
 
     sequencer.set_measurement_option(
