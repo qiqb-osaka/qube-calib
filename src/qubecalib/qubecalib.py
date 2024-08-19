@@ -1113,16 +1113,23 @@ class TargetBPC(TypedDict):
     box: Quel1Box
     port: int | tuple[int, int]
     channel: int
+    box_name: str
 
 
 class PortConfigAcquirer:
     def __init__(
         self,
+        boxpool: BoxPool,
+        box_name: str,
         box: Quel1Box,
         port: int | tuple[int, int],
         channel: int,
     ):
-        self.dump_config = dp = box.dump_port(port)
+        # boxpool にキャッシュされている box の設定を取得する
+        if box_name not in boxpool._box_config_cache:
+            boxpool._box_config_cache[box_name] = box.dump_box()
+        dump_box = boxpool._box_config_cache[box_name]["ports"]
+        self.dump_config = dp = dump_box[port]
         fnco_freq = 0
         if "channels" in dp:
             fnco_freq = dp["channels"][channel]["fnco_freq"]
@@ -1284,7 +1291,7 @@ class Sequencer(Command):
                 else:
                     raise ValueError("port is not defined")
                 if (
-                    boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "in"
+                    boxpool.get_port_direction(box_name, port) == "in"
                     and target_name in self.cap_sampled_sequence
                 ):
                     if target_name in _cap_resource_map:
@@ -1308,7 +1315,7 @@ class Sequencer(Command):
                 else:
                     raise ValueError("port is not defined")
                 if (
-                    boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "out"
+                    boxpool.get_port_direction(box_name, port) == "out"
                     and target_name in self.gen_sampled_sequence
                 ):
                     if target_name in _gen_resource_map:
@@ -1328,6 +1335,7 @@ class Sequencer(Command):
                 box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
+                box_name=m["box"].box_name,
             )
             for target_name, m in cap_resource_map.items()
         }
@@ -1336,12 +1344,17 @@ class Sequencer(Command):
                 box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
+                box_name=m["box"].box_name,
             )
             for target_name, m in gen_resource_map.items()
         }
         cap_target_portconf = {
             target_name: PortConfigAcquirer(
-                box=m["box"], port=m["port"], channel=m["channel"]
+                boxpool=boxpool,
+                box_name=m["box_name"],
+                box=m["box"],
+                port=m["port"],
+                channel=m["channel"],
             )
             for target_name, m in cap_target_bpc.items()
         }
@@ -1394,7 +1407,11 @@ class Sequencer(Command):
 
         gen_target_portconf = {
             target_name: PortConfigAcquirer(
-                box=m["box"], port=m["port"], channel=m["channel"]
+                boxpool=boxpool,
+                box_name=m["box_name"],
+                box=m["box"],
+                port=m["port"],
+                channel=m["channel"],
             )
             for target_name, m in gen_target_bpc.items()
         }
@@ -1452,6 +1469,14 @@ class Sequencer(Command):
         box_configs = {
             box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
         }
+        for box_name, initial in boxpool._box_config_cache.items():
+            if box_name not in box_configs:
+                raise ValueError(f"The BoxPool is inconsistent with {box_name}")
+            final = box_configs[box_name]
+            if initial != final:
+                logger.warning(
+                    f"The box {box_name} configuration has changed since the start of the process: {initial} -> {final}"
+                )
         # TODO CW 出力については box の機能を使うのが良さげ
         # 制御方式の自動選択
         # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用

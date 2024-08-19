@@ -37,8 +37,11 @@ class Box:
         self.rmap = ResourceMap()
         self.wss = None
 
-    def dump_box(self) -> dict[str, Any]:
-        return {}
+    def dump_box(self) -> dict[str, dict[int, Any]]:
+        dump: dict[str, dict[int, Any]] = {"ports": {}}
+        for i in range(14):
+            dump["ports"][i] = self.dump_port(i)
+        return dump
 
     def dump_port(
         self, port: int

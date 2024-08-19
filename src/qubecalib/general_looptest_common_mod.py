@@ -35,6 +35,8 @@ class BoxPool:
         self._linkstatus: dict[str, bool] = {}
         self._estimated_timediff: dict[str, int] = {}
         self._cap_sysref_time_offset: int = 0
+        self._port_direction: dict[tuple[str, int], str] = {}
+        self._box_config_cache: dict[str, dict] = {}
 
     def create_clock_master(
         self,
@@ -150,6 +152,12 @@ class BoxPool:
             return box, sqc
         else:
             raise ValueError(f"invalid name of box: '{name}'")
+
+    def get_port_direction(self, box_name: str, port: int) -> str:
+        if (box_name, port) not in self._port_direction:
+            box = self.get_box(box_name)[0]
+            self._port_direction[(box_name, port)] = box.dump_port(port)["direction"]
+        return self._port_direction[(box_name, port)]
 
 
 @dataclass
