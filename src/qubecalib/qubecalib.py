@@ -128,10 +128,14 @@ class QubeCalib:
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
         # sequencer に measurement_option を設定する
-        for _ in self._executor.collect_sequencers():
-            _.set_measurement_option(
+        for sequencer in self._executor.collect_sequencers():
+            if sequencer.interval is None:
+                new_interval = interval
+            else:
+                new_interval = sequencer.interval
+            sequencer.set_measurement_option(
                 repeats=repeats,
-                interval=interval,
+                interval=new_interval,
                 integral_mode=integral_mode,
                 dsp_demodulation=dsp_demodulation,
                 software_demodulation=software_demodulation,
@@ -151,6 +155,8 @@ class QubeCalib:
     def add_sequence(
         self,
         sequence: neopulse.Sequence,
+        *,
+        interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
     ) -> None:
@@ -173,8 +179,8 @@ class QubeCalib:
             Sequencer(
                 gen_sampled_sequence=gen_sampled_sequence,
                 cap_sampled_sequence=cap_sampled_sequence,
-                group_items_by_target=items_by_target,
                 resource_map=resource_map,
+                group_items_by_target=items_by_target,
                 time_offset=time_offset,
                 time_to_start=time_to_start,
             )
