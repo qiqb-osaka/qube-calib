@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from typing import Any, MutableMapping, MutableSequence
 
 import numpy as np
@@ -120,8 +121,9 @@ class WaveSequenceTools:
         bounds = [sum(chain[: i + 1]) for i, _ in enumerate(chain)]
         # print(bounds)
         i, q = np.zeros(bounds[-1]).astype(int), np.zeros(bounds[-1]).astype(int)
+        EPS = sys.float_info.epsilon
         for begin, subseq in zip(bounds[::2], sequence.sub_sequences):
-            if max(np.abs(subseq.real)) > 1 or max(np.abs(subseq.imag)) > 1:
+            if max(np.abs(subseq.real)) - 1 > EPS or max(np.abs(subseq.imag)) - 1 > EPS:
                 raise ValueError("magnitude of iq signal must not exceed 1")
             i[begin : begin + subseq.real.shape[0]] = (32767 * subseq.real).astype(int)
             q[begin : begin + subseq.imag.shape[0]] = (32767 * subseq.imag).astype(int)
@@ -163,51 +165,61 @@ class CaptureParamTools:
         interval_samples: int,
     ) -> CaptureParam:
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        # print(sequence)
         # 市松模様チェーンを生成
+        # WaveChunk に相当するものがないので subsequence はマージする
         chain = _convert_cap_sampled_sequence_to_blanks_and_durations_chain(sequence)
-        # print(chain)
+        # 最初のブランクは Block = 16 words 単位でしか反応しないので 16 の整数倍数に合うよう拡大する
+        # WaveSequence の単位に合わせた先頭 padding
+        chain[0] += sequence.padding
         # 境界を抽出
         bounds = [sum(chain[:i]) for i, _ in enumerate(chain)]
-        # print(bounds)
         # アライメント境界を生成
-        grid = [math.floor(_ / unit) * unit for _ in bounds]
-        lower = [
-            align - unit if bound < align else align
-            for bound, align in zip(bounds[1::2], grid[1::2])
-        ]
-        upper = [
-            align + unit if bound > align else align
-            for bound, align in zip(bounds[2::2], grid[2::2])
-        ]
-        # print(bounds[1::2], aligns[1::2], lower)
-        # print(bounds[2::2], aligns[2::2], upper)
-        aligned: MutableSequence = sum(
-            [[bounds[0]]] + [[low, up] for low, up in zip(lower, upper)],
-            [],
-        )
-        # print(aligned)
+        # delay と sum_section の長さは ADC_WORD が最小単位
+        # ただし pre_blank は 1 block = 16 words が最小単位
+        # ticks = [0, math.floor(bounds[1] / (16 * unit)) * 16 * unit] + [
+        #     math.floor(bound / unit) * unit for bound in bounds[2:]
+        # ]
+        # lower = [
+        #     tick - unit if bound < tick else tick
+        #     for bound, tick in zip(bounds[1::2], ticks[1::2])
+        # ]
+        # upper = [
+        #     tick - unit if bound < tick else tick
+        #     for bound, tick in zip(bounds[2::2], ticks[2::2])
+        # ]
+        # aligned: MutableSequence = sum(
+        #     [[bounds[0]]] + [[low, up] for low, up in zip(lower, upper)],
+        #     [],
+        # )
+        aligned: MutableSequence[int] = [
+            0,
+            math.floor(bounds[1] / (16 * unit)) * 16 * unit,
+        ] + [math.floor(bound / unit) * unit for bound in bounds[2:]]
+        # アライメントされた境界を使って新しい市松模様チェーンを生成
+        # 最後の要素が None だと以降の処理でエラーにならないよう 0 へ変換
         new_chain = [
             int((up - low) / unit) if low is not None and up is not None else None
             for low, up in zip(aligned[:-1], aligned[1:])
         ] + [chain[-1] if chain[-1] is not None else 0]
-        total_duration_words = (
-            sum(new_chain[:-1]) if chain[-1] is None else sum(new_chain)
-        )
+        total_duration_words = sum(new_chain)
         interval_words = int(interval_samples // unit)
-        # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる
-        # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ）
-        new_chain[-1] += interval_words - total_duration_words + new_chain[0]
-        if new_chain[-1] == 0:
-            new_chain[-2] -= 1
-            new_chain[-1] = 1
+        # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる TOOO ?
+        # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ） <- これはダメ　 X wait は先頭のみ
+        new_chain[-1] = interval_words - total_duration_words + new_chain[0]
+        for i in range(2, len(new_chain), 2):
+            if new_chain[i] == 0:
+                if new_chain[i - 1] == 1:
+                    raise ValueError("Capture is too short")
+                new_chain[i - 1] -= 1
+                new_chain[i] = 1
+        # if new_chain[-1] == 0:
+        #     new_chain[-2] -= 1
+        #     new_chain[-1] = 1
         # TODO new_chain の blank 要素が潰れることがある（capt は拡張なので潰れない）この処理を追加しないといけない
-        # TODO 最終の post_blank の処理をまだ入れていない
         # TODO post_blank は 1 以上の制約がある
         capprm = CaptureParam()
         capprm.capture_delay = capture_delay_words + new_chain[0]
         capprm.num_integ_sections = repeats
-        # print("capture_delay", capprm.capture_delay, new_chain[0])
         for duration, blank in zip(new_chain[1::2], new_chain[2::2]):
             capprm.add_sum_section(
                 num_words=duration,
@@ -412,5 +424,72 @@ def _convert_cap_sampled_sequence_to_blanks_and_durations_chain(
         ]
         # お尻につく wave, blank
         + [[seq.sub_sequences[-1].capture_slots[-1].duration, last_blank]],
+        [],
+    )
+
+
+def _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
+    sequence: CapSampledSequence,
+) -> MutableSequence:
+    """cap sampled sequence を blank - duration チェーンに変換する（ただし、オリジナルの値を使う）"""
+    seq = sequence
+
+    # sub sequence 間を橋渡しするブランクのリスト MutableSequence[Optional[int|float]]
+    # 最終スロットの blank, 前 subseq の post_blank, 後 subseq の prev_blank
+    blank_bridges = [
+        (
+            lo.capture_slots[-1].original_post_blank
+            + lo.original_post_blank
+            + hi.original_prev_blank
+            if lo.capture_slots[-1].original_post_blank is not None
+            and lo.original_post_blank is not None
+            and hi.original_prev_blank is not None
+            else None
+        )
+        for lo, hi in zip(seq.sub_sequences[:-1], seq.sub_sequences[1:])
+    ]
+
+    # お尻につく blank
+    last_blank = (
+        seq.sub_sequences[-1].capture_slots[-1].original_post_blank
+        + seq.sub_sequences[-1].original_post_blank
+        + seq.original_post_blank
+        if seq.sub_sequences[-1].capture_slots[-1].original_post_blank is not None
+        and seq.sub_sequences[-1].original_post_blank is not None
+        and seq.original_post_blank is not None
+        else None
+    )
+
+    prev_blank = seq.original_prev_blank
+    if prev_blank is None:
+        raise ValueError("original_prev_blank must be set")
+    subseq_prev_blank = seq.sub_sequences[0].original_prev_blank
+    if subseq_prev_blank is None:
+        raise ValueError("original_prev_blank of subseq must be set")
+
+    return sum(
+        # 先頭の blank
+        [[prev_blank + subseq_prev_blank]]
+        + [
+            sum(
+                # 最終以外の subseq の 最終以外の slot の wave, blank chain
+                [
+                    [slot.original_duration, slot.original_post_blank]
+                    for slot in subseq.capture_slots[:-1]
+                ]
+                # 最終以外の subseq の 最終 slot の wave, blank
+                # blank は 橋渡し blank の値を使う
+                + [[subseq.capture_slots[-1].original_duration, blank]],
+                [],
+            )
+            for subseq, blank in zip(seq.sub_sequences[:-1], blank_bridges)
+        ]
+        # 最終 subseq の 最終以外の slot の wave, blank chain
+        + [
+            [slot.original_duration, slot.original_post_blank]
+            for slot in seq.sub_sequences[-1].capture_slots[:-1]
+        ]
+        # お尻につく wave, blank
+        + [[seq.sub_sequences[-1].capture_slots[-1].original_duration, last_blank]],
         [],
     )
