@@ -49,8 +49,8 @@ class Box:
         if port in [1, 4, 9, 12]:
             return {
                 "direction": "in",
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
+                "lo_freq": 8_000_000_000,
+                "cnco_freq": 1_500_000_000,
                 "runits": {
                     0: {"fnco_freq": 0.0},
                     1: {"fnco_freq": 0.0},
@@ -67,19 +67,19 @@ class Box:
                     2: {"fnco_freq": 0.0},
                     3: {"fnco_freq": 0.0},
                 },
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
+                "lo_freq": 12_000_000_000,
+                "cnco_freq": 1_500_000_000,
                 "sideband": "L",
             }
-        elif port in [0, 13]:
+        elif port in [0, 2, 11, 13]:
             return {
                 "direction": "out",
                 "channels": {
                     0: {"fnco_freq": 0.0},
                 },
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
-                "sideband": "L",
+                "lo_freq": 8_000_000_000,
+                "cnco_freq": 1_500_000_000,
+                "sideband": "U",
             }
         else:
             return {}
@@ -166,7 +166,7 @@ def test_execute(mocker: MockerFixture) -> None:
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
                 "port": PortSetting("QUBE.PORT0", "QUBE", 0, ndelay_or_nwait=(0,)),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
             {
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
@@ -174,7 +174,7 @@ def test_execute(mocker: MockerFixture) -> None:
                     "QUBE.PORT1", "QUBE", 1, ndelay_or_nwait=(0, 0, 0, 0)
                 ),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
         ]
     }
@@ -238,7 +238,7 @@ def test_execute_backward_compat(mocker: MockerFixture) -> None:
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
                 "port": PortSetting("QUBE.PORT0", "QUBE", 0, ndelay_or_nwait=(0,)),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
             {
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
@@ -246,7 +246,7 @@ def test_execute_backward_compat(mocker: MockerFixture) -> None:
                     "QUBE.PORT1", "QUBE", 1, ndelay_or_nwait=(0, 0, 0, 0)
                 ),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
         ]
     }
@@ -615,13 +615,13 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
                 "box": box,
                 "port": port1,
                 "channel_number": 0,
-                "target": {"frequency": 9.8},
+                "target": {"frequency": 9.6},
             },
             {
                 "box": box,
                 "port": port0,
                 "channel_number": 0,
-                "target": {"frequency": 9.8},
+                "target": {"frequency": 9.6},
             },
         ],
         "RQ01": [
@@ -629,13 +629,13 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
                 "box": box,
                 "port": port1,
                 "channel_number": 1,
-                "target": {"frequency": 9.9},
+                "target": {"frequency": 9.6},
             },
             {
                 "box": box,
                 "port": port0,
                 "channel_number": 0,
-                "target": {"frequency": 9.9},
+                "target": {"frequency": 9.6},
             },
         ],
         "RQ02": [
@@ -643,13 +643,13 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
                 "box": box,
                 "port": port1,
                 "channel_number": 2,
-                "target": {"frequency": 10.1},
+                "target": {"frequency": 9.7},
             },
             {
                 "box": box,
                 "port": port13,
                 "channel_number": 0,
-                "target": {"frequency": 10.1},
+                "target": {"frequency": 9.7},
             },
         ],
         "Q00": [
@@ -657,7 +657,7 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
                 "box": box,
                 "port": port5,
                 "channel_number": 0,
-                "target": {"frequency": 10.2},
+                "target": {"frequency": 10.4},
             },
         ],
     }
