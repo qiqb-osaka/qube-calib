@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import getpass
 import json
 import logging
 import math
@@ -9,7 +10,6 @@ import os
 import pathlib
 import pickle
 import time
-import getpass
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -184,6 +184,7 @@ class QubeCalib:
                 group_items_by_target=items_by_target,
                 time_offset=time_offset,
                 time_to_start=time_to_start,
+                interval=interval,
             )
         )
 
@@ -1172,6 +1173,7 @@ class Sequencer(Command):
         time_to_start: dict[str, int] = {},
         *,
         group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
+        interval: Optional[float] = None,
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
         self.cap_sampled_sequence = cap_sampled_sequence
@@ -1180,6 +1182,8 @@ class Sequencer(Command):
         self.resource_map = resource_map
         self.syncoffset_by_boxname = time_offset  # taps
         self.timetostart_by_boxname = time_to_start  # sysref
+        if interval is not None:
+            self.interval = interval
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
