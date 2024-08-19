@@ -4,10 +4,11 @@ from typing import Any
 
 from e7awgsw import AWG, CaptureUnit, WaveSequence
 from pytest_mock import MockerFixture
+from quel_ic_config import Quel1BoxType
+
 from qubecalib.general_looptest_common_mod import BoxPool
 from qubecalib.neopulse import DEFAULT_SAMPLING_PERIOD, Capture, Rectangle, Sequence
 from qubecalib.qubecalib import BoxSetting, PortSetting, Sequencer
-from quel_ic_config import Quel1BoxType
 
 
 class ResourceMap:
@@ -32,8 +33,8 @@ class Box:
         if port in [1, 4, 9, 12]:
             return {
                 "direction": "in",
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
+                "lo_freq": 8_000_000_000,
+                "cnco_freq": 1_500_000_000,
                 "runits": {
                     0: {"fnco_freq": 0.0},
                     1: {"fnco_freq": 0.0},
@@ -50,19 +51,19 @@ class Box:
                     2: {"fnco_freq": 0.0},
                     3: {"fnco_freq": 0.0},
                 },
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
+                "lo_freq": 12_000_000_000,
+                "cnco_freq": 1_500_000_000,
                 "sideband": "L",
             }
-        elif port in [0, 13]:
+        elif port in [0, 2, 11, 13]:
             return {
                 "direction": "out",
                 "channels": {
                     0: {"fnco_freq": 0.0},
                 },
-                "lo_freq": 12000_000_000,
-                "cnco_freq": 1500000000.0,
-                "sideband": "L",
+                "lo_freq": 8_000_000_000,
+                "cnco_freq": 1_500_000_000,
+                "sideband": "U",
             }
         else:
             return {}
@@ -139,7 +140,7 @@ def test_execute(mocker: MockerFixture) -> None:
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
                 "port": PortSetting("QUBE.PORT0", "QUBE", 0, ndelay_or_nwait=(0,)),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
             {
                 "box": BoxSetting("QUBE", "0.0.0.0", Quel1BoxType.QuBE_RIKEN_TypeA),
@@ -147,7 +148,7 @@ def test_execute(mocker: MockerFixture) -> None:
                     "QUBE.PORT1", "QUBE", 1, ndelay_or_nwait=(0, 0, 0, 0)
                 ),
                 "channel_number": 0,
-                "target": {"frequency": 1000},
+                "target": {"frequency": 9.6},
             },
         ]
     }
