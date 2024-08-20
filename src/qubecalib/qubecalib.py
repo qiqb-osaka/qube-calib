@@ -1474,17 +1474,14 @@ class Sequencer(Command):
 
         box_names = {box_name for (box_name, _, _), _ in cap_e7_settings.items()}
         box_names |= {box_name for (box_name, _, _), _ in gen_e7_settings.items()}
-        box_configs = {
-            box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
-        }
-        for box_name, initial in boxpool._box_config_cache.items():
-            if box_name not in box_configs:
-                raise ValueError(f"The BoxPool is inconsistent with {box_name}")
-            final = box_configs[box_name]
-            if initial != final:
-                logger.warning(
-                    f"The box {box_name} configuration has changed since the start of the process: {initial} -> {final}"
-                )
+        # box_configs = {
+        #     box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
+        # }
+        # if box_name not in boxpool._box_config_cache:
+        #     boxpool._box_config_cache[box_name] = box.dump_box()
+        # dump_box = boxpool._box_config_cache[box_name]["ports"]
+        # self.dump_config = dp = dump_box[port]
+        # box_configs = {box_name: boxpool.get_box}
         # TODO CW 出力については box の機能を使うのが良さげ
         # 制御方式の自動選択
         # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
@@ -1503,7 +1500,7 @@ class Sequencer(Command):
             return (status, iqs) + (
                 {
                     "cap_e7_settings": cap_e7_settings,
-                    "box_configs": box_configs,
+                    # "box_configs": box_configs,
                     "cap_sampled_sequence": self.cap_sampled_sequence,
                     "modulation_frequencies_for_capture": cap_fmod,
                     "first_padding": first_padding,
@@ -1527,7 +1524,7 @@ class Sequencer(Command):
                     "gen_e7_settings": gen_e7_settings,
                     "gen_sampled_sequence": self.gen_sampled_sequence,
                     "modulation_frequencies_for_generator": gen_fmod,
-                    "box_configs": box_configs,
+                    # "box_configs": box_configs,
                     "first_padding": first_padding,
                     "drive_mode": "case 1: capture_at_trigger_of, emit_now",
                 },
@@ -1542,7 +1539,7 @@ class Sequencer(Command):
                     "gen_e7_settings": gen_e7_settings,
                     "gen_sampled_sequence": self.gen_sampled_sequence,
                     "modulation_frequencies_for_generator": gen_fmod,
-                    "box_configs": box_configs,
+                    # "box_configs": box_configs,
                     "first_padding": first_padding,
                     "drive_mode": "case 3: emit_now",
                 },
@@ -1558,7 +1555,7 @@ class Sequencer(Command):
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
                         "modulation_frequencies_for_generator": gen_fmod,
-                        "box_configs": box_configs,
+                        # "box_configs": box_configs,
                         "first_padding": first_padding,
                         "drive_mode": "case 5: emit_now",
                     },
@@ -1576,7 +1573,7 @@ class Sequencer(Command):
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
                         "modulation_frequencies_for_generator": gen_fmod,
-                        "box_configs": box_configs,
+                        # "box_configs": box_configs,
                         "first_padding": first_padding,
                         "drive_mode": "case 5: emit_at",
                     },
@@ -1600,7 +1597,7 @@ class Sequencer(Command):
                         "cap_sampled_sequence": self.cap_sampled_sequence,
                         "modulation_frequencies_for_capture": cap_fmod,
                         "reference_time_for_capture": reference_time_list_by_target,
-                        "box_configs": box_configs,
+                        # "box_configs": box_configs,
                         "first_padding": first_padding,
                         "drive_mode": "case 4: capture_at_trigger_of, emit_now",
                     },
@@ -1626,7 +1623,7 @@ class Sequencer(Command):
                         "cap_sampled_sequence": self.cap_sampled_sequence,
                         "modulation_frequencies_for_capture": cap_fmod,
                         "reference_time_for_capture": reference_time_list_by_target,
-                        "box_configs": box_configs,
+                        # "box_configs": box_configs,
                         "first_padding": first_padding,
                         "drive_mode": "case 4: capture_at_trigger_of, emit_at",
                     },
@@ -1788,6 +1785,7 @@ class Executor:
     def __next__(self) -> tuple[Any, dict, dict]:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
+            self.check_config()
             raise StopIteration()
         # Sequencer が見つかるまでコマンドを逐次実行
         while True:
@@ -1842,6 +1840,20 @@ class Executor:
         for command in self._work_queue:
             command.execute(self._boxpool)
         return status, iqs, config
+
+    def check_config(self) -> None:
+        box_configs = {
+            box_name: self._boxpool.get_box(box_name)[0].dump_box()
+            for box_name in self._boxpool._box_config_cache
+        }
+        for box_name, initial in self._boxpool._box_config_cache.items():
+            if box_name not in box_configs:
+                raise ValueError(f"The BoxPool is inconsistent with {box_name}")
+            final = box_configs[box_name]
+            if initial != final:
+                logger.warning(
+                    f"The box {box_name} configuration has changed since the start of the process: {initial} -> {final}"
+                )
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)
