@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Final, Optional
@@ -89,6 +89,7 @@ class PortResult:
 class Results:
     def __init__(self, results: dict[int, PortResult]) -> None:
         self._results = results
+        self._queue: Final[deque] = deque()
 
     @property
     def port(self) -> dict[int, PortResult]:
@@ -98,6 +99,22 @@ class Results:
         self, *, port: int, runit: int, sum_section: int
     ) -> npt.NDArray[np.complex64]:
         return self._results[port].runit[runit].sum_section[sum_section]
+
+    def __iter__(self) -> Results:
+        self._queue.clear()
+        for port, port_result in self._results.items():
+            for runit, runit_result in port_result.runit.items():
+                for sum_section, _ in enumerate(runit_result.sum_section):
+                    self._queue.appendleft((port, runit, sum_section))
+        return self
+
+    def __next__(self) -> tuple[tuple[int, int, int], npt.NDArray[np.complex64]]:
+        if not self._queue:
+            raise StopIteration
+        port, runit, sum_section = self._queue.pop()
+        return (port, runit, sum_section), self.port[port].runit[runit].sum_section[
+            sum_section
+        ]
 
 
 class Driver:

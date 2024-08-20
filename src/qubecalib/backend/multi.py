@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import Final, Optional
 
+import numpy as np
+import numpy.typing as npt
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import Quel1BoxWithRawWss
 
@@ -274,17 +276,24 @@ class Results:
             name: driver.get_results(thunks[name]) for name, driver in drivers.items()
         }
         self._queue: Final[deque] = deque()
+
+    @property
+    def box(self) -> dict[str, single.Results]:
+        return self._results
+
+    def __iter__(self) -> Results:
+        self._queue.clear()
         for name, box_result in self._results.items():
             for port, port_result in box_result.port.items():
                 for runit, data in port_result.runit.items():
-                    for sum_section in data.sum_section:
+                    for sum_section, _ in enumerate(data.sum_section):
                         self._queue.appendleft((name, port, runit, sum_section))
-
-    def __iter__(self) -> Results:
         return self
 
-    def __next__(self) -> tuple[tuple[str, int, int], single.UnitResult]:
+    def __next__(self) -> tuple[tuple[str, int, int, int], npt.NDArray[np.complex64]]:
         if not self._queue:
             raise StopIteration
         name, port, runit, sum_section = self._queue.pop()
-        return (name, port, runit), self._results[name].port[port].runit[runit]
+        return (name, port, runit, sum_section), self._results[name].port[port].runit[
+            runit
+        ].sum_section[sum_section]
