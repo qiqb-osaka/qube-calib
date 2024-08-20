@@ -924,7 +924,6 @@ class Converter:
                 ids_sampled_sequences[box_port_channel][target] = gen_sampled_sequence[
                     target
                 ]
-
         # ids_sampled_sequences = {
         #     id: {
         #         _: sampled_sequence[_]
@@ -938,15 +937,16 @@ class Converter:
             id: {_: targets_freqs[_] for _, _id in targets_ids.items() if _id == id}
             for id in targets_ids.values()
         }
-
         # 最初の subsequence の先頭に padding 分の 0 を追加する
         # TODO sampling_period を見るようにする
-        sequence = next(iter(gen_sampled_sequence.values()))
-        padding = sequence.padding
-        for seq in gen_sampled_sequence.values():
-            subseq = seq.sub_sequences[0]
-            subseq.real = np.concatenate([np.zeros(padding), subseq.real])
-            subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
+        sequences = list(gen_sampled_sequence.values())
+        if sequences:
+            sequence = sequences[0]
+            padding = sequence.padding
+            for seq in gen_sampled_sequence.values():
+                subseq = seq.sub_sequences[0]
+                subseq.real = np.concatenate([np.zeros(padding), subseq.real])
+                subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
         # ここから全部の subseq で位相回転 (omega(t-t0))しないといけない
         # channel 毎に WaveSequence を生成する
         # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の dict
@@ -1185,8 +1185,7 @@ class Sequencer(Command):
         self.resource_map = resource_map
         self.syncoffset_by_boxname = time_offset  # taps
         self.timetostart_by_boxname = time_to_start  # sysref
-        if interval is not None:
-            self.interval = interval
+        self.interval = interval
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
@@ -1386,6 +1385,7 @@ class Sequencer(Command):
             for target, seq in csseq.items()
         }
 
+        interval = self.interval if self.interval is not None else 10240
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
             Converter.convert_to_cap_device_specific_sequence(
                 gen_sampled_sequence=self.gen_sampled_sequence,
@@ -1394,7 +1394,7 @@ class Sequencer(Command):
                 # target_freq=target_freq,
                 port_config=cap_target_portconf,
                 repeats=self.repeats,
-                interval=self.interval,
+                interval=interval,
                 integral_mode=self.integral_mode,
                 dsp_demodulation=self.dsp_demodulation,
                 software_demodulation=self.software_demodulation,
@@ -1430,7 +1430,7 @@ class Sequencer(Command):
                 resource_map=gen_resource_map,
                 port_config=gen_target_portconf,
                 repeats=self.repeats,
-                interval=self.interval,
+                interval=interval,
             )
         )
         gen_fmod = {
