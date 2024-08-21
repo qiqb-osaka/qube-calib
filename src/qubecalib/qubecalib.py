@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import copy
 import datetime
+import getpass
 import json
 import logging
+import math
 import os
 import pathlib
 import pickle
@@ -39,14 +41,17 @@ from . import __version__, neopulse
 from .e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
+    _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
 )
 from .general_looptest_common_mod import BoxPool, PulseCap, PulseGen, PulseGen_
 from .neopulse import (
     CapSampledSequence,
+    Capture,
     GenSampledSequence,
     GenSampledSubSequence,
-    SampledSequenceBase,
+    Slot,
+    Waveform,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,10 +129,14 @@ class QubeCalib:
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
         # sequencer に measurement_option を設定する
-        for _ in self._executor.collect_sequencers():
-            _.set_measurement_option(
+        for sequencer in self._executor.collect_sequencers():
+            if sequencer.interval is None:
+                new_interval = interval
+            else:
+                new_interval = sequencer.interval
+            sequencer.set_measurement_option(
                 repeats=repeats,
-                interval=interval,
+                interval=new_interval,
                 integral_mode=integral_mode,
                 dsp_demodulation=dsp_demodulation,
                 software_demodulation=software_demodulation,
@@ -147,23 +156,35 @@ class QubeCalib:
     def add_sequence(
         self,
         sequence: neopulse.Sequence,
+        *,
+        interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
     ) -> None:
+        # TODO ここは仕様変更が必要
+        # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
+        # 情報を失わせ過ぎた
+        # capture に関連する gen_sequence を取り出して 変調 slice を作成する
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
+        items_by_target = sequence._get_group_items_by_target()
+
         targets = set(
-            [_ for _ in gen_sampled_sequence] + [_ for _ in cap_sampled_sequence]
+            [gtarget for gtarget in gen_sampled_sequence]
+            + [ctarget for ctarget in cap_sampled_sequence]
         )
         resource_map = self._create_target_resource_map(targets)
+
         self._executor.add_command(
             Sequencer(
                 gen_sampled_sequence=gen_sampled_sequence,
                 cap_sampled_sequence=cap_sampled_sequence,
                 resource_map=resource_map,
+                group_items_by_target=items_by_target,
                 time_offset=time_offset,
                 time_to_start=time_to_start,
+                interval=interval,
             )
         )
 
@@ -296,7 +317,7 @@ class QubeCalib:
         self,
         target_names: Iterable[str],
     ) -> dict[
-        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, float]]]
     ]:
         # {target_name: sampled_sequence} の形式から
         # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
@@ -542,7 +563,7 @@ class QubeCalib:
                     "cap_e7_settings": cap_e7_settings,
                     "capmod_by_port_channel": capmod_by_port_channel,
                     "box_configs": box_configs,
-                    "debug": "case 2: capture_now",
+                    "drive_mode": "case 2: capture_now",
                 },
             )
         elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
@@ -560,7 +581,7 @@ class QubeCalib:
                     "gen_e7_settings": gen_e7_settings,
                     "capmod_by_port_channel": capmod_by_port_channel,
                     "box_configs": box_configs,
-                    "debug": "case 1: capture_at_trigger_of, emit_now",
+                    "drive_mode": "case 1: capture_at_trigger_of, emit_now",
                 },
             )
         elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
@@ -572,7 +593,7 @@ class QubeCalib:
                 {
                     "gen_e7_settings": gen_e7_settings,
                     "box_configs": box_configs,
-                    "debug": "case 3: emit_now",
+                    "drive_mode": "case 3: emit_now",
                 },
             )
         elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
@@ -585,7 +606,7 @@ class QubeCalib:
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "box_configs": box_configs,
-                        "debug": "case 5: emit_now",
+                        "drive_mode": "case 5: emit_now",
                     },
                 )
             else:
@@ -600,7 +621,7 @@ class QubeCalib:
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "box_configs": box_configs,
-                        "debug": "case 5: emit_at",
+                        "drive_mode": "case 5: emit_at",
                     },
                 )
         elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
@@ -618,7 +639,7 @@ class QubeCalib:
                         "gen_e7_settings": gen_e7_settings,
                         "capmod_by_port_channel": capmod_by_port_channel,
                         "box_configs": box_configs,
-                        "debug": "case 4: capture_at, emit_now",
+                        "drive_mode": "case 4: capture_at, emit_now",
                     },
                 )
             else:
@@ -638,7 +659,7 @@ class QubeCalib:
                         "gen_e7_settings": gen_e7_settings,
                         "capmod_by_port_channel": capmod_by_port_channel,
                         "box_configs": box_configs,
-                        "debug": "case 4: capture_at, emit_at",
+                        "drive_mode": "case 4: capture_at, emit_at",
                     },
                 )
         else:
@@ -660,7 +681,8 @@ class Converter:
     @classmethod
     def convert_to_device_specific_sequence(
         cls,
-        sampled_sequence: dict[str, SampledSequenceBase],
+        gen_sampled_sequence: dict[str, GenSampledSequence],
+        cap_sampled_sequence: dict[str, CapSampledSequence],
         resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
@@ -672,20 +694,17 @@ class Converter:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
         capseq = cls.convert_to_cap_device_specific_sequence(
-            sampled_sequence={
-                target_name: sseq
-                for target_name, sseq in sampled_sequence.items()
-                if isinstance(sseq, CapSampledSequence)
-            },
+            gen_sampled_sequence=gen_sampled_sequence,
+            cap_sampled_sequence=cap_sampled_sequence,
             resource_map={
                 target_name: _
                 for target_name, _ in resource_map.items()
-                if isinstance(sampled_sequence[target_name], CapSampledSequence)
+                if target_name in cap_sampled_sequence
             },
             port_config={
                 target_name: _
                 for target_name, _ in port_config.items()
-                if isinstance(sampled_sequence[target_name], CapSampledSequence)
+                if target_name in cap_sampled_sequence
             },
             repeats=repeats,
             interval=interval,
@@ -694,20 +713,17 @@ class Converter:
             software_demodulation=software_demodulation,
         )
         genseq = cls.convert_to_gen_device_specific_sequence(
-            sampled_sequence={
-                target_name: sseq
-                for target_name, sseq in sampled_sequence.items()
-                if isinstance(sseq, GenSampledSequence)
-            },
+            gen_sampled_sequence=gen_sampled_sequence,
+            cap_sampled_sequence=cap_sampled_sequence,
             resource_map={
                 target_name: _
                 for target_name, _ in resource_map.items()
-                if isinstance(sampled_sequence[target_name], GenSampledSequence)
+                if target_name in gen_sampled_sequence
             },
             port_config={
                 target_name: _
                 for target_name, _ in port_config.items()
-                if isinstance(sampled_sequence[target_name], GenSampledSequence)
+                if target_name in gen_sampled_sequence
             },
             repeats=repeats,
             interval=interval,
@@ -717,7 +733,8 @@ class Converter:
     @classmethod
     def convert_to_cap_device_specific_sequence(
         cls,
-        sampled_sequence: dict[str, CapSampledSequence],
+        gen_sampled_sequence: dict[str, GenSampledSequence],
+        cap_sampled_sequence: dict[str, CapSampledSequence],
         resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
@@ -726,6 +743,7 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
     ) -> dict[tuple[str, int, int], CaptureParam]:
+        # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
             target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
             if _["port"].ndelay_or_nwait is not None
@@ -741,6 +759,8 @@ class Converter:
             )
             for target_name, _ in resource_map.items()
         }
+        for target_name, freq in targets_freqs.items():
+            cap_sampled_sequence[target_name].modulation_frequency = freq
         # target_name と (box_name, port_number, channel_number) のマップを作成する
         # 1:1 の対応を仮定
         targets_ids = {
@@ -757,21 +777,30 @@ class Converter:
         if not all(
             [
                 _ == 1
-                for _ in Counter([targets_ids[_] for _ in sampled_sequence]).values()
+                for _ in Counter(
+                    [targets_ids[_] for _ in cap_sampled_sequence]
+                ).values()
             ]
         ):
             raise ValueError(
                 "multiple access for single runit will be supported, not now"
             )
         # 戻り値は {(box_name, port_number, channel_number): CaptureParam} の dict
+        sseqs = [seq for seq in cap_sampled_sequence.values()]
+        # fps = [padding] + len(sseqs[1:]) * [0]
+        # lbs = len(sseqs[:-1]) * [0] + [padding]
+        # padding は WaveSequence の長さと合わせるために設けた
+        # 原則 WaveSequence は wait = 0 とする
+        # TODO Skew の調整はこれから実装する。　wait の単位を確認すること。1Saで調整できるように。
         ids_e7 = {
-            targets_ids[_.target_name]: CaptureParamTools.create(
-                sequence=_,
-                capture_delay_words=ndelay_or_nwait_by_target[_.target_name] * 16,
+            targets_ids[sseq.target_name]: CaptureParamTools.create(
+                sequence=sseq,
+                capture_delay_words=ndelay_or_nwait_by_target[sseq.target_name]
+                * 16,  # ndelay は 16 words = 1 block の単位
                 repeats=repeats,
-                interval_samples=int(interval / _.sampling_period),  # samples
+                interval_samples=int(interval / sseq.sampling_period),  # samples
             )
-            for _ in sampled_sequence.values()
+            for sseq in sseqs
         }
         if integral_mode == "integral":
             ids_e7 = {
@@ -786,33 +815,90 @@ class Converter:
                 )
                 for id, e7 in ids_e7.items()
             }
-
         return ids_e7
 
     @classmethod
     def convert_to_gen_device_specific_sequence(
         cls,
-        sampled_sequence: dict[str, GenSampledSequence],
-        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        gen_sampled_sequence: dict[str, GenSampledSequence],
+        cap_sampled_sequence: dict[str, CapSampledSequence],
+        resource_map: dict[
+            str, dict[str, BoxSetting | PortSetting | int | dict[str, float]]
+        ],
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
     ) -> dict[tuple[str, int, int], WaveSequence]:
         # WaveSequence の生成
-        # target 毎の変調周波数の計算
-        targets_freqs = {
-            target_name: cls.calc_modulation_frequency(
-                f_target=_["target"]["frequency"],
+        SAMPLING_PERIOD = 2
+
+        # target 毎の変調周波数の計算と channel 毎にデータを束ねる
+        targets_freqs: MutableMapping[str, float] = {}
+        targets_ids: MutableMapping[str, tuple[str, int, int]] = {}
+        for target_name, rmap in resource_map.items():
+            # target 毎の変調周波数の計算
+            rmap_target = rmap["target"]
+            if not isinstance(rmap_target, dict):
+                raise ValueError("target is not defined")
+            targets_freqs[target_name] = cls.calc_modulation_frequency(
+                f_target=rmap_target["frequency"],
                 port_config=port_config[target_name],
             )
-            for target_name, _ in resource_map.items()
-        }
-        # channel 毎 (awg 毎) にデータを束ねる
-        # target_name と (box_name, port_number, channel_number) のマップを作成する
-        targets_ids = {
-            target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
-            for target_name, _ in resource_map.items()
-        }
+
+            # targets_freqs = {
+            #     target_name: cls.calc_modulation_frequency(
+            #         f_target=rmap["target"]["frequency"],
+            #         port_config=port_config[target_name],
+            #     )
+            #     for target_name, rmap in resource_map.items()
+            # }
+
+            # channel 毎 (awg 毎) にデータを束ねる
+            # target_name と (box_name, port_number, channel_number) のマップを作成する
+            rmap_box = rmap["box"]
+            if not isinstance(rmap_box, BoxSetting):
+                raise ValueError("box is not defined")
+            rmap_port = rmap["port"]
+            if not isinstance(rmap_port, PortSetting):
+                raise ValueError("port is not defined")
+            rmap_channel_number = rmap["channel_number"]
+            if not isinstance(rmap_channel_number, int):
+                raise ValueError("channel_number is not defined")
+            targets_ids[target_name] = (
+                rmap_box.box_name,
+                rmap_port.port,
+                rmap_channel_number,
+            )
+
+        # readout のタイミングを考慮して位相補償を行う
+        for target_name, freq in targets_freqs.items():
+            gen_sampled_sequence[target_name].modulation_frequency = freq
+        for target, seq in gen_sampled_sequence.items():
+            # readout target でない場合はスキップ
+            if target not in cap_sampled_sequence:
+                continue
+            modulation_angular_frequency = 2 * np.pi * targets_freqs[target]
+            timing_list = seq.readout_timings
+            offset_list = cap_sampled_sequence[target].readin_offsets
+            # もし readout_timings と readin_offsets が None なら後方互換でスキップ
+            if timing_list is None and offset_list is None:
+                continue
+            if timing_list is None:
+                raise ValueError("readout_timings is not defined")
+            if offset_list is None:
+                raise ValueError("readin_offsets is not defined")
+            for subseq, timings, offsets in zip(
+                seq.sub_sequences, timing_list, offset_list
+            ):
+                wave = subseq.real + 1j * subseq.imag
+                for (begin, end), (offsetb, _) in zip(timings, offsets):
+                    offset_phase = modulation_angular_frequency * offsetb
+                    b = math.floor(begin / SAMPLING_PERIOD)
+                    e = math.floor(end / SAMPLING_PERIOD)
+                    wave[b:e] = wave[b:e] * np.exp(-1j * offset_phase)
+                subseq.real = np.real(wave)
+                subseq.imag = np.imag(wave)
+
         ndelay_or_nwait_by_id = {
             id: next(
                 iter(
@@ -828,20 +914,40 @@ class Converter:
             for id in targets_ids.values()
         }
         # (box_name, port_number, channel_number) と {target_name: sampled_sequence} とのマップを作成する
-        ids_sampled_sequences = {
-            id: {
-                _: sampled_sequence[_]
-                for _, _id in targets_ids.items()
-                if _id == id and _ in sampled_sequence
-            }
-            for id in targets_ids.values()
-        }
+        ids_sampled_sequences: dict[
+            tuple[str, int, int], dict[str, GenSampledSequence]
+        ] = {}
+        for target, box_port_channel in targets_ids.items():
+            if target in gen_sampled_sequence:
+                if box_port_channel not in ids_sampled_sequences:
+                    ids_sampled_sequences[box_port_channel] = {}
+                ids_sampled_sequences[box_port_channel][target] = gen_sampled_sequence[
+                    target
+                ]
+        # ids_sampled_sequences = {
+        #     id: {
+        #         _: sampled_sequence[_]
+        #         for _, _id in targets_ids.items()
+        #         if _id == id and _ in sampled_sequence
+        #     }
+        #     for id in targets_ids.values()
+        # }
         # (box_name, port_number, channel_number) と {target_name: modfreq} とのマップを作成する
         ids_modfreqs = {
             id: {_: targets_freqs[_] for _, _id in targets_ids.items() if _id == id}
             for id in targets_ids.values()
         }
-
+        # 最初の subsequence の先頭に padding 分の 0 を追加する
+        # TODO sampling_period を見るようにする
+        sequences = list(gen_sampled_sequence.values())
+        if sequences:
+            sequence = sequences[0]
+            padding = sequence.padding
+            for seq in gen_sampled_sequence.values():
+                subseq = seq.sub_sequences[0]
+                subseq.real = np.concatenate([np.zeros(padding), subseq.real])
+                subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
+        # ここから全部の subseq で位相回転 (omega(t-t0))しないといけない
         # channel 毎に WaveSequence を生成する
         # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の dict
         # 周波数多重した sampled_sequence を作成する
@@ -898,6 +1004,9 @@ class Converter:
         else:
             raise ValueError("invalid ssb mode")
 
+        if 0.25 < abs(f_diff):
+            raise ValueError("modulation frequency is too high")
+
         return f_diff  # GHz
 
     @classmethod
@@ -906,32 +1015,56 @@ class Converter:
         sequences: MutableMapping[str, GenSampledSequence],
         modfreqs: MutableMapping[str, float],
     ) -> GenSampledSequence:
+        # sequences は {target_name: GenSampledSequence} の dict だが
+        # 基本データを取得するために代表する先頭の sequence を取得する
+        # 基本データは全て同じであることを前提とする
         cls.validate_geometry_identity(sequences)
         if not cls.validate_geometry_identity(sequences):
             raise ValueError(
                 "All geometry of sub sequences belonging to the same awg must be equal"
             )
         sequence = sequences[next(iter(sequences))]
+        padding = sequence.padding
+
         chain = {
-            target_name: _convert_gen_sampled_sequence_to_blanks_and_waves_chain(_)
-            for target_name, _ in sequences.items()
+            target_name: _convert_gen_sampled_sequence_to_blanks_and_waves_chain(subseq)
+            for target_name, subseq in sequences.items()
         }
         begins = {
             target_name: [
                 sum(chain[target_name][: i + 1])
                 for i, _ in enumerate(chain[target_name][1:])
             ]
-            for target_name, _ in sequences.items()
+            for target_name in sequences
         }
+        # 変調する時間軸を生成する
+        # padding 分基準時間をずらす t - t0 処理が加わっている
+        SAMPLING_PERIOD = sequence.sampling_period
         times = {
             target_name: [
-                (begin + np.arange(subseq.real.shape[0])) * sequence.sampling_period
+                (begin + np.arange(subseq.real.shape[0]) - padding) * SAMPLING_PERIOD
                 for begin, subseq in zip(
-                    begins[target_name][::2], sequence.sub_sequences
+                    begins[target_name][::2],
+                    sequence.sub_sequences,
                 )
             ]
             for target_name, sequence in sequences.items()
         }
+        # 変調および多重化した複素信号
+        waves = [
+            np.array(
+                [
+                    (
+                        sequences[target].sub_sequences[i].real
+                        + 1j * sequences[target].sub_sequences[i].imag
+                    )
+                    * np.exp(1j * 2 * np.pi * (modfreqs[target] * times[target][i]))
+                    for target in sequences
+                ]
+            ).sum(axis=0)
+            for i, _ in enumerate(sequence.sub_sequences)
+        ]
+
         return GenSampledSequence(
             target_name="",
             prev_blank=sequence.prev_blank,
@@ -940,30 +1073,8 @@ class Converter:
             sampling_period=sequence.sampling_period,
             sub_sequences=[
                 GenSampledSubSequence(
-                    real=np.array(
-                        [
-                            np.real(
-                                (
-                                    sequences[_].sub_sequences[i].real
-                                    + 1j * sequences[_].sub_sequences[i].imag
-                                )
-                                * np.exp(1j * 2 * np.pi * (modfreqs[_] * times[_][i]))
-                            )
-                            for _ in sequences
-                        ]
-                    ).sum(axis=0),
-                    imag=np.array(
-                        [
-                            np.imag(
-                                (
-                                    sequences[_].sub_sequences[i].real
-                                    + 1j * sequences[_].sub_sequences[i].imag
-                                )
-                                * np.exp(1j * 2 * np.pi * (modfreqs[_] * times[_][i]))
-                            )
-                            for _ in sequences
-                        ]
-                    ).sum(axis=0),
+                    real=np.real(waves[i]),
+                    imag=np.imag(waves[i]),
                     post_blank=subseq.post_blank,
                     repeats=subseq.repeats,
                 )
@@ -1007,16 +1118,23 @@ class TargetBPC(TypedDict):
     box: Quel1Box
     port: int | tuple[int, int]
     channel: int
+    box_name: str
 
 
 class PortConfigAcquirer:
     def __init__(
         self,
+        boxpool: BoxPool,
+        box_name: str,
         box: Quel1Box,
         port: int | tuple[int, int],
         channel: int,
     ):
-        self.dump_config = dp = box.dump_port(port)
+        # boxpool にキャッシュされている box の設定を取得する
+        if box_name not in boxpool._box_config_cache:
+            boxpool._box_config_cache[box_name] = box.dump_box()
+        dump_box = boxpool._box_config_cache[box_name]["ports"]
+        self.dump_config = dp = dump_box[port]
         fnco_freq = 0
         if "channels" in dp:
             fnco_freq = dp["channels"][channel]["fnco_freq"]
@@ -1056,12 +1174,18 @@ class Sequencer(Command):
         ],
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
+        *,
+        group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
+        interval: Optional[float] = None,
     ):
         self.gen_sampled_sequence = gen_sampled_sequence
         self.cap_sampled_sequence = cap_sampled_sequence
+        self.group_items_by_terget = group_items_by_target  # TODO ここは begin, end の境界だけわかれば良いので過剰
+        # むしろオブジェクトは不要（シリアライズして送るのに面倒）
         self.resource_map = resource_map
         self.syncoffset_by_boxname = time_offset  # taps
         self.timetostart_by_boxname = time_to_start  # sysref
+        self.interval = interval
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
@@ -1070,19 +1194,91 @@ class Sequencer(Command):
         #   "target": db._target_settings[target_name],
         # }
 
+        # readout の target set を作る
+        readout_targets = {
+            target
+            for target, subseq in group_items_by_target.items()
+            for items in subseq.values()
+            for item in items
+            if isinstance(item, Waveform)
+        }
+        # readout のタイミング (begin, end) 辞書を作る
+        readout_timings: dict[str, MutableSequence[list[tuple[float, float]]]] = {
+            target: [
+                [
+                    (begin, begin + duration)
+                    for item in items
+                    if isinstance(item, Waveform)
+                    if (begin := item.begin) is not None
+                    and (duration := item.duration) is not None
+                ]
+                for items in group_items_by_target[target].values()
+            ]
+            for target in readout_targets
+        }
+        # remove empty items
+        readout_timings = {
+            target: [item for item in items if item]
+            for target, items in readout_timings.items()
+        }
+        # remove empty subseqs
+        readout_timings = {
+            target: items for target, items in readout_timings.items() if items
+        }
+        # readout_timings が 空なら後方互換
+        if readout_timings:
+            for target_name, gseq in gen_sampled_sequence.items():
+                # readout_timings に target_name は含まれているはず
+                gseq.readout_timings = readout_timings[target_name]
+
+        readin_targets = {
+            target
+            for target, subseq in group_items_by_target.items()
+            for items in subseq.values()
+            for item in items
+            if isinstance(item, Capture)
+        }
+        readin_offsets: dict[str, MutableSequence[list[tuple[float, float]]]] = {
+            target: [
+                [
+                    (begin, begin + duration)
+                    for item in items
+                    if isinstance(item, Capture)
+                    if (begin := item.begin) is not None
+                    and (duration := item.duration) is not None
+                ]
+                for nodeid, items in group_items_by_target[target].items()
+            ]
+            for target in readin_targets
+        }
+        # remove empty items
+        readin_offsets = {
+            target: [item for item in items if item]
+            for target, items in readin_offsets.items()
+        }
+        # remove empty subseqs
+        readin_offsets = {
+            target: items for target, items in readin_offsets.items() if items
+        }
+        if readin_offsets:
+            for target_name, cseq in cap_sampled_sequence.items():
+                cseq.readin_offsets = readin_offsets[target_name]
+
     def set_measurement_option(
         self,
         repeats: int,
         interval: float,
         integral_mode: str,
-        dsp_demodulation: bool,
-        software_demodulation: bool,
+        dsp_demodulation: bool = True,
+        software_demodulation: bool = False,
+        phase_compensation: bool = True,  # TODO not work
     ) -> None:
         self.repeats = repeats
         self.interval = interval
         self.integral_mode = integral_mode
         self.dsp_demodulation = dsp_demodulation
         self.software_demodulation = software_demodulation
+        self.phase_compensation = phase_compensation
 
     def execute(
         self,
@@ -1102,7 +1298,7 @@ class Sequencer(Command):
                 else:
                     raise ValueError("port is not defined")
                 if (
-                    boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "in"
+                    boxpool.get_port_direction(box_name, port) == "in"
                     and target_name in self.cap_sampled_sequence
                 ):
                     if target_name in _cap_resource_map:
@@ -1126,7 +1322,7 @@ class Sequencer(Command):
                 else:
                     raise ValueError("port is not defined")
                 if (
-                    boxpool.get_box(box_name)[0].dump_port(port)["direction"] == "out"
+                    boxpool.get_port_direction(box_name, port) == "out"
                     and target_name in self.gen_sampled_sequence
                 ):
                     if target_name in _gen_resource_map:
@@ -1146,6 +1342,7 @@ class Sequencer(Command):
                 box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
+                box_name=m["box"].box_name,
             )
             for target_name, m in cap_resource_map.items()
         }
@@ -1154,44 +1351,92 @@ class Sequencer(Command):
                 box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
+                box_name=m["box"].box_name,
             )
             for target_name, m in gen_resource_map.items()
         }
         cap_target_portconf = {
             target_name: PortConfigAcquirer(
-                box=m["box"], port=m["port"], channel=m["channel"]
+                boxpool=boxpool,
+                box_name=m["box_name"],
+                box=m["box"],
+                port=m["port"],
+                channel=m["channel"],
             )
             for target_name, m in cap_target_bpc.items()
         }
+
+        csseq = self.cap_sampled_sequence
+        first_blank = min(
+            [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
+        )
+        first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
+        # ref_sequence = next(iter(csseq.values()))
+
+        for target_name, cseq in self.cap_sampled_sequence.items():
+            cseq.padding = first_padding
+        for target_name, gseq in self.gen_sampled_sequence.items():
+            gseq.padding = first_padding
+
+        csseqchains_by_target = {
+            target: _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
+                seq,
+            )
+            for target, seq in csseq.items()
+        }
+
+        interval = self.interval if self.interval is not None else 10240
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
             Converter.convert_to_cap_device_specific_sequence(
-                sampled_sequence=self.cap_sampled_sequence,
+                gen_sampled_sequence=self.gen_sampled_sequence,
+                cap_sampled_sequence=self.cap_sampled_sequence,
                 resource_map=cap_resource_map,
                 # target_freq=target_freq,
                 port_config=cap_target_portconf,
                 repeats=self.repeats,
-                interval=self.interval,
+                interval=interval,
                 integral_mode=self.integral_mode,
                 dsp_demodulation=self.dsp_demodulation,
                 software_demodulation=self.software_demodulation,
             )
         )
+        cap_fmod = {
+            target_name: sequence.modulation_frequency
+            for target_name, sequence in self.cap_sampled_sequence.items()
+        }
+        reference_time_list_by_target = {
+            target: list(np.cumsum(np.array([v for v in chain if v is not None]))[::2])
+            for target, chain in csseqchains_by_target.items()
+        }
+        # phase_offset_list_by_target = {
+        #     target: [-2 * np.pi * cap_fmod[target] * t for t in reference_time_list]
+        #     for target, reference_time_list in reference_time_list_by_target.items()
+        # }
 
         gen_target_portconf = {
             target_name: PortConfigAcquirer(
-                box=m["box"], port=m["port"], channel=m["channel"]
+                boxpool=boxpool,
+                box_name=m["box_name"],
+                box=m["box"],
+                port=m["port"],
+                channel=m["channel"],
             )
             for target_name, m in gen_target_bpc.items()
         }
         gen_e7_settings: dict[tuple[str, int, int], WaveSequence] = (
             Converter.convert_to_gen_device_specific_sequence(
-                sampled_sequence=self.gen_sampled_sequence,
+                gen_sampled_sequence=self.gen_sampled_sequence,
+                cap_sampled_sequence=self.cap_sampled_sequence,
                 resource_map=gen_resource_map,
                 port_config=gen_target_portconf,
                 repeats=self.repeats,
-                interval=self.interval,
+                interval=interval,
             )
         )
+        gen_fmod = {
+            target_name: sequence.modulation_frequency
+            for target_name, sequence in self.gen_sampled_sequence.items()
+        }
 
         pc = PulseCap(boxpool)
         pg = PulseGen(boxpool)
@@ -1229,9 +1474,14 @@ class Sequencer(Command):
 
         box_names = {box_name for (box_name, _, _), _ in cap_e7_settings.items()}
         box_names |= {box_name for (box_name, _, _), _ in gen_e7_settings.items()}
-        box_configs = {
-            box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
-        }
+        # box_configs = {
+        #     box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
+        # }
+        # if box_name not in boxpool._box_config_cache:
+        #     boxpool._box_config_cache[box_name] = box.dump_box()
+        # dump_box = boxpool._box_config_cache[box_name]["ports"]
+        # self.dump_config = dp = dump_box[port]
+        # box_configs = {box_name: boxpool.get_box}
         # TODO CW 出力については box の機能を使うのが良さげ
         # 制御方式の自動選択
         # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
@@ -1250,9 +1500,11 @@ class Sequencer(Command):
             return (status, iqs) + (
                 {
                     "cap_e7_settings": cap_e7_settings,
-                    "box_configs": box_configs,
+                    # "box_configs": box_configs,
                     "cap_sampled_sequence": self.cap_sampled_sequence,
-                    "debug": "case 2: catpure_now",
+                    "modulation_frequencies_for_capture": cap_fmod,
+                    "first_padding": first_padding,
+                    "drive_mode": "case 2: catpure_now",
                 },
             )
         elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
@@ -1267,10 +1519,14 @@ class Sequencer(Command):
                 {
                     "cap_e7_settings": cap_e7_settings,
                     "cap_sampled_sequence": self.cap_sampled_sequence,
+                    "modulation_frequencies_for_capture": cap_fmod,
+                    "reference_time_for_capture": reference_time_list_by_target,
                     "gen_e7_settings": gen_e7_settings,
                     "gen_sampled_sequence": self.gen_sampled_sequence,
-                    "box_configs": box_configs,
-                    "debug": "case 1: capture_at_trigger_of, emit_now",
+                    "modulation_frequencies_for_generator": gen_fmod,
+                    # "box_configs": box_configs,
+                    "first_padding": first_padding,
+                    "drive_mode": "case 1: capture_at_trigger_of, emit_now",
                 },
             )
         elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
@@ -1282,8 +1538,10 @@ class Sequencer(Command):
                 {
                     "gen_e7_settings": gen_e7_settings,
                     "gen_sampled_sequence": self.gen_sampled_sequence,
-                    "box_configs": box_configs,
-                    "debug": "case 3: emit_now",
+                    "modulation_frequencies_for_generator": gen_fmod,
+                    # "box_configs": box_configs,
+                    "first_padding": first_padding,
+                    "drive_mode": "case 3: emit_now",
                 },
             )
         elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
@@ -1296,8 +1554,10 @@ class Sequencer(Command):
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "box_configs": box_configs,
-                        "debug": "case 5: emit_now",
+                        "modulation_frequencies_for_generator": gen_fmod,
+                        # "box_configs": box_configs,
+                        "first_padding": first_padding,
+                        "drive_mode": "case 5: emit_now",
                     },
                 )
             else:
@@ -1312,8 +1572,10 @@ class Sequencer(Command):
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "box_configs": box_configs,
-                        "debug": "case 5: emit_at",
+                        "modulation_frequencies_for_generator": gen_fmod,
+                        # "box_configs": box_configs,
+                        "first_padding": first_padding,
+                        "drive_mode": "case 5: emit_at",
                     },
                 )
         elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
@@ -1330,10 +1592,14 @@ class Sequencer(Command):
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
+                        "modulation_frequencies_for_generator": gen_fmod,
                         "cap_e7_settings": cap_e7_settings,
                         "cap_sampled_sequence": self.cap_sampled_sequence,
-                        "box_configs": box_configs,
-                        "debug": "case 4: capture_at_trigger_of, emit_now",
+                        "modulation_frequencies_for_capture": cap_fmod,
+                        "reference_time_for_capture": reference_time_list_by_target,
+                        # "box_configs": box_configs,
+                        "first_padding": first_padding,
+                        "drive_mode": "case 4: capture_at_trigger_of, emit_now",
                     },
                 )
             else:
@@ -1352,10 +1618,14 @@ class Sequencer(Command):
                     {
                         "gen_e7_settings": gen_e7_settings,
                         "gen_sampled_sequence": self.gen_sampled_sequence,
+                        "modulation_frequencies_for_generator": gen_fmod,
                         "cap_e7_settings": cap_e7_settings,
                         "cap_sampled_sequence": self.cap_sampled_sequence,
-                        "box_configs": box_configs,
-                        "debug": "case 4: capture_at_trigger_of, emit_at",
+                        "modulation_frequencies_for_capture": cap_fmod,
+                        "reference_time_for_capture": reference_time_list_by_target,
+                        # "box_configs": box_configs,
+                        "first_padding": first_padding,
+                        "drive_mode": "case 4: capture_at_trigger_of, emit_at",
                     },
                 )
         else:
@@ -1447,8 +1717,6 @@ class ConfigPort(Command):
         boxpool: BoxPool,
     ) -> None:
         print(f"{self.__class__.__name__} executed")
-        # box = boxpool(self.box_name)
-        # box.config_port()
 
 
 class ConfigChannel(Command):
@@ -1517,6 +1785,9 @@ class Executor:
     def __next__(self) -> tuple[Any, dict, dict]:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
+            self.check_config()
+            self._boxpool = BoxPool()
+            self.clear_log()
             raise StopIteration()
         # Sequencer が見つかるまでコマンドを逐次実行
         while True:
@@ -1537,7 +1808,7 @@ class Executor:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
                 status, iqs, config = next.execute(self._boxpool)
-                user_name = os.getlogin()
+                user_name = getpass.getuser()
                 current_pyfile = os.path.abspath(__file__)
                 date_time = datetime.datetime.now()
                 clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
@@ -1554,7 +1825,7 @@ class Executor:
                 return status, iqs, config
         # これ以上 Sequencer がなければ残りのコマンドを実行する
         status, iqs, config = next.execute(self._boxpool)
-        user_name = os.getlogin()
+        user_name = getpass.getuser()
         current_pyfile = os.path.abspath(__file__)
         date_time = datetime.datetime.now()
         clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
@@ -1571,6 +1842,20 @@ class Executor:
         for command in self._work_queue:
             command.execute(self._boxpool)
         return status, iqs, config
+
+    def check_config(self) -> None:
+        box_configs = {
+            box_name: self._boxpool.get_box(box_name)[0].dump_box()
+            for box_name in self._boxpool._box_config_cache
+        }
+        for box_name, initial in self._boxpool._box_config_cache.items():
+            if box_name not in box_configs:
+                raise ValueError(f"The BoxPool is inconsistent with {box_name}")
+            final = box_configs[box_name]
+            if initial != final:
+                logger.warning(
+                    f"The box {box_name} configuration has changed since the start of the process: {initial} -> {final}"
+                )
 
     def add_command(self, command: Command) -> None:
         self._work_queue.appendleft(command)
