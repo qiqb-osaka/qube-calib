@@ -1786,6 +1786,8 @@ class Executor:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
             self.check_config()
+            self._boxpool = BoxPool()
+            self.clear_log()
             raise StopIteration()
         # Sequencer が見つかるまでコマンドを逐次実行
         while True:
