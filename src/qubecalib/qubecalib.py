@@ -36,8 +36,6 @@ from quel_ic_config import (
 )
 
 from . import __version__, neopulse
-from .backend.baseclasses import Backend
-from .backend.qube import Qube
 from .e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
@@ -77,15 +75,6 @@ class QubeCalib:
 
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
-
-        self._backend = Qube()
-
-        # polymorphic methods
-        self.append_sequence = self.backend.append_sequence
-
-    @property
-    def backend(self) -> Backend:
-        return self._backend
 
     @property
     def system_config_database(self) -> SystemConfigDatabase:
