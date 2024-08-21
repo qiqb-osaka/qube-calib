@@ -1786,6 +1786,7 @@ class Executor:
         # ワークキューが空になったら実行を止める
         if not self._work_queue:
             self.check_config()
+            self._boxpool._box_config_cache.clear()
             self._boxpool = BoxPool()
             self.clear_log()
             raise StopIteration()
@@ -1822,6 +1823,11 @@ class Executor:
                         clock_ns,
                     )
                 )
+                if not self._work_queue:
+                    self.check_config()
+                    self._boxpool._box_config_cache.clear()
+                    self._boxpool = BoxPool()
+                    self.clear_log()
                 return status, iqs, config
         # これ以上 Sequencer がなければ残りのコマンドを実行する
         status, iqs, config = next.execute(self._boxpool)
@@ -1841,6 +1847,11 @@ class Executor:
         )
         for command in self._work_queue:
             command.execute(self._boxpool)
+        if not self._work_queue:
+            self.check_config()
+            self._boxpool._box_config_cache.clear()
+            self._boxpool = BoxPool()
+            self.clear_log()
         return status, iqs, config
 
     def check_config(self) -> None:
