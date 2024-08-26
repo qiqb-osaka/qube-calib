@@ -1141,7 +1141,7 @@ class PortConfigAcquirer:
         if "runits" in dp:
             fnco_freq = dp["runits"][channel]["fnco_freq"]
         sideband = dp["sideband"] if "sideband" in dp else "U"
-        self.lo_freq: float = dp["lo_freq"]
+        self.lo_freq: float = dp["lo_freq"] if "lo_freq" in dp else 0
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
         self.sideband: str = sideband
