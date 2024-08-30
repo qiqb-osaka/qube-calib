@@ -1003,7 +1003,6 @@ class Converter:
             f_diff = -(f_target - f_lo) - (f_cnco + f_fnco)
         else:
             raise ValueError("invalid ssb mode")
-
         if 0.25 < abs(f_diff):
             raise ValueError("modulation frequency is too high")
 
@@ -1141,7 +1140,19 @@ class PortConfigAcquirer:
         if "runits" in dp:
             fnco_freq = dp["runits"][channel]["fnco_freq"]
         sideband = dp["sideband"] if "sideband" in dp else "U"
-        self.lo_freq: float = dp["lo_freq"] if "lo_freq" in dp else 0
+        if box.boxtype == "quel1se-riken8":
+            if port == 1:
+                sideband = "U"
+        self.lo_freq: float = 0
+        if box.boxtype == "quel1se-riken8":
+            if port == 9:
+                self.lo_freq = dump_box[10]["lo_freq"]
+            elif "lo_freq" not in dp:
+                self.lo_freq = 0
+            else:
+                self.lo_freq = dp["lo_freq"]
+        else:
+            self.lo_freq = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
         self.sideband: str = sideband
@@ -1367,16 +1378,22 @@ class Sequencer(Command):
         }
 
         csseq = self.cap_sampled_sequence
-        first_blank = min(
-            [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
-        )
-        first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
-        # ref_sequence = next(iter(csseq.values()))
+        first_padding = 0
+        if csseq:
+            first_blank = min(
+                [
+                    seq.prev_blank
+                    for sseq in csseq.values()
+                    for seq in sseq.sub_sequences
+                ]
+            )
+            first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
+            # ref_sequence = next(iter(csseq.values()))
 
-        for target_name, cseq in self.cap_sampled_sequence.items():
-            cseq.padding = first_padding
-        for target_name, gseq in self.gen_sampled_sequence.items():
-            gseq.padding = first_padding
+            for target_name, cseq in self.cap_sampled_sequence.items():
+                cseq.padding = first_padding
+            for target_name, gseq in self.gen_sampled_sequence.items():
+                gseq.padding = first_padding
 
         csseqchains_by_target = {
             target: _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
