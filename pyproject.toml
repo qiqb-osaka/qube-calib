@@ -20,8 +20,8 @@ dependencies = [
     "matplotlib ~= 3.0",
     "tqdm ~= 4.0",
     "e7awgsw @ git+https://github.com/e-trees/e7awg_sw.git@7dccc53c",
-    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.9#subdirectory=quel_clock_master",
-    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.9#subdirectory=quel_ic_config",
+    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.10#subdirectory=quel_clock_master",
+    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.10#subdirectory=quel_ic_config",
 ]
 
 [tool.setuptools.dynamic]
