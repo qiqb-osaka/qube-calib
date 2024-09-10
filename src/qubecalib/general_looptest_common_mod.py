@@ -291,7 +291,7 @@ class PulseGen_:
         self.box: Quel1Box = box
         self.sqc: SequencerClient = sqc
 
-        self.port, self.subport = self.box.decode_port(port)
+        self.port, self.subport = self.box._decode_port(port)
         group, line = self.box._convert_any_port(port)
         if isinstance(line, str):
             raise ValueError("invalid port")
@@ -476,7 +476,7 @@ class PulseCap_:
         self.box = box
         self.sqc = sqc
 
-        self.port, self.support = self.box.decode_port(port)
+        self.port, self.support = self.box._decode_port(port)
         group, rline = self.box._convert_any_port(port)
         if isinstance(rline, int):
             raise ValueError("invalid port")

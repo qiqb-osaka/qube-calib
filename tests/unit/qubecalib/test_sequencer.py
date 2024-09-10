@@ -90,7 +90,7 @@ class Box:
             1: True,
         }
 
-    def decode_port(self, port: int) -> tuple[int, int]:
+    def _decode_port(self, port: int) -> tuple[int, int]:
         return (port, 0)
 
     def _convert_any_port(self, port: int) -> tuple[int, int | str]:
