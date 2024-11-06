@@ -1006,7 +1006,9 @@ class Converter:
             raise ValueError("invalid ssb mode")
 
         if 0.25 < abs(f_diff):
-            warnings.warn("modulation frequency is too high")
+            warnings.warn(
+                f"Modulation frequency is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
+            )
 
         return f_diff  # GHz
 
