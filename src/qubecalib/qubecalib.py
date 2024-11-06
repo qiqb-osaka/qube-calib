@@ -10,6 +10,7 @@ import os
 import pathlib
 import pickle
 import time
+import warnings
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -1005,7 +1006,9 @@ class Converter:
             raise ValueError("invalid ssb mode")
 
         if 0.25 < abs(f_diff):
-            raise ValueError("modulation frequency is too high")
+            warnings.warn(
+                f"Modulation frequency is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
+            )
 
         return f_diff  # GHz
 
