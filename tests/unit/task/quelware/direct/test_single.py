@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
+
 import pytest
-import qubecalib.task.quelware.direct.single as single
-import quel_ic_config
 from e7awgsw import CaptureParam, DspUnit, WaveSequence
-from qubecalib.task.quelware.direct.single import Awg, Runit
-from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss
+from qubecalib.task.quelware.direct.single import (
+    Action,
+    AwgId,
+    AwgSetting,
+    RunitId,
+    RunitSetting,
+    TriggerSetting,
+)
+from quel_ic_config import Quel1BoxWithRawWss
 
 PERIOD = 1280 * 128
 
@@ -25,10 +32,6 @@ CAPTURE_PARAM.add_sum_section(
 CAPTURE_PARAM.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
 
 
-def test_quel_ic_config_version() -> None:
-    assert quel_ic_config.__version__ == "0.8.10"
-
-
 def test_create_box(box: Quel1BoxWithRawWss) -> None:
     assert isinstance(box, Quel1BoxWithRawWss)
 
@@ -46,164 +49,244 @@ def create_capture_params(
     c.sel_dsp_units_to_enable(DspUnit.INTEGRATION)
 
 
-def test_run_runitonly(box: Quel1BoxWithRawWss) -> None:
-    task = single.Task(
+def test_action_runitonly(box: Quel1BoxWithRawWss) -> None:
+    a = Action.build(
         box=box,
         settings=[
-            single.RunitSetting(runit=Runit(port=1, runit=0), cprm=CAPTURE_PARAM),
-            single.RunitSetting(runit=Runit(port=12, runit=0), cprm=CAPTURE_PARAM),
-            single.RunitSetting(runit=Runit(port=12, runit=1), cprm=CAPTURE_PARAM),
-            single.RunitSetting(runit=Runit(port=12, runit=2), cprm=CAPTURE_PARAM),
-            single.RunitSetting(runit=Runit(port=12, runit=3), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=1, runit=0), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=0), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=1), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=2), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=3), cprm=CAPTURE_PARAM),
         ],
     )
-    assert task._runits_by_ports == {1: [0], 12: [0, 1, 2, 3]}
-    assert task._channels == []
-    assert task._triggers == {}
-    futures = task.run()
+    assert isinstance(a, Action)
+    assert isinstance(a.box, Quel1BoxWithRawWss)
+    assert a._wseqs == {}
+    assert a._cprms == {
+        RunitId(port=1, runit=0): CAPTURE_PARAM,
+        RunitId(port=12, runit=0): CAPTURE_PARAM,
+        RunitId(port=12, runit=1): CAPTURE_PARAM,
+        RunitId(port=12, runit=2): CAPTURE_PARAM,
+        RunitId(port=12, runit=3): CAPTURE_PARAM,
+    }
+    assert a._triggers == {}
+
+    futures = a.capture_start()
+    a.start_emission()
     assert futures.keys() == {1, 12}
-    # for port 1
-    future_1 = futures[1]
-    assert isinstance(future_1, single.Future)
-    result_1 = future_1.result()
-    assert isinstance(result_1[0], CaptureReturnCode)
-    assert result_1[1].keys() == {0}
-    for value in result_1[1].values():
-        # num_samples_to_sum なのに words_to_sum が返ってくるのは仕様か？
-        assert value.shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
-    # for port 12
-    future_12 = futures[12]
-    assert isinstance(future_12, single.Future)
-    result_12 = future_12.result()
-    assert isinstance(result_12[0], CaptureReturnCode)
-    assert result_12[1].keys() == {0, 1, 2, 3}
-    for value in result_12[1].values():
-        assert value.shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
 
+    futures_1, future_12 = futures[1], futures[12]
+    assert isinstance(futures_1, Future) and isinstance(future_12, Future)
 
-def test_run_awgonly(box: Quel1BoxWithRawWss) -> None:
-    task = single.Task(
+    results = a.capture_stop(futures)
+    assert results.keys() == {(1, 0), (12, 0), (12, 1), (12, 2), (12, 3)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 1)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 2)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 3)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+
+    a = Action.build(
         box=box,
         settings=[
-            single.AwgSetting(
-                awg=Awg(port=0, channel=0),
+            RunitSetting(runit=RunitId(port=1, runit=0), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=0), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=1), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=2), cprm=CAPTURE_PARAM),
+            RunitSetting(runit=RunitId(port=12, runit=3), cprm=CAPTURE_PARAM),
+        ],
+    )
+    results = a.capture_stop(futures)
+    assert results.keys() == {(1, 0), (12, 0), (12, 1), (12, 2), (12, 3)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 1)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 2)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert results[(12, 3)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+
+
+def test_action_awgonly(box: Quel1BoxWithRawWss) -> None:
+    a = Action.build(
+        box=box,
+        settings=[
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
                 wseq=WAVE_SEQUENCE,
             ),
-            single.AwgSetting(
-                awg=Awg(port=13, channel=0),
+            AwgSetting(
+                awg=AwgId(port=13, channel=0),
                 wseq=WAVE_SEQUENCE,
             ),
         ],
     )
-    assert task._runits_by_ports == {}
-    assert task._channels == [Awg(port=0, channel=0), Awg(port=13, channel=0)]
-    assert task._triggers == {}
-    futures = task.run()
-    assert futures is None
+    assert a._wseqs == {
+        AwgId(port=0, channel=0): WAVE_SEQUENCE,
+        AwgId(port=13, channel=0): WAVE_SEQUENCE,
+    }
+    assert a._cprms == {}
+    assert a._triggers == {}
+    futures = a.capture_start()
+    a.start_emission()
+    assert list(futures.keys()) == []
+    results = a.capture_stop(futures)
+    assert list(results.keys()) == []
 
-
-def test_run_runit_awg_notrig(box: Quel1BoxWithRawWss) -> None:
-    task = single.Task(
+    a = Action.build(
         box=box,
         settings=[
-            single.AwgSetting(
-                awg=Awg(port=0, channel=0),
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
                 wseq=WAVE_SEQUENCE,
             ),
-            single.RunitSetting(
-                runit=Runit(port=1, runit=0),
+            AwgSetting(
+                awg=AwgId(port=13, channel=0),
+                wseq=WAVE_SEQUENCE,
+            ),
+        ],
+    )
+    results = a.action()
+    assert list(results.keys()) == []
+
+
+def test_action_runit_awg_notrig(box: Quel1BoxWithRawWss) -> None:
+    a = Action.build(
+        box=box,
+        settings=[
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
+                wseq=WAVE_SEQUENCE,
+            ),
+            RunitSetting(
+                runit=RunitId(port=1, runit=0),
                 cprm=CAPTURE_PARAM,
             ),
         ],
     )
-    assert task._runits_by_ports == {1: [0]}
-    assert task._channels == [Awg(port=0, channel=0)]
-    assert task._triggers == {}
-    futures = task.run()
-    # for port 1
-    future_1 = futures[1]
-    assert isinstance(future_1, single.Future)
-    result_1 = future_1.result()
-    assert isinstance(result_1[0], CaptureReturnCode)
-    assert result_1[1].keys() == {0}
-    for value in result_1[1].values():
-        assert value.shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert a._wseqs == {AwgId(port=0, channel=0): WAVE_SEQUENCE}
+    assert a._cprms == {RunitId(port=1, runit=0): CAPTURE_PARAM}
+    assert a._triggers == {}
+    futures = a.capture_start()
+    a.start_emission()
+    assert futures.keys() == {1}
+    assert isinstance(futures[1], Future)
+    results = a.capture_stop(futures)
+    assert results.keys() == {(1, 0)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
 
-
-def test_run_runit_awg_trig(box: Quel1BoxWithRawWss) -> None:
-    task = single.Task(
+    a = Action.build(
         box=box,
         settings=[
-            single.AwgSetting(
-                awg=Awg(port=0, channel=0),
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
                 wseq=WAVE_SEQUENCE,
             ),
-            single.RunitSetting(
-                runit=Runit(port=1, runit=0),
+            RunitSetting(
+                runit=RunitId(port=1, runit=0),
                 cprm=CAPTURE_PARAM,
             ),
-            single.TriggerSetting(
+        ],
+    )
+    results = a.action()
+    assert results.keys() == {(1, 0)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+
+
+def test_action_runit_awg_trig(box: Quel1BoxWithRawWss) -> None:
+    a = Action.build(
+        box=box,
+        settings=[
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
+                wseq=WAVE_SEQUENCE,
+            ),
+            RunitSetting(
+                runit=RunitId(port=1, runit=0),
+                cprm=CAPTURE_PARAM,
+            ),
+            TriggerSetting(
                 triggerd_port=1,
-                trigger_awg=Awg(port=0, channel=0),
+                trigger_awg=AwgId(port=0, channel=0),
             ),
         ],
     )
-    assert task._runits_by_ports == {1: [0]}
-    assert task._channels == [Awg(port=0, channel=0)]
-    assert task._triggers == {1: Awg(port=0, channel=0)}
-    futures = task.run()
-    # for port 1
-    future_1 = futures[1]
-    assert isinstance(future_1, single.Future)
-    result_1 = future_1.result()
-    assert isinstance(result_1[0], CaptureReturnCode)
-    assert result_1[1].keys() == {0}
-    for value in result_1[1].values():
-        assert value.shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+    assert a._wseqs == {AwgId(port=0, channel=0): WAVE_SEQUENCE}
+    assert a._cprms == {RunitId(port=1, runit=0): CAPTURE_PARAM}
+    assert a._triggers == {1: AwgId(port=0, channel=0)}
+    futures = a.capture_start()
+    a.start_emission()
+    assert isinstance(futures[1], Future)
+    results = a.capture_stop(futures)
+    assert results.keys() == {(1, 0)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
+
+    a = Action.build(
+        box=box,
+        settings=[
+            AwgSetting(
+                awg=AwgId(port=0, channel=0),
+                wseq=WAVE_SEQUENCE,
+            ),
+            RunitSetting(
+                runit=RunitId(port=1, runit=0),
+                cprm=CAPTURE_PARAM,
+            ),
+            TriggerSetting(
+                triggerd_port=1,
+                trigger_awg=AwgId(port=0, channel=0),
+            ),
+        ],
+    )
+    results = a.action()
+    assert results.keys() == {(1, 0)}
+    assert results[(1, 0)].shape == (4 * CAPTURE_PARAM.num_samples_to_sum(0),)
 
 
-def test_run_raise_no_settings(box: Quel1BoxWithRawWss) -> None:
+def test_action_raise_no_settings(box: Quel1BoxWithRawWss) -> None:
     with pytest.raises(ValueError) as e:
-        single.Task(box=box, settings=[])
+        Action.build(box=box, settings=[])
     assert str(e.value) == "no settings provided"
 
 
-def test_run_raise_already_loaded(box: Quel1BoxWithRawWss) -> None:
-    task = single.Task(
-        box=box,
-        settings=[
-            single.RunitSetting(runit=Runit(port=1, runit=0), cprm=CAPTURE_PARAM),
-        ],
-    )
-    with pytest.raises(ValueError) as e:
-        task._load([])
-    assert str(e.value) == "already loaded"
+# def test_action_raise_already_loaded(box: Quel1BoxWithRawWss) -> None:
+#     a = Action.build(
+#         box=box,
+#         settings=[
+#             RunitSetting(runit=RunitId(port=1, runit=0), cprm=CAPTURE_PARAM),
+#         ],
+#     )
+#     with pytest.raises(ValueError) as e:
+#         a._load([])
+#     assert str(e.value) == "already loaded"
 
 
-def test_run_invalid_trigger(box: Quel1BoxWithRawWss) -> None:
+def test_action_invalid_trigger(box: Quel1BoxWithRawWss) -> None:
     # noawg for triggerd port 1
     NUM_WORDS = int(8 * 4096 / 16)
     PERIOD = 1280 * 128
     c = create_capture_params(NUM_WORDS, PERIOD)
-    task = single.Task(
+    a = Action.build(
         box=box,
         settings=[
-            single.RunitSetting(runit=Runit(port=1, runit=0), cprm=c),
-            single.RunitSetting(runit=Runit(port=1, runit=0), cprm=c),
-            single.TriggerSetting(triggerd_port=1, trigger_awg=Awg(port=0, channel=0)),
+            RunitSetting(runit=RunitId(port=1, runit=0), cprm=c),
+            RunitSetting(runit=RunitId(port=1, runit=0), cprm=c),
+            TriggerSetting(triggerd_port=1, trigger_awg=AwgId(port=0, channel=0)),
         ],
     )
     with pytest.raises(ValueError) as e:
-        task.run()
-    assert str(e.value) == "trigger awg (0, 0) for triggerd port 1 is not provided"
+        a.action()
+    assert (
+        str(e.value)
+        == "trigger AwgId(port=0, channel=0) for triggerd port 1 is not provided"
+    )
     # norunit for triggerd port 1
-    task = single.Task(
+    a = Action.build(
         box=box,
         settings=[
-            single.AwgSetting(awg=Awg(port=0, channel=0), wseq=WAVE_SEQUENCE),
-            single.TriggerSetting(triggerd_port=1, trigger_awg=Awg(port=0, channel=0)),
+            AwgSetting(awg=AwgId(port=0, channel=0), wseq=WAVE_SEQUENCE),
+            TriggerSetting(triggerd_port=1, trigger_awg=AwgId(port=0, channel=0)),
         ],
     )
     with pytest.raises(ValueError) as e:
-        task.run()
+        a.action()
     assert str(e.value) == "triggerd port 1 is not provided in runit settings"
