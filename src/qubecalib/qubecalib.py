@@ -23,6 +23,7 @@ from typing import (
     MutableMapping,
     MutableSequence,
     Optional,
+    Set,
     TypedDict,
 )
 
@@ -2309,9 +2310,38 @@ class SystemConfigDatabase:
             indent=4,
         )
 
+    def get_target_name(
+        self,
+        *,
+        box_name: str,
+    ) -> Set[tuple[str, str]]:
+        ps = self._port_settings
+        port_names = {n for n, s in ps.items() if s.box_name == box_name}
+        rcp = self._relation_channel_port
+        channel_names = {n for n, c in rcp if c["port_name"] in port_names}
+        rct = self._relation_channel_target
+        relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
+        return relation_target_channel
+
+    def get_target_by_port(
+        self,
+        *,
+        box_name: str,
+        port: int,
+    ) -> Set[tuple[str, str]]:
+        ps = self._port_settings
+        port_names = {
+            n for n, s in ps.items() if s.box_name == box_name and s.port == port
+        }
+        rcp = self._relation_channel_port
+        channel_names = {n for n, c in rcp if c["port_name"] in port_names}
+        rct = self._relation_channel_target
+        relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
+        return relation_target_channel
+
 
 def find_primary_component(
-    x: npt.NDArray[np.float], y: npt.NDArray[np.float]
+    x: npt.NDArray[np.float32], y: npt.NDArray[np.float32]
 ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], npt.NDArray[np.float32]]:
     s = np.stack([x, y])
     m = np.stack([s[0, :].mean(), s[1, :].mean()]).reshape(s.shape[0], 1)
