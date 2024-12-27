@@ -11,11 +11,12 @@ import pathlib
 import pickle
 import time
 import warnings
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
+from types import MappingProxyType
 from typing import (
     Any,
     Final,
@@ -36,6 +37,7 @@ from quel_ic_config import (
     CaptureReturnCode,
     Quel1Box,
     Quel1BoxType,
+    Quel1BoxWithRawWss,
     Quel1ConfigOption,
 )
 
@@ -55,6 +57,7 @@ from .neopulse import (
     Slot,
     Waveform,
 )
+from .task.quelware.direct import multi, single
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +133,25 @@ class QubeCalib:
                     logger.error(
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
+
+        # db = self.system_config_database
+        # if db._clockmaster_setting is None:
+        #     raise ValueError("clock master is not found")
+        # quel1system = multi.Quel1System.create(
+        #     clockmaster=QuBEMasterClient(db._clockmaster_setting.ipaddr),
+        #     boxes=[
+        #         multi.NamedBox(
+        #             name=name,
+        #             box=Quel1BoxWithRawWss.create(
+        #                 ipaddr_wss=str(db._box_settings[name].ipaddr_wss),
+        #                 boxtype=db._box_settings[name].boxtype,
+        #             ),
+        #         )
+        #         for name in boxes
+        #     ],
+        # )
+        # self._executor._quel1system = quel1system
+
         # sequencer に measurement_option を設定する
         for sequencer in self._executor.collect_sequencers():
             if sequencer.interval is None:
@@ -1007,8 +1029,9 @@ class Converter:
             raise ValueError("invalid ssb mode")
 
         if 0.25 < abs(f_diff):
+            p = port_config
             warnings.warn(
-                f"Modulation frequency is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
+                f"Modulation frequency of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
             )
 
         return f_diff  # GHz
@@ -1139,16 +1162,25 @@ class PortConfigAcquirer:
             boxpool._box_config_cache[box_name] = box.dump_box()
         dump_box = boxpool._box_config_cache[box_name]["ports"]
         self.dump_config = dp = dump_box[port]
+        sideband = dp["sideband"] if "sideband" in dp else "U"
         fnco_freq = 0
         if "channels" in dp:
             fnco_freq = dp["channels"][channel]["fnco_freq"]
         if "runits" in dp:
             fnco_freq = dp["runits"][channel]["fnco_freq"]
-        sideband = dp["sideband"] if "sideband" in dp else "U"
+            if port == 1:
+                sideband = dump_box[0]["sideband"] if "sideband" in dump_box[0] else "U"
+            elif port == 12:
+                sideband = (
+                    dump_box[13]["sideband"] if "sideband" in dump_box[13] else "U"
+                )
         self.lo_freq: float = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
         self.sideband: str = sideband
+        self._box_name = box_name
+        self._port = port
+        self._channel = channel
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(lo_freq={self.lo_freq}, cnco_freq={self.cnco_freq}, fnco_freq={self.fnco_freq}, sideband={self.sideband})"
@@ -1284,12 +1316,7 @@ class Sequencer(Command):
         self.software_demodulation = software_demodulation
         self.phase_compensation = phase_compensation
 
-    def execute(
-        self,
-        boxpool: BoxPool,
-    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
-        # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
-
+    def generate_cap_resource_map(self, boxpool: BoxPool) -> dict[str, Any]:
         _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
@@ -1309,11 +1336,29 @@ class Sequencer(Command):
                         _cap_resource_map[target_name].append(m)
                     else:
                         _cap_resource_map[target_name] = [m]
-        cap_resource_map: dict[str, Any] = {
+        return {
             target_name: next(iter(maps))
             for target_name, maps in _cap_resource_map.items()
             if maps
         }
+
+    def calc_first_padding(self) -> int:
+        csseq = self.cap_sampled_sequence
+        first_blank = min(
+            [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
+        )
+        return ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
+
+    def generate_e7_settings(
+        self,
+        boxpool: BoxPool,
+    ) -> tuple[
+        dict[tuple[str, int, int], CaptureParam],
+        dict[tuple[str, int, int], WaveSequence],
+        dict[str, Any],
+    ]:
+        # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
+        cap_resource_map = self.generate_cap_resource_map(boxpool)
         _gen_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
@@ -1370,24 +1415,17 @@ class Sequencer(Command):
             for target_name, m in cap_target_bpc.items()
         }
 
-        csseq = self.cap_sampled_sequence
-        first_blank = min(
-            [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
-        )
-        first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
+        # first_blank = min(
+        #     [seq.prev_blank for sseq in csseq.values() for seq in sseq.sub_sequences]
+        # )
+        # first_padding = ((first_blank - 1) // 64 + 1) * 64 - first_blank  # Sa
         # ref_sequence = next(iter(csseq.values()))
+        first_padding = self.calc_first_padding()
 
         for target_name, cseq in self.cap_sampled_sequence.items():
             cseq.padding = first_padding
         for target_name, gseq in self.gen_sampled_sequence.items():
             gseq.padding = first_padding
-
-        csseqchains_by_target = {
-            target: _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
-                seq,
-            )
-            for target, seq in csseq.items()
-        }
 
         interval = self.interval if self.interval is not None else 10240
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
@@ -1404,14 +1442,6 @@ class Sequencer(Command):
                 software_demodulation=self.software_demodulation,
             )
         )
-        cap_fmod = {
-            target_name: sequence.modulation_frequency
-            for target_name, sequence in self.cap_sampled_sequence.items()
-        }
-        reference_time_list_by_target = {
-            target: list(np.cumsum(np.array([v for v in chain if v is not None]))[::2])
-            for target, chain in csseqchains_by_target.items()
-        }
         # phase_offset_list_by_target = {
         #     target: [-2 * np.pi * cap_fmod[target] * t for t in reference_time_list]
         #     for target, reference_time_list in reference_time_list_by_target.items()
@@ -1437,6 +1467,115 @@ class Sequencer(Command):
                 interval=interval,
             )
         )
+        return cap_e7_settings, gen_e7_settings, cap_resource_map
+
+    def execute(
+        self,
+        boxpool: BoxPool,
+    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
+        quel1system = self.create_quel1system(boxpool)
+        # ) -> dict[tuple[str, int, int], npt.NDArray[np.complex64]]:
+        c, g, m = self.generate_e7_settings(boxpool)
+        # print(m)
+        settings: dict[
+            str, list[single.RunitSetting | single.AwgSetting | single.TriggerSetting]
+        ] = defaultdict(list)
+        for (name, port, runit), cprm in c.items():
+            settings[name].append(
+                single.RunitSetting(single.RunitId(port, runit), cprm)
+            )
+        for (name, port, channel), wseq in g.items():
+            settings[name].append(single.AwgSetting(single.AwgId(port, channel), wseq))
+        settings = self.select_trigger(quel1system, settings)
+        box_settings = [
+            multi.BoxSetting(name, setting) for name, setting in settings.items()
+        ]
+        a = multi.Action.build(quel1system=quel1system, settings=box_settings)
+        # TODO check operation for CLASSIFICATION option
+        status, results = a.action()
+        return self.parse_capture_results(status, results, a._actions, m)
+
+    def parse_capture_results(
+        self,
+        status: dict[tuple[str, int], CaptureReturnCode],
+        results: dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+        actions: MappingProxyType[str, single.Action],
+        crmap: dict[str, Any],
+    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
+        bpc2target = {}
+        for target, m in crmap.items():
+            box, port, channel = m["box"].box_name, m["port"].port, m["channel_number"]
+            bpc2target[(box, port, channel)] = target
+        # status = {}
+        # for (box, port), code in status.items():
+        #     status[(box, port)] = code
+        data = {}
+        for (box, port, runit), datum in results.items():
+            data[(box, port, runit)] = datum
+        cprms = {}
+        for box, action in actions.items():
+            for (port, runit), cprm in action._cprms.items():
+                cprms[(box, port, runit)] = cprm
+        rstatus, rresults = {}, {}
+        for (box, port, runit), target in bpc2target.items():
+            s, r = self.parse_capture_result(
+                status[(box, port)],
+                data[(box, port, runit)],
+                cprms[(box, port, runit)],
+            )
+            target = bpc2target[(box, port, runit)]
+            rstatus[target] = s
+            rresults[target] = r
+        return rstatus, rresults, {}
+
+    def parse_capture_result(
+        self,
+        status: CaptureReturnCode,
+        data: npt.NDArray[np.complex64],
+        cprm: CaptureParam,
+    ) -> tuple[CaptureReturnCode, list[npt.NDArray[np.complex64]]]:
+        # num_expected_words = cprm.calc_capture_samples()
+        if DspUnit.INTEGRATION in cprm.dsp_units_enabled:
+            data = data.reshape(1, -1)
+        else:
+            data = data.reshape(cprm.num_integ_sections, -1)
+        if DspUnit.SUM in cprm.dsp_units_enabled:
+            width = list(range(len(cprm.sum_section_list))[1:])
+            result = np.hsplit(data, width)
+        else:
+            b = DspUnit.SUM not in cprm.dsp_units_enabled
+            ssl = cprm.sum_section_list
+            ws = [w if b else int(w / 4) for w in ssl[:-1]]
+            word = cprm.NUM_SAMPLES_IN_ADC_WORD
+            width = np.cumsum(np.array(ws))
+            c = np.hsplit(data, width * word)
+            result = [di.transpose() for di in c]
+        return status, result
+
+    def execute_old(
+        self,
+        boxpool: BoxPool,
+    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
+        cap_e7_settings, gen_e7_settings, cap_resource_map = self.generate_e7_settings(
+            boxpool
+        )
+        cap_fmod = {
+            target_name: sequence.modulation_frequency
+            for target_name, sequence in self.cap_sampled_sequence.items()
+        }
+        first_padding = self.calc_first_padding()
+        csseq = self.cap_sampled_sequence
+        csseqchains_by_target = {
+            target: _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
+                seq,
+            )
+            for target, seq in csseq.items()
+        }
+        reference_time_list_by_target = {
+            target: list(np.cumsum(np.array([v for v in chain if v is not None]))[::2])
+            for target, chain in csseqchains_by_target.items()
+        }
+        # just for information
         gen_fmod = {
             target_name: sequence.modulation_frequency
             for target_name, sequence in self.gen_sampled_sequence.items()
@@ -1458,6 +1597,7 @@ class Sequencer(Command):
                 channel=channel,
                 waveseq=e7,
             )
+        pg._pulsecap = pc
         for o in list(pg.pulsegens) + list(pc.pulsecaps):
             o.init()
         bpc_capmod = {(_.box_name, _.port, _.channel): _.capmod for _ in pc.pulsecaps}
@@ -1634,6 +1774,105 @@ class Sequencer(Command):
                 )
         else:
             raise ValueError("this setting is not supported yet")
+
+    def create_quel1system(self, boxpool: BoxPool) -> multi.Quel1System:
+        quel1system = multi.Quel1System.create(
+            clockmaster=boxpool._clock_master,
+            boxes=[
+                multi.NamedBox(
+                    name,
+                    Quel1BoxWithRawWss.create(
+                        ipaddr_wss=box._dev.wss._wss_addr,
+                        boxtype=box._dev.boxtype,
+                    ),
+                )
+                for name, (box, _) in boxpool._boxes.items()
+            ],
+        )
+        for box in quel1system.boxes.values():
+            box.reconnect()
+        return quel1system
+
+    def convert(
+        self,
+        cap_e7_settings: dict[tuple[str, int, int], CaptureParam],
+        gen_e7_settings: dict[tuple[str, int, int], WaveSequence],
+    ) -> dict[
+        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
+    ]:
+        settings: dict[
+            str,
+            list[single.AwgSetting | single.RunitSetting | single.TriggerSetting],
+        ] = defaultdict(list)
+        for (box_name, port, runit), e7 in cap_e7_settings.items():
+            settings[box_name].append(
+                single.RunitSetting(
+                    runit=single.RunitId(port=port, runit=runit),
+                    cprm=e7,
+                )
+            )
+        for (box_name, port, channel), e7 in gen_e7_settings.items():
+            settings[box_name].append(
+                single.AwgSetting(
+                    awg=single.AwgId(port=port, channel=channel),
+                    wseq=e7,
+                )
+            )
+        return settings
+
+    @staticmethod
+    def is_empty_trigger(
+        settings: dict[
+            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
+        ],
+    ) -> bool:
+        counter = 0
+        for name, setting in settings.items():
+            for s in setting:
+                if isinstance(s, single.TriggerSetting):
+                    counter += 1
+        return counter == 0
+
+    def select_trigger(
+        self,
+        quel1system: multi.Quel1System,
+        settings: dict[
+            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
+        ],
+    ) -> dict[
+        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
+    ]:
+        if not self.is_empty_trigger(settings):
+            raise ValueError("trigger is already set")
+
+        caps: list[tuple[str, int, single.RunitId]] = []
+        gens: list[tuple[str, int, single.AwgId]] = []
+        for name, box_setting in settings.items():
+            for setting in box_setting:
+                if isinstance(setting, single.RunitSetting):
+                    box = quel1system.box[name]
+                    port, subport = box._decode_port(setting.runit.port)
+                    group, rline = box._convert_any_port(port)
+                    # capmod = box.rmap.get_capture_module_of_rline(group, rline)
+                    caps.append((name, group, setting.runit))
+                elif isinstance(setting, single.AwgSetting):
+                    port, subport = box._decode_port(setting.awg.port)
+                    group, rline = box._convert_any_port(port)
+                    gens.append((name, group, setting.awg))
+        for runit_name, runit_group, runit_id in caps:
+            for awg_name, awg_group, awg_id in gens:
+                if runit_name == awg_name and runit_group == awg_group:
+                    settings[runit_name].append(
+                        single.TriggerSetting(
+                            triggerd_port=runit_id.port,
+                            trigger_awg=awg_id,
+                        )
+                    )
+                    break
+            else:
+                # TODO 別の group の trigger を割り当てるようにチャレンジする
+                raise ValueError("invalid trigger")
+        return settings
 
     @classmethod
     def convert_key_from_bmu_to_target(
@@ -1812,14 +2051,17 @@ class Executor:
         for command in self._work_queue:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
-                status, iqs, config = next.execute(self._boxpool)
+                # if self._quel1system is None:
+                #     raise ValueError("Quel1System is not defined")
+                # status, iqs, config = next.execute(self._boxpool, self._quel1system)
+                results = next.execute(self._boxpool)
                 user_name = getpass.getuser()
                 current_pyfile = os.path.abspath(__file__)
                 date_time = datetime.datetime.now()
                 clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
                 self._config_buffer.append(
                     (
-                        config,
+                        # config,
                         user_name,
                         current_pyfile,
                         __version__,
@@ -1832,16 +2074,21 @@ class Executor:
                     self._boxpool._box_config_cache.clear()
                     self._boxpool = BoxPool()
                     self.clear_log()
-                return status, iqs, config
+                # return status, iqs, config
+                return results
         # これ以上 Sequencer がなければ残りのコマンドを実行する
-        status, iqs, config = next.execute(self._boxpool)
+        # if self._quel1system is None:
+        #     raise ValueError("Quel1System is not defined")
+        # status, iqs, config = next.execute(self._boxpool, self._quel1system)
+        results = next.execute(self._boxpool)
+        # status, iqs, config = next.execute(self._boxpool)
         user_name = getpass.getuser()
         current_pyfile = os.path.abspath(__file__)
         date_time = datetime.datetime.now()
         clock_ns = time.clock_gettime_ns(time.CLOCK_REALTIME)
         self._config_buffer.append(
             (
-                config,
+                # config,
                 user_name,
                 current_pyfile,
                 __version__,
@@ -1856,7 +2103,8 @@ class Executor:
             self._boxpool._box_config_cache.clear()
             self._boxpool = BoxPool()
             self.clear_log()
-        return status, iqs, config
+        # return status, iqs, config
+        return results
 
     def check_config(self) -> None:
         box_configs = {
