@@ -182,17 +182,27 @@ class Action:
                 Future[tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]],
             ],
         ],
-    ) -> dict[tuple[str, int, int], npt.NDArray[np.complex64]]:
+    ) -> tuple[
+        dict[tuple[str, int], CaptureReturnCode],
+        dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+    ]:
         box_results = {}
         for name, future in futures.items():
             box_results[name] = self._actions[name].capture_stop(future)
-        results = {}
-        for name, box_result in box_results.items():
-            for (port, channel), value in box_result.items():
-                results[(name, port, channel)] = value
-        return results
+        status, data = {}, {}
+        for name, (box_status, box_data) in box_results.items():
+            for port, capt_return_code in box_status.items():
+                status[(name, port)] = capt_return_code
+            for (port, runit), runit_data in box_data.items():
+                data[(name, port, runit)] = runit_data
+        return status, data
 
-    def action(self) -> dict[tuple[str, int, int], npt.NDArray[np.complex64]]:
+    def action(
+        self,
+    ) -> tuple[
+        dict[tuple[str, int], CaptureReturnCode],
+        dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+    ]:
         futures = self.capture_start()
         self.emit_at()
         results = self.capture_stop(futures)
@@ -235,81 +245,3 @@ class Action:
             t = base_time + self._estimated_timediff[name]
             action.box.reserve_emission(set(action._wseqs.keys()), t)
             logger.warning(f"reserving emission of {name} at {t}")
-
-
-# class Counters:
-#     SYSREF_PERIOD: Final[int] = SYSREF_PERIOD
-#     DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
-
-#     def __init__(self) -> None:
-#         pass
-
-#     @classmethod
-#     def build(cls, box: Quel1BoxWithRawWss) -> Counters:
-#         return cls()
-
-
-# class BoxAction:
-#     SYSREF_PERIOD: Final[int] = SYSREF_PERIOD
-#     DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
-
-#     def __init__(
-#         self,
-#         box: Quel1BoxWithRawWss,
-#         single_action: single.Action,
-#         # bitmap: int,
-#     ) -> None:
-#         self._box: Final[Quel1BoxWithRawWss] = box
-#         self._single_action: Final[single.Action] = single_action
-#         # self._estimated_timediff: Optional[int] = None
-
-#     @property
-#     def box(self) -> Quel1BoxWithRawWss:
-#         return self._box
-
-#     @classmethod
-#     def build(
-#         cls,
-#         *,
-#         box: Quel1BoxWithRawWss,
-#         settings: list[AwgSetting | RunitSetting | TriggerSetting],
-#     ) -> BoxAction:
-#         single_action = single.Action.build(box=box, settings=settings)
-#         current_time, last_sysref_time = box.read_current_and_latched_clock()
-#         logger.warning(
-#             f"clock of {box.wss._wss_addr}, current: {current_time}, last sysref: {last_sysref_time}, last sysref period: {cls._mod_by_sysref(last_sysref_time)}"
-#         )
-#         return cls(box, single_action)
-
-#     @classmethod
-#     def _mod_by_sysref(cls, t: int) -> int:
-#         h = cls.SYSREF_PERIOD // 2
-#         return (t + h) % cls.SYSREF_PERIOD - h
-
-#     def _estimate_timediff(self, cap_sysref_time_offset: int) -> None:
-#         if self._sysref_time_offset is None:
-#             raise ValueError("no sysref time offset is measured")
-#         self._estimated_timediff = self._sysref_time_offset - cap_sysref_time_offset
-
-#     def reserve_emission(
-#         self, base_time: int, estimated_timediff: int, time_to_start: int
-#     ) -> None:
-#         if self._estimated_timediff is None:
-#             raise ValueError("no sysref time offset is measured")
-#         logger.warning(
-#             f"measured timediff of {self.box.wss._wss_addr} at {self._estimated_timediff}"
-#         )
-#         ts = base_time + self._estimated_timediff  # * self.SYSREF_PERIOD
-
-#         current_time, last_sysref_time = self._box.read_current_and_latched_clock()
-#         logger.warning(
-#             f"clock of {self.box.wss._wss_addr}: current: {current_time}, last sysref: {self._mod_by_sysref(last_sysref_time)}"
-#         )
-#         logger.warning(f"reserving emission of {self.box.wss._wss_addr} at {ts}")
-#         a = self._single_action
-#         # channels = set([awg_spec for awg_spec in a._wseqs])
-#         a.box.reserve_emission(self.channels, ts, skip_validation=False)
-
-#     @property
-#     def channels(self) -> list[single.AwgId]:
-#         return list(self._single_action._wseqs.keys())

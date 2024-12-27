@@ -150,20 +150,22 @@ class Action:
 
     def capture_stop(
         self, futures: dict[int, Future]
-    ) -> dict[tuple[int, int], npt.NDArray[np.complex64]]:
-        results = {}
+    ) -> tuple[
+        dict[int, CaptureReturnCode], dict[tuple[int, int], npt.NDArray[np.complex64]]
+    ]:
+        status, data = {}, {}
         for port, future in futures.items():
             capt_return_code, runit_data = future.result()
-            if capt_return_code is not CaptureReturnCode.SUCCESS:
-                raise ValueError(
-                    f"Capture failed at port (= {port}) . {capt_return_code}"
-                )
-            for runit, data in runit_data.items():
-                results[(port, runit)] = data
+            status[port] = capt_return_code
+            for runit, d in runit_data.items():
+                data[(port, runit)] = d
+        return status, data
 
-        return results
-
-    def action(self) -> dict[tuple[int, int], npt.NDArray[np.complex64]]:
+    def action(
+        self,
+    ) -> tuple[
+        dict[int, CaptureReturnCode], dict[tuple[int, int], npt.NDArray[np.complex64]]
+    ]:
         futures = self.capture_start()
         self.start_emission()
         return self.capture_stop(futures)
