@@ -1487,13 +1487,24 @@ class Sequencer(Command):
         for (name, port, channel), wseq in g.items():
             settings[name].append(single.AwgSetting(single.AwgId(port, channel), wseq))
         settings = self.select_trigger(quel1system, settings)
-        box_settings = [
-            multi.BoxSetting(name, setting) for name, setting in settings.items()
-        ]
-        a = multi.Action.build(quel1system=quel1system, settings=box_settings)
-        # TODO check operation for CLASSIFICATION option
-        status, results = a.action()
-        return self.parse_capture_results(status, results, a._actions, m)
+        if len(settings) == 0:
+            raise ValueError("no settings")
+        elif len(settings) == 1:
+            name = next(iter(settings))
+            a1 = single.Action.build(box=quel1system.box[name], settings=settings[name])
+            s, r = a1.action()
+            status = {(name, i): si for i, si in s.items()}
+            results = {(name, i, j): rij for (i, j), rij in r.items()}
+            actions = MappingProxyType({name: a1})
+        else:
+            box_settings = [
+                multi.BoxSetting(name, setting) for name, setting in settings.items()
+            ]
+            am = multi.Action.build(quel1system=quel1system, settings=box_settings)
+            # TODO check operation for CLASSIFICATION option
+            status, results = am.action()
+            actions = am._actions
+        return self.parse_capture_results(status, results, actions, m)
 
     def parse_capture_results(
         self,

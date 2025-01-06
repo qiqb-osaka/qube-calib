@@ -70,6 +70,7 @@ class Action:
         MappingProxyType[RunitId, CaptureParam],
         MappingProxyType[int, AwgId],
     ]:
+        # ValueError 1
         if not settings:
             raise ValueError("no settings provided")
         wseqs, cprms, triggers = {}, {}, {}
@@ -82,6 +83,33 @@ class Action:
                 triggers[setting.triggerd_port] = setting.trigger_awg
             else:
                 raise ValueError(f"unsupported setting: {setting}")
+        # wseqs, cprms, triggers
+        # False, False, False -> ValueError 1
+        # True,  False, False
+        # False, True,  False
+        # True,  True,  False -> ValueError 2
+        # False, False, True  -> ValueError 3
+        # True,  False, True  -> ValueError 3
+        # False, True,  True  -> ValueError 4
+        # True,  True,  True
+        # ValueError 2
+        if all([any(wseqs), any(cprms), not any(triggers)]):
+            raise ValueError("both wseqs and cprms are provided without triggers")
+        if triggers:
+            cap_ports = {runit.port for runit in cprms}
+            for port in triggers:
+                # ValueError 3
+                if port not in cap_ports:
+                    raise ValueError(
+                        f"triggerd port {port} is not provided in runit settings"
+                    )
+            awgs = set(wseqs.keys())
+            for port, awg in triggers.items():
+                # ValueError 4
+                if awg not in awgs:
+                    raise ValueError(
+                        f"trigger {awg} for triggerd port {port} is not provided"
+                    )
         return (
             MappingProxyType(wseqs),
             MappingProxyType(cprms),
@@ -166,9 +194,24 @@ class Action:
     ) -> tuple[
         dict[int, CaptureReturnCode], dict[tuple[int, int], npt.NDArray[np.complex64]]
     ]:
-        futures = self.capture_start()
-        self.start_emission()
-        return self.capture_stop(futures)
+        # wseqs, cprms, triggers
+        # True,  False, False -> AWG only
+        # False, True,  False -> Capture only
+        # True,  True,  True  -> Triggered Capture
+        # Triggered Capture
+        if all([any(self._wseqs), any(self._cprms), any(self._triggers)]):
+            futures = self.capture_start()
+            self.start_emission()
+            return self.capture_stop(futures)
+        # Awg only
+        elif all([any(self._wseqs), not any(self._cprms), not any(self._triggers)]):
+            self.start_emission()
+            return {}, {}
+        # Capture only
+        elif all([not any(self._cprms), any(self._cprms), not any(self._triggers)]):
+            raise ValueError("This mode is not implemented yet")
+        else:
+            raise ValueError("unsupported action")  # 基本的には起こらないはず
 
     # box を変更されたくないので getter を用意し setter は用意しない
     # 細かな制御は直接 box を操作することで行う

@@ -62,7 +62,7 @@ class Quel1System:
 class Action:
     SYSREF_PERIOD: Final[int] = 2_000
     TIMING_OFFSET: Final[int] = 0
-    MIN_TIME_OFFSET = 3 * 12_500_000
+    MIN_TIME_OFFSET = 12_500_000
     DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
 
     def __init__(
@@ -238,6 +238,7 @@ class Action:
 
         base_time = current_time + min_time_offset
         tamate_offset = (16 - (base_time - self._ref_sysref_time_offset) % 16) % 16
+        # tamate_offset = (base_time - self._ref_sysref_time_offset) % 16
         base_time += tamate_offset
         base_time += displacement  # inducing clock displacement for performance evaluation (must be 0 usually).
         base_time += self.TIMING_OFFSET
