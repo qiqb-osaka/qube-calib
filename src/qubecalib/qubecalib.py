@@ -1870,6 +1870,9 @@ class Sequencer(Command):
                     port, subport = box._decode_port(setting.awg.port)
                     group, rline = box._convert_any_port(port)
                     gens.append((name, group, setting.awg))
+        # もし capture のみあるいは awgs のみなら tigger は設定しない
+        if all([any(caps), not any(gens)]) or all([not any(caps), any(gens)]):
+            return settings
         for runit_name, runit_group, runit_id in caps:
             for awg_name, awg_group, awg_id in gens:
                 if runit_name == awg_name and runit_group == awg_group:

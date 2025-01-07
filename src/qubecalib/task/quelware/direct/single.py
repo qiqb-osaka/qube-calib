@@ -208,8 +208,9 @@ class Action:
             self.start_emission()
             return {}, {}
         # Capture only
-        elif all([not any(self._cprms), any(self._cprms), not any(self._triggers)]):
-            raise ValueError("This mode is not implemented yet")
+        elif all([not any(self._wseqs), any(self._cprms), not any(self._triggers)]):
+            futures = self.capture_start()
+            return self.capture_stop(futures)
         else:
             raise ValueError("unsupported action")  # 基本的には起こらないはず
 
