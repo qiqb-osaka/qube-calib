@@ -35,7 +35,6 @@ from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
     CaptureReturnCode,
-    Quel1Box,
     Quel1BoxType,
     Quel1BoxWithRawWss,
     Quel1ConfigOption,
@@ -402,7 +401,7 @@ class QubeCalib:
         self,
         box_name: str,
         reconnect: bool = True,
-    ) -> Quel1Box:
+    ) -> Quel1BoxWithRawWss:
         return self.system_config_database.create_box(
             box_name=box_name,
             reconnect=reconnect,
@@ -1142,7 +1141,7 @@ class Command:
 
 
 class TargetBPC(TypedDict):
-    box: Quel1Box
+    box: Quel1BoxWithRawWss
     port: int | tuple[int, int]
     channel: int
     box_name: str
@@ -1153,7 +1152,7 @@ class PortConfigAcquirer:
         self,
         boxpool: BoxPool,
         box_name: str,
-        box: Quel1Box,
+        box: Quel1BoxWithRawWss,
         port: int | tuple[int, int],
         channel: int,
     ):
@@ -1792,16 +1791,11 @@ class Sequencer(Command):
             boxes=[
                 multi.NamedBox(
                     name,
-                    Quel1BoxWithRawWss.create(
-                        ipaddr_wss=box._dev.wss._wss_addr,
-                        boxtype=box._dev.boxtype,
-                    ),
+                    box,
                 )
                 for name, (box, _) in boxpool._boxes.items()
             ],
         )
-        for box in quel1system.boxes.values():
-            box.reconnect()
         return quel1system
 
     def convert(
@@ -2508,9 +2502,9 @@ class SystemConfigDatabase:
         self,
         box_name: str,
         reconnect: bool = True,
-    ) -> Quel1Box:
+    ) -> Quel1BoxWithRawWss:
         s = self._box_settings[box_name]
-        box = Quel1Box.create(
+        box = Quel1BoxWithRawWss.create(
             ipaddr_wss=str(s.ipaddr_wss),
             ipaddr_sss=str(s.ipaddr_sss),
             ipaddr_css=str(s.ipaddr_css),

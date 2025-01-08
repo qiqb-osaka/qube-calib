@@ -13,8 +13,8 @@ from e7awgsw import CaptureParam, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
     CaptureReturnCode,
-    Quel1Box,
     Quel1BoxType,
+    Quel1BoxWithRawWss,
     Quel1ConfigOption,
 )
 
@@ -31,7 +31,7 @@ class BoxPool:
         self._clock_master = (
             None  # QuBEMasterClient(settings["CLOCK_MASTER"]["ipaddr"])
         )
-        self._boxes: dict[str, tuple[Quel1Box, SequencerClient]] = {}
+        self._boxes: dict[str, tuple[Quel1BoxWithRawWss, SequencerClient]] = {}
         self._linkstatus: dict[str, bool] = {}
         self._estimated_timediff: dict[str, int] = {}
         self._cap_sysref_time_offset: int = 0
@@ -75,8 +75,8 @@ class BoxPool:
         boxtype: Quel1BoxType,
         config_root: Optional[Path],
         config_options: Optional[Collection[Quel1ConfigOption]] = None,
-    ) -> Quel1Box:
-        box = Quel1Box.create(
+    ) -> Quel1BoxWithRawWss:
+        box = Quel1BoxWithRawWss.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
@@ -146,7 +146,7 @@ class BoxPool:
     def get_box(
         self,
         name: str,
-    ) -> tuple[Quel1Box, SequencerClient]:
+    ) -> tuple[Quel1BoxWithRawWss, SequencerClient]:
         if name in self._boxes:
             box, sqc = self._boxes[name]
             return box, sqc
@@ -163,7 +163,7 @@ class BoxPool:
 @dataclass
 class Resource:
     name: str
-    box: Quel1Box
+    box: Quel1BoxWithRawWss
     sqc: SequencerClient
     awgs: set[int]
     awgbitmap: int
@@ -179,6 +179,7 @@ class PulseGen:
     ) -> None:
         self.boxpool = boxpool
         self.pulsegens: MutableSequence[PulseGen_] = []
+        self._pulsecap: Optional[PulseCap] = None
 
     def create(
         self,
@@ -288,7 +289,7 @@ class PulseGen_:
             )
 
         self.box_name: str = box_name
-        self.box: Quel1Box = box
+        self.box: Quel1BoxWithRawWss = box
         self.sqc: SequencerClient = sqc
 
         self.port, self.subport = self.box._decode_port(port)
