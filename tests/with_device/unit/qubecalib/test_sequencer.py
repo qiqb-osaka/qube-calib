@@ -4,8 +4,6 @@ from typing import Any, Type
 
 from e7awgsw import AWG, CaptureUnit, WaveSequence
 from pytest_mock import MockerFixture
-from quel_ic_config import Quel1BoxType
-
 from qubecalib.general_looptest_common_mod import BoxPool
 from qubecalib.neopulse import (
     DEFAULT_SAMPLING_PERIOD,
@@ -22,6 +20,7 @@ from qubecalib.qubecalib import (
     PortSetting,
     Sequencer,
 )
+from quel_ic_config import Quel1BoxType
 
 
 class ResourceMap:
@@ -194,7 +193,7 @@ def test_execute(mocker: MockerFixture) -> None:
 
     boxpool = BoxPool()
 
-    sequencer.execute(boxpool)
+    sequencer.execute_old(boxpool)
 
 
 def test_execute_backward_compat(mocker: MockerFixture) -> None:
@@ -265,7 +264,7 @@ def test_execute_backward_compat(mocker: MockerFixture) -> None:
 
     boxpool = BoxPool()
 
-    sequencer.execute(boxpool)
+    sequencer.execute_old(boxpool)
 
 
 def property_of_capture_slot(
@@ -680,7 +679,7 @@ def test_make_e7_settings(mocker: MockerFixture) -> None:
 
     boxpool = BoxPool()
 
-    status, iqs, config = sequencer.execute(boxpool)
+    status, iqs, config = sequencer.execute_old(boxpool)
 
     print()
     # group_items = (

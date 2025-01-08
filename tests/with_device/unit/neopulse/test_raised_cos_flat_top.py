@@ -1,14 +1,14 @@
-import pytest
 import numpy as np
+import pytest
 from qubecalib.neopulse import RaisedCosFlatTop, Waveform
 
 
-def test_inheritance():
+def test_inheritance() -> None:
     """RaisedCosFlatTop should inherit from Waveform."""
     assert issubclass(RaisedCosFlatTop, Waveform)
 
 
-def test_empty_init():
+def test_empty_init() -> None:
     """RaisedCosFlatTop should initialize with no arguments."""
     wf = RaisedCosFlatTop()
     assert wf.duration is None
@@ -16,7 +16,7 @@ def test_empty_init():
     assert wf.rise_time == 0.0
 
 
-def test_init():
+def test_init() -> None:
     """RaisedCosFlatTop should initialize with arguments."""
     wf = RaisedCosFlatTop(duration=10.0, amplitude=0.5, rise_time=2.0)
     assert wf.duration == 10.0
@@ -24,7 +24,7 @@ def test_init():
     assert wf.rise_time == 2.0
 
 
-def test_func():
+def test_func() -> None:
     """RaisedCosFlatTop should return the correct values."""
     duration = 30
     amplitude = 0.1
@@ -43,7 +43,7 @@ def test_func():
     assert wf.func(35.0) == 0.0
 
 
-def test_ufunc():
+def test_ufunc() -> None:
     """RaisedCosFlatTop should return the correct samples."""
     duration = 8
     amplitude = 2

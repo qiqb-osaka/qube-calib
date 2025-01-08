@@ -14,7 +14,7 @@ from qubecalib.neopulse import (
 )
 
 
-def test_convert_to_sampled_sequence():
+def test_convert_to_sampled_sequence() -> None:
     """Sequence should convert to sampled sequence."""
     target = "RQ00"
 
@@ -30,7 +30,7 @@ def test_convert_to_sampled_sequence():
     assert isinstance(cap_sampled_sequence, CapSampledSequence)
 
 
-def test_reuse_slot_instance():
+def test_reuse_slot_instance() -> None:
     """Slot instances should be reusable."""
     target = "RQ00"
     dt = neopulse.DEFAULT_SAMPLING_PERIOD
@@ -51,7 +51,7 @@ def test_reuse_slot_instance():
     )
 
 
-def test_gen_sampled_sequence():
+def test_gen_sampled_sequence() -> None:
     """GenSampledSequence should return the correct values."""
     target = "RQ00"
     dt = neopulse.DEFAULT_SAMPLING_PERIOD
@@ -87,7 +87,7 @@ def test_gen_sampled_sequence():
     }
 
 
-def test_cap_sampled_sequence():
+def test_cap_sampled_sequence() -> None:
     """CapSampledSequence should return the correct values."""
     target = "RQ00"
     dt = neopulse.DEFAULT_SAMPLING_PERIOD
@@ -132,7 +132,7 @@ def test_cap_sampled_sequence():
     }
 
 
-def test_series():
+def test_series() -> None:
     """Series should add slots in series."""
     target0 = "RQ00"
     target1 = "RQ01"
@@ -194,7 +194,7 @@ def test_series():
     }
 
 
-def test_series_as_default():
+def test_series_as_default() -> None:
     """Series should be the default slot."""
     target0 = "RQ00"
     target1 = "RQ01"
@@ -217,7 +217,7 @@ def test_series_as_default():
     assert target1_sequence1 == target1_sequence2
 
 
-def test_flushleft():
+def test_flushleft() -> None:
     """Flushleft should add slots in parallel to the left."""
     target0 = "RQ00"
     target1 = "RQ01"
@@ -280,7 +280,7 @@ def test_flushleft():
     }
 
 
-def test_flushright():
+def test_flushright() -> None:
     """Flushright should add slots in parallel to the right."""
     target0 = "RQ00"
     target1 = "RQ01"

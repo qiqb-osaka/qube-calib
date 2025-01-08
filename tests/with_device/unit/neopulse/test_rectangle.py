@@ -1,28 +1,28 @@
-import pytest
 import numpy as np
+import pytest
 from qubecalib.neopulse import Rectangle, Waveform
 
 
-def test_inheritance():
+def test_inheritance() -> None:
     """RaisedCosFlatTop should inherit from Waveform."""
     assert issubclass(Rectangle, Waveform)
 
 
-def test_empty_init():
+def test_empty_init() -> None:
     """Rectangle should initialize with no arguments."""
     wf = Rectangle()
     assert wf.duration is None
     assert wf.amplitude == 1.0
 
 
-def test_init():
+def test_init() -> None:
     """Rectangle should initialize with arguments."""
     wf = Rectangle(duration=10.0, amplitude=0.5)
     assert wf.duration == 10.0
     assert wf.amplitude == 0.5
 
 
-def test_func():
+def test_func() -> None:
     """Rectangle should return the correct values."""
     duration = 10
     wf = Rectangle(duration=duration, amplitude=0.1)
@@ -33,7 +33,7 @@ def test_func():
     assert wf.func(15.0) == 0.0
 
 
-def test_ufunc():
+def test_ufunc() -> None:
     """Rectangle should return the correct samples."""
     duration = 8
     amplitude = 2

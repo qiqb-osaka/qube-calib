@@ -1,21 +1,20 @@
 import numpy as np
 import pytest
-
 from qubecalib.neopulse import DEFAULT_SAMPLING_PERIOD, Arbit, Waveform
 
 
-def test_inheritance():
+def test_inheritance() -> None:
     """Arbit should inherit from Waveform."""
     assert issubclass(Arbit, Waveform)
 
 
-def test_empty_init():
+def test_empty_init() -> None:
     """Arbit should not initialize with no arguments."""
     with pytest.raises(TypeError):
         Arbit()  # type: ignore
 
 
-def test_init():
+def test_init() -> None:
     """Arbit should initialize with arguments."""
     wf_list = Arbit([1, 1j])
     wf_array = Arbit(np.array([1, 1j]))
@@ -25,12 +24,12 @@ def test_init():
     assert (wf_array.iq == np.array([1, 1j])).all()
 
 
-def test_default_sampling_period():
+def test_default_sampling_period() -> None:
     """Default sampling period should be 2 ns."""
     assert DEFAULT_SAMPLING_PERIOD == 2
 
 
-def test_func():
+def test_func() -> None:
     """Arbit should return the correct samples."""
     wf = Arbit([0.1, 0.2, 0.3, 0.4, 0.5])
     wf.begin = 0
