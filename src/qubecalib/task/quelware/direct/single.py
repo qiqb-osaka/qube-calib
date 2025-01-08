@@ -93,7 +93,7 @@ class Action:
         # False, True,  True  -> ValueError 4
         # True,  True,  True
         # ValueError 2
-        if all([any(wseqs), any(cprms), not any(triggers)]):
+        if all([bool(wseqs), bool(cprms), not bool(triggers)]):
             raise ValueError("both wseqs and cprms are provided without triggers")
         if triggers:
             cap_ports = {runit.port for runit in cprms}
@@ -199,16 +199,16 @@ class Action:
         # False, True,  False -> Capture only
         # True,  True,  True  -> Triggered Capture
         # Triggered Capture
-        if all([any(self._wseqs), any(self._cprms), any(self._triggers)]):
+        if all([bool(self._wseqs), bool(self._cprms), bool(self._triggers)]):
             futures = self.capture_start()
             self.start_emission()
             return self.capture_stop(futures)
         # Awg only
-        elif all([any(self._wseqs), not any(self._cprms), not any(self._triggers)]):
+        elif all([bool(self._wseqs), not bool(self._cprms), not bool(self._triggers)]):
             self.start_emission()
             return {}, {}
         # Capture only
-        elif all([not any(self._wseqs), any(self._cprms), not any(self._triggers)]):
+        elif all([not bool(self._wseqs), bool(self._cprms), not bool(self._triggers)]):
             futures = self.capture_start()
             return self.capture_stop(futures)
         else:

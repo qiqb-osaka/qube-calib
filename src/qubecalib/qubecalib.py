@@ -1499,6 +1499,7 @@ class Sequencer(Command):
             box_settings = [
                 multi.BoxSetting(name, setting) for name, setting in settings.items()
             ]
+            print(box_settings)
             am = multi.Action.build(quel1system=quel1system, settings=box_settings)
             # TODO check operation for CLASSIFICATION option
             status, results = am.action()
@@ -1865,7 +1866,7 @@ class Sequencer(Command):
                     group, rline = box._convert_any_port(port)
                     gens.append((name, group, setting.awg))
         # もし capture のみあるいは awgs のみなら tigger は設定しない
-        if all([any(caps), not any(gens)]) or all([not any(caps), any(gens)]):
+        if all([bool(caps), not bool(gens)]) or all([not bool(caps), bool(gens)]):
             return settings
         for runit_name, runit_group, runit_id in caps:
             for awg_name, awg_group, awg_id in gens:
