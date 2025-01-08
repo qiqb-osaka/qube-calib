@@ -1499,7 +1499,6 @@ class Sequencer(Command):
             box_settings = [
                 multi.BoxSetting(name, setting) for name, setting in settings.items()
             ]
-            print(box_settings)
             am = multi.Action.build(quel1system=quel1system, settings=box_settings)
             # TODO check operation for CLASSIFICATION option
             status, results = am.action()
