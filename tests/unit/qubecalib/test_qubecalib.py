@@ -1,7 +1,8 @@
 import os
+from typing import Generator
+
 import pytest
 from qubecalib import QubeCalib
-
 
 CONFIG_KEYS = {
     "clockmaster_setting",
@@ -15,7 +16,7 @@ CONFIG_KEYS = {
 
 
 @pytest.fixture(name="qc")
-def qubecalib():
+def qubecalib() -> Generator[QubeCalib, None, None]:
     """Return a QubeCalib object with a sample config file."""
     cwd = os.getcwd()  # Save the current working directory
     os.chdir(os.path.dirname(__file__))  # Change to the directory of this file
@@ -23,20 +24,20 @@ def qubecalib():
     os.chdir(cwd)  # Restore the current working directory
 
 
-def test_empty_init():
+def test_empty_init() -> None:
     """QubeCalib should initialize with no arguments."""
     qc = QubeCalib()
     config = qc.system_config_database.asdict()
     assert config.keys() == CONFIG_KEYS
 
 
-def test_error_handling_invalid_config():
+def test_error_handling_invalid_config() -> None:
     """QubeCalib should raise FileNotFoundError for invalid config file."""
     with pytest.raises(FileNotFoundError):
         QubeCalib("nonexistent_config.json")
 
 
-def test_init_with_config(qc):
+def test_init_with_config(qc: QubeCalib) -> None:
     """QuabeCalib should initialize with a configuration file."""
     config = qc.system_config_database.asdict()
     assert config.keys() == CONFIG_KEYS
@@ -52,13 +53,13 @@ def test_init_with_config(qc):
     ] in config["relation_channel_port"]
 
 
-def test_modify_target_frequency(qc):
+def test_modify_target_frequency(qc: QubeCalib) -> None:
     """modify_target_frequency should change the frequency of a target."""
     qc.modify_target_frequency("CQ00_0", 7.5e9)
     assert qc.get_target_info("CQ00_0")["target_frequency"] == 7500000000.0
 
 
-def test_define_clockmaster():
+def test_define_clockmaster() -> None:
     """define_clockmaster should set the clockmaster settings."""
     qc = QubeCalib()
     ipaddr = "10.3.0.255"
@@ -67,7 +68,7 @@ def test_define_clockmaster():
     assert clockmaster_setting["ipaddr"] == ipaddr
 
 
-def test_define_box():
+def test_define_box() -> None:
     """define_box should set the box settings."""
     qc = QubeCalib()
     box_name1 = "BOX_NAME_1"
@@ -83,7 +84,7 @@ def test_define_box():
     assert box_settings[box_name2]["ipaddr_wss"] == ipaddr2
 
 
-def test_define_port():
+def test_define_port() -> None:
     """define_port should set the port settings."""
     qc = QubeCalib()
     box_name_1 = "BOX_NAME_1"
@@ -99,7 +100,7 @@ def test_define_port():
     assert port_settings[port_name2]["port"] == port_number2
 
 
-def test_define_channel():
+def test_define_channel() -> None:
     """define_channel should set the channel settings."""
     qc = QubeCalib()
     qc.define_port(port_name="PORT", box_name="BOX", port_number=5)
@@ -111,7 +112,7 @@ def test_define_channel():
     ) in relation_channel_port
 
 
-def test_define_target():
+def test_define_target() -> None:
     """define_target should set the target settings."""
     qc = QubeCalib()
     qc.define_target(
