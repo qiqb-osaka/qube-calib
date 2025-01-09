@@ -1877,8 +1877,17 @@ class Sequencer(Command):
                         )
                     )
                     break
+            # 別の group の trigger を割り当てるようにチャレンジ
+            for awg_name, awg_group, awg_id in gens:
+                if runit_name == awg_name:
+                    settings[runit_name].append(
+                        single.TriggerSetting(
+                            triggerd_port=runit_id.port,
+                            trigger_awg=awg_id,
+                        )
+                    )
+                    break
             else:
-                # TODO 別の group の trigger を割り当てるようにチャレンジする
                 raise ValueError("invalid trigger")
         return settings
 

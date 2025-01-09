@@ -87,7 +87,7 @@ class Action:
         settings: list[BoxSetting],
     ) -> Action:
         master = quel1system._clockmaster
-        logger.warning(f"clock of master: {master.read_clock()}")
+        logger.info(f"clock of master: {master.read_clock()}")
         actions: dict[str, single.Action] = {}
         for box_settings in settings:
             name = box_settings.name
@@ -99,7 +99,7 @@ class Action:
             ]
             box.prepare_for_emission(awg_ids)
             current_time, last_sysref_time = box.read_current_and_latched_clock()
-            logger.warning(
+            logger.info(
                 f"clock of {name}, current: {current_time}, last sysref: {last_sysref_time}, last sysref offset: {cls._mod_by_sysref(last_sysref_time)}"
             )
             actions[name] = single.Action.build(
@@ -116,7 +116,7 @@ class Action:
         estimated_timediff = {}
         for name, avgcntr in average_offsets_at_sysref_clock.items():
             estimated_timediff[name] = avgcntr - ref_sysref_time_offset
-            logger.warning(
+            logger.info(
                 f"estimated time difference of {name}: {estimated_timediff[name]}"
             )
         return cls(
@@ -217,13 +217,13 @@ class Action:
         for name, action in self._actions.items():
             box = action.box
             current_time, last_sysref_time = box.read_current_and_latched_clock()
-            logger.warning(
+            logger.info(
                 f"sysref offset of {name}: latest: {self._mod_by_sysref(last_sysref_time)}"
             )
 
         box = self._quel1system.box[self._reference_box_name]
         current_time, last_sysref_time = box.read_current_and_latched_clock()
-        logger.warning(
+        logger.info(
             f"sysref offset of reference box {self._reference_box_name}: average: {self._ref_sysref_time_offset},  latest: {self._mod_by_sysref(last_sysref_time)}"
         )
 
@@ -245,4 +245,4 @@ class Action:
         for name, action in self._actions.items():
             t = base_time + self._estimated_timediff[name]
             action.box.reserve_emission(set(action._wseqs.keys()), t)
-            logger.warning(f"reserving emission of {name} at {t}")
+            logger.info(f"reserving emission of {name} at {t}")
