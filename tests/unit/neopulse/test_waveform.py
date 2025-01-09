@@ -1,28 +1,27 @@
 import numpy as np
-
 from qubecalib.neopulse import Slot, Waveform
 
 
-def test_inheritance():
+def test_inheritance() -> None:
     """Waveform should inherit from Slot."""
     assert issubclass(Waveform, Slot)
 
 
-def test_empty_init():
+def test_empty_init() -> None:
     """Waveform should initialize with no arguments."""
     wf = Waveform()
     assert wf.duration is None
     assert wf.cmag == 1 + 0j
 
 
-def test_init():
+def test_init() -> None:
     """Waveform should initialize with arguments."""
     wf = Waveform(duration=10.0)
     assert wf.duration == 10.0
     assert wf.cmag == 1 + 0j
 
 
-def test_scaled():
+def test_scaled() -> None:
     """scaled should return the amplitude-scaled waveform."""
     wf1 = Waveform(duration=10.0)
     wf2 = wf1.scaled(2).scaled(3)
@@ -30,7 +29,7 @@ def test_scaled():
     assert wf1.cmag == 1 + 0j
 
 
-def test_shifted():
+def test_shifted() -> None:
     """shifted should return the phase-shifted waveform."""
     wf1 = Waveform(duration=10.0)
     wf2 = wf1.shifted(np.pi / 2).shifted(np.pi / 2)

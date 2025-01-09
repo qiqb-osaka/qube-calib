@@ -3,7 +3,7 @@ import pytest
 from qubecalib.neopulse import Frequency, Magnifier, Rectangle, Sequence, VirtualZ
 
 
-def test_magnifier():
+def test_magnifier() -> None:
     target = "TARGET"
 
     with Sequence() as seq:
@@ -18,7 +18,7 @@ def test_magnifier():
     assert (subseq.real == np.array([0.1, 0.1, 0.2, 0.2, 0.4, 0.4])).all()
 
 
-def test_virtual_z():
+def test_virtual_z() -> None:
     target = "TARGET"
 
     with Sequence() as seq:
@@ -39,7 +39,7 @@ def test_virtual_z():
     )
 
 
-def test_frequency():
+def test_frequency() -> None:
     target = "TARGET"
 
     with Sequence() as seq:

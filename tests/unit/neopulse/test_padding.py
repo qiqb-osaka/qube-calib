@@ -1,9 +1,8 @@
 import numpy as np
-
 from qubecalib.neopulse import Flushleft, Rectangle, Sequence, padding
 
 
-def test_padding():
+def test_padding() -> None:
     """padding should take up the correct duration."""
     target = "RQ00"
     with Sequence() as seq:

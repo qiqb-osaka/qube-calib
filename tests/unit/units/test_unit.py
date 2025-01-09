@@ -1,5 +1,4 @@
 import numpy as np
-
 from qubecalib.units import (
     BLOCK,
     DEG,
@@ -18,7 +17,7 @@ from qubecalib.units import (
 )
 
 
-def test_units():
+def test_units() -> None:
     """Units should have the correct values."""
     assert 0.2 * Sec == 0.2 * 1e9
     assert 0.2 * mS == 0.2 * 1e6
