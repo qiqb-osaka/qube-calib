@@ -1867,9 +1867,9 @@ class Sequencer(Command):
         # もし capture のみあるいは awgs のみなら tigger は設定しない
         if all([bool(caps), not bool(gens)]) or all([not bool(caps), bool(gens)]):
             return settings
-        for runit_name, runit_group, runit_id in caps:
-            for awg_name, awg_group, awg_id in gens:
-                if runit_name == awg_name and runit_group == awg_group:
+        for runit_name, _, runit_id in caps:
+            for awg_name, _, awg_id in gens:
+                if runit_name == awg_name:
                     settings[runit_name].append(
                         single.TriggerSetting(
                             triggerd_port=runit_id.port,
