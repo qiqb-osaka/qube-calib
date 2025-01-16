@@ -1853,9 +1853,9 @@ class Sequencer(Command):
         caps: list[tuple[str, int, single.RunitId]] = []
         gens: list[tuple[str, int, single.AwgId]] = []
         for name, box_setting in settings.items():
+            box = quel1system.box[name]
             for setting in box_setting:
                 if isinstance(setting, single.RunitSetting):
-                    box = quel1system.box[name]
                     port, subport = box._decode_port(setting.runit.port)
                     group, rline = box._convert_any_port(port)
                     # capmod = box.rmap.get_capture_module_of_rline(group, rline)
