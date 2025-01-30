@@ -32,8 +32,8 @@ class RunitSetting(NamedTuple):
 
 
 class TriggerSetting(NamedTuple):
-    triggerd_port: int
     trigger_awg: AwgId  # port, channel
+    triggerd_port: int
 
 
 class Action:
@@ -59,7 +59,8 @@ class Action:
         wseqs, cprms, triggers = cls.parse_settings(settings)
         self = cls(box, wseqs, cprms, triggers)
         self._load_to_device()
-        box.prepare_for_emission(set(self._wseqs.keys()))
+        awgs = set([(s.port, s.channel) for s in self._wseqs])
+        box.prepare_for_emission(awgs)
         return self
 
     @staticmethod
@@ -172,7 +173,7 @@ class Action:
             return {}
 
     def start_emission(self) -> None:
-        awg_specs = self._wseqs.keys()
+        awg_specs = set([(s.port, s.channel) for s in self._wseqs])
         if awg_specs:  # _channels が空の場合は AWG は起動しない
             self._box.start_emission(awg_specs)
 

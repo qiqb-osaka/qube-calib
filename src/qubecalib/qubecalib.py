@@ -56,6 +56,7 @@ from .neopulse import (
     Slot,
     Waveform,
 )
+from .task.quelware import direct
 from .task.quelware.direct import multi, single
 
 logger = logging.getLogger(__name__)
@@ -405,6 +406,17 @@ class QubeCalib:
         return self.system_config_database.create_box(
             box_name=box_name,
             reconnect=reconnect,
+        )
+
+    def create_named_box(
+        self, box_name: str, *, reconnect: bool = True
+    ) -> direct.NamedBox:
+        return direct.NamedBox(
+            name=box_name,
+            box=self.create_box(
+                box_name,
+                reconnect=reconnect,
+            ),
         )
 
     def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
@@ -1524,8 +1536,8 @@ class Sequencer(Command):
             data[(box, port, runit)] = datum
         cprms = {}
         for box, action in actions.items():
-            for (port, runit), cprm in action._cprms.items():
-                cprms[(box, port, runit)] = cprm
+            for runit_id, cprm in action._cprms.items():
+                cprms[(box, runit_id.port, runit_id.runit)] = cprm
         rstatus, rresults = {}, {}
         for (box, port, runit), target in bpc2target.items():
             s, r = self.parse_capture_result(
@@ -2518,8 +2530,6 @@ class SystemConfigDatabase:
             ipaddr_sss=str(s.ipaddr_sss),
             ipaddr_css=str(s.ipaddr_css),
             boxtype=s.boxtype,
-            config_root=Path(s.config_root) if s.config_root is not None else None,
-            config_options=s.config_options if s.config_options else None,
         )
         if reconnect:
             if not all([_ for _ in box.link_status().values()]):

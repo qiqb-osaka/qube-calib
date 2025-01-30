@@ -11,7 +11,6 @@ from quel_clock_master import QuBEMasterClient
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss
 
 from . import single
-from .single import AwgSetting, RunitSetting, TriggerSetting
 
 logger = getLogger(__name__)
 
@@ -23,7 +22,7 @@ class NamedBox(NamedTuple):
 
 class BoxSetting(NamedTuple):
     name: str
-    settings: list[AwgSetting | RunitSetting | TriggerSetting]
+    settings: list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
 
 
 class Quel1System:
@@ -95,7 +94,9 @@ class Action:
             box.initialize_all_awgs()
             box.initialize_all_capunits()
             awg_ids = [
-                s.awg for s in box_settings.settings if isinstance(s, AwgSetting)
+                (s.awg.port, s.awg.channel)
+                for s in box_settings.settings
+                if isinstance(s, single.AwgSetting)
             ]
             box.prepare_for_emission(awg_ids)
             current_time, last_sysref_time = box.read_current_and_latched_clock()
@@ -236,6 +237,10 @@ class Action:
                 f"large fluctuation (= {fluctuation}) of sysref is detected from the previous timing measurement"
             )
 
+        awgs = {}
+        for name, action in self._actions.items():
+            awgs[name] = set([(s.port, s.channel) for s in action._wseqs])
+
         base_time = current_time + min_time_offset
         tamate_offset = (16 - (base_time - self._ref_sysref_time_offset) % 16) % 16
         # tamate_offset = (base_time - self._ref_sysref_time_offset) % 16
@@ -244,5 +249,5 @@ class Action:
         base_time += self.TIMING_OFFSET
         for name, action in self._actions.items():
             t = base_time + self._estimated_timediff[name]
-            action.box.reserve_emission(set(action._wseqs.keys()), t)
+            action.box.reserve_emission(awgs[name], t)
             logger.info(f"reserving emission of {name} at {t}")
