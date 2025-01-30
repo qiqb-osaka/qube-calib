@@ -4,8 +4,7 @@ import logging
 from collections import defaultdict
 from concurrent.futures import Future
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Collection, Final, MutableSequence, Optional
+from typing import Any, Final, MutableSequence, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -15,7 +14,6 @@ from quel_ic_config import (
     CaptureReturnCode,
     Quel1BoxType,
     Quel1BoxWithRawWss,
-    Quel1ConfigOption,
 )
 
 from .quel1_wave_subsystem_mod import Quel1WaveSubsystemMod
@@ -73,16 +71,16 @@ class BoxPool:
         ipaddr_sss: str,
         ipaddr_css: str,
         boxtype: Quel1BoxType,
-        config_root: Optional[Path],
-        config_options: Optional[Collection[Quel1ConfigOption]] = None,
+        # config_root: Optional[Path],
+        # config_options: Optional[Collection[Quel1ConfigOption]] = None,
     ) -> Quel1BoxWithRawWss:
         box = Quel1BoxWithRawWss.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             boxtype=boxtype,
-            config_root=config_root,
-            config_options=config_options,
+            # config_root=config_root,
+            # config_options=config_options,
         )
         sqc = SequencerClient(ipaddr_sss)
         self._boxes[box_name] = (box, sqc)

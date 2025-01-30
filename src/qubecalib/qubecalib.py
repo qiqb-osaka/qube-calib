@@ -12,7 +12,7 @@ import pickle
 import time
 import warnings
 from collections import Counter, defaultdict, deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
@@ -121,10 +121,10 @@ class QubeCalib:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root)
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
             )
             status = box.reconnect()
             for mxfe_idx, s in status.items():
@@ -285,17 +285,17 @@ class QubeCalib:
         boxtype: str,
         ipaddr_sss: Optional[str] = None,
         ipaddr_css: Optional[str] = None,
-        config_root: Optional[str] = None,
-        config_options: MutableSequence[Quel1ConfigOption] = [],
+        config_root: Optional[str] = None,  # TODO will remove
+        config_options: MutableSequence[Quel1ConfigOption] = [],  # TODO will remove
     ) -> dict[str, Any]:
         return self.system_config_database.define_box(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
             boxtype=boxtype,
-            config_options=config_options,
+            # config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            # config_root=config_root,
         )
 
     def define_channel(
@@ -509,10 +509,10 @@ class QubeCalib:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root)
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
                 # ignore_crc_error_of_mxfe=args.ignore_crc_error_of_mxfe,
                 # ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780,
             )
@@ -2164,7 +2164,7 @@ class BoxSetting:
     ipaddr_sss: Optional[str | IPv4Address | IPv6Address] = None
     ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None
     config_root: Optional[str | os.PathLike] = None
-    config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
+    # config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if isinstance(self.ipaddr_wss, str):
@@ -2186,7 +2186,7 @@ class BoxSetting:
         elif not isinstance(self.ipaddr_css, (IPv4Address, IPv6Address)):
             raise ValueError("ipaddr_css should be instance of IPvxAddress")
 
-        self.config_options = []
+        # self.config_options = []
 
     def asdict(self) -> dict[str, Any]:
         return {
@@ -2194,10 +2194,10 @@ class BoxSetting:
             "ipaddr_sss": str(self.ipaddr_sss),
             "ipaddr_css": str(self.ipaddr_css),
             "boxtype": self.boxtype,
-            "config_root": str(self.config_root)
-            if self.config_root is not None
-            else None,
-            "config_options": self.config_options,
+            # "config_root": str(self.config_root)
+            # if self.config_root is not None
+            # else None,
+            # "config_options": self.config_options,
         }
 
     def asjsonable(self) -> dict[str, Any]:
@@ -2326,8 +2326,8 @@ class SystemConfigDatabase:
             boxtype=boxtype,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
-            config_options=config_options,
+            # config_root=config_root,
+            # config_options=config_options,
         )
 
     def add_port_setting(
@@ -2442,10 +2442,10 @@ class SystemConfigDatabase:
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
             boxtype=QUEL1_BOXTYPE_ALIAS[boxtype],
-            config_options=config_options,
+            # config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            # config_root=config_root,
         )
         self._box_settings[box_name] = box_setting
         return box_setting.asdict()
@@ -2518,8 +2518,8 @@ class SystemConfigDatabase:
             ipaddr_sss=str(s.ipaddr_sss),
             ipaddr_css=str(s.ipaddr_css),
             boxtype=s.boxtype,
-            config_root=Path(s.config_root) if s.config_root is not None else None,
-            config_options=s.config_options if s.config_options else None,
+            # config_root=Path(s.config_root) if s.config_root is not None else None,
+            # config_options=s.config_options if s.config_options else None,
         )
         if reconnect:
             if not all([_ for _ in box.link_status().values()]):
