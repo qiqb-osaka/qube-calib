@@ -184,6 +184,7 @@ class QubeCalib:
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
+        # skew: dict[str, int] = {},  # {target_name: skew [Sa]}
     ) -> None:
         # TODO ここは仕様変更が必要
         # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
@@ -192,6 +193,18 @@ class QubeCalib:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
+        # for target_name, skew_in_sa in skew.items():
+        #     if target_name not in gen_sampled_sequence:
+        #         raise ValueError(f"target({target_name}) is not found in gen_sequence")
+        #     gen_sampled_sequence[target_name].padding += skew_in_sa
+        settings = self.system_config_database._target_settings
+        for target_name, gss in gen_sampled_sequence.items():
+            if target_name not in settings:
+                raise ValueError(f"target({target_name}) is not defined")
+            tgtset = settings[target_name]
+            skew = tgtset["skew"] if "skew" in tgtset else 0
+            gss.padding += skew
+
         items_by_target = sequence._get_group_items_by_target()
 
         targets = set(
@@ -1434,9 +1447,9 @@ class Sequencer(Command):
         first_padding = self.calc_first_padding()
 
         for target_name, cseq in self.cap_sampled_sequence.items():
-            cseq.padding = first_padding
+            cseq.padding += first_padding
         for target_name, gseq in self.gen_sampled_sequence.items():
-            gseq.padding = first_padding
+            gseq.padding += first_padding
 
         interval = self.interval if self.interval is not None else 10240
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
