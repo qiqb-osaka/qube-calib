@@ -19,6 +19,7 @@ dependencies = [
     "numpy ~= 1.0",
     "matplotlib ~= 3.0",
     "tqdm ~= 4.0",
+    "cairo",
     "e7awgsw @ git+https://github.com/e-trees/e7awg_sw.git@6c8bf95",
     "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.11#subdirectory=quel_clock_master",
     "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.11#subdirectory=quel_ic_config",
