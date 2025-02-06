@@ -9,6 +9,8 @@ def pca(
 ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     r = np.dot(x, x.transpose()) / x.shape[0]
     d, e = np.linalg.eig(r)
+    idx = np.argsort(d)
+    d, e = d[idx], e[:, idx]
     return d, e
 
 
@@ -21,14 +23,12 @@ def to_complex(x: npt.NDArray[np.float64]) -> npt.NDArray[np.complex128]:
 
 
 def principal_axis_rotation(
-    x: npt.NDArray[np.complex128],
-) -> tuple[npt.NDArray[np.complex128], float]:
+    x: npt.NDArray[np.complex64],
+) -> tuple[npt.NDArray[np.complex64], float]:
     """Action to rotate the principal axis of the signal to the imaginary axis"""
     xx = to_float(x)
     m = xx.mean(axis=1).reshape(xx.shape[0], 1)
-    d, e = pca(xx - m)
-    idx = np.argsort(d)
-    d, e = d[idx], e[:, idx]
+    _, e = pca(xx - m)
     e = (
         e if np.dot(m[:, 0], e[:, -1]) > 0 else -e
     )  # 固有ベクトルの向きを信号の向きに合わせる
