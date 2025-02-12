@@ -23,8 +23,8 @@ def to_complex(x: npt.NDArray[np.float64]) -> npt.NDArray[np.complex128]:
 
 
 def principal_axis_rotation(
-    x: npt.NDArray[np.complex64],
-) -> tuple[npt.NDArray[np.complex64], float]:
+    x: npt.NDArray[np.complex128],
+) -> tuple[npt.NDArray[np.complex128], float]:
     """Action to rotate the principal axis of the signal to the imaginary axis"""
     xx = to_float(x)
     m = xx.mean(axis=1).reshape(xx.shape[0], 1)
