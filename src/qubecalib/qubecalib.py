@@ -11,12 +11,11 @@ import pathlib
 import pickle
 import time
 import warnings
-from collections import Counter, defaultdict, deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from types import MappingProxyType
 from typing import (
     Any,
     Final,
@@ -57,7 +56,6 @@ from .neopulse import (
     Waveform,
 )
 from .task.quelware import direct
-from .task.quelware.direct import multi, single
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +66,8 @@ class Direction(Enum):
 
 
 class Sideband(Enum):
-    UpperSideBand: str = "U"
-    LowerSideBand: str = "L"
+    UpperSideBand = "U"
+    LowerSideBand = "L"
 
 
 class QubeCalib:
@@ -88,6 +86,10 @@ class QubeCalib:
 
     @property
     def system_config_database(self) -> SystemConfigDatabase:
+        return self._system_config_database
+
+    @property
+    def sysdb(self) -> SystemConfigDatabase:
         return self._system_config_database
 
     def execute(self) -> tuple:
@@ -222,6 +224,7 @@ class QubeCalib:
                 time_offset=time_offset,
                 time_to_start=time_to_start,
                 interval=interval,
+                sysdb=self.system_config_database,
             )
         )
 
@@ -877,6 +880,11 @@ class Converter:
         repeats: int,
         interval: float,
     ) -> dict[tuple[str, int, int], WaveSequence]:
+        # for target_name, gss in gen_sampled_sequence.items():
+        #     print(target_name, gss.padding, end=" ")
+        #     # for sub in gss.sub_sequences:
+        #     #     print(sub.padding, end=" ")
+        # print()
         # WaveSequence の生成
         SAMPLING_PERIOD = 2
 
@@ -987,14 +995,11 @@ class Converter:
         }
         # 最初の subsequence の先頭に padding 分の 0 を追加する
         # TODO sampling_period を見るようにする
-        sequences = list(gen_sampled_sequence.values())
-        if sequences:
-            sequence = sequences[0]
-            padding = sequence.padding
-            for seq in gen_sampled_sequence.values():
-                subseq = seq.sub_sequences[0]
-                subseq.real = np.concatenate([np.zeros(padding), subseq.real])
-                subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
+        for target, seq in gen_sampled_sequence.items():
+            padding = seq.padding
+            subseq = seq.sub_sequences[0]
+            subseq.real = np.concatenate([np.zeros(padding), subseq.real])
+            subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
         # ここから全部の subseq で位相回転 (omega(t-t0))しないといけない
         # channel 毎に WaveSequence を生成する
         # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の dict
@@ -1188,16 +1193,18 @@ class PortConfigAcquirer:
         self.dump_config = dp = dump_box[port]
         sideband = dp["sideband"] if "sideband" in dp else "U"
         fnco_freq = 0
-        if "channels" in dp:
+        if port in box.get_output_ports():
             fnco_freq = dp["channels"][channel]["fnco_freq"]
-        if "runits" in dp:
+        if port in box.get_input_ports():
             fnco_freq = dp["runits"][channel]["fnco_freq"]
-            if port == 1:
-                sideband = dump_box[0]["sideband"] if "sideband" in dump_box[0] else "U"
-            elif port == 12:
-                sideband = (
-                    dump_box[13]["sideband"] if "sideband" in dump_box[13] else "U"
-                )
+            if port in box.get_read_input_ports():
+                lpbackp = next(iter(box.get_loopbacks_of_port(port)))
+                dumped_port = dump_box[lpbackp]
+                sideband = dumped_port["sideband"] if "sideband" in dumped_port else "U"
+            elif port in box.get_monitor_input_ports():
+                lpbackp = next(iter(box.get_loopbacks_of_port(port)))
+                dumped_port = dump_box[lpbackp]
+                sideband = dumped_port["sideband"] if "sideband" in dumped_port else "U"
         self.lo_freq: float = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
@@ -1232,9 +1239,10 @@ class Sequencer(Command):
         resource_map: dict[
             str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
+        *,
+        sysdb: SystemConfigDatabase,
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
-        *,
         group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
         interval: Optional[float] = None,
     ):
@@ -1253,6 +1261,10 @@ class Sequencer(Command):
         #   "channel_number": channel_number,
         #   "target": db._target_settings[target_name],
         # }
+        self.sysdb = sysdb
+        self._direct_settings: list[
+            direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting
+        ] = []
 
         # readout の target set を作る
         readout_targets = {
@@ -1498,43 +1510,51 @@ class Sequencer(Command):
         boxpool: BoxPool,
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         quel1system = self.create_quel1system(boxpool)
-        # ) -> dict[tuple[str, int, int], npt.NDArray[np.complex64]]:
         c, g, m = self.generate_e7_settings(boxpool)
-        # print(m)
-        settings: dict[
-            str, list[single.RunitSetting | single.AwgSetting | single.TriggerSetting]
-        ] = defaultdict(list)
+
+        settings: list[
+            direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting
+        ] = []
         for (name, port, runit), cprm in c.items():
-            settings[name].append(
-                single.RunitSetting(single.RunitId(port, runit), cprm)
+            settings.append(
+                direct.RunitSetting(
+                    runit=direct.RunitId(
+                        box=name,
+                        port=port,
+                        runit=runit,
+                    ),
+                    cprm=cprm,
+                )
             )
         for (name, port, channel), wseq in g.items():
-            settings[name].append(single.AwgSetting(single.AwgId(port, channel), wseq))
-        settings = self.select_trigger(quel1system, settings)
+            settings.append(
+                direct.AwgSetting(
+                    awg=direct.AwgId(
+                        box=name,
+                        port=port,
+                        channel=channel,
+                    ),
+                    wseq=wseq,
+                )
+            )
+        settings += self.select_trigger(quel1system, settings)
         if len(settings) == 0:
             raise ValueError("no settings")
-        elif len(settings) == 1:
-            name = next(iter(settings))
-            a1 = single.Action.build(box=quel1system.box[name], settings=settings[name])
-            s, r = a1.action()
-            status = {(name, i): si for i, si in s.items()}
-            results = {(name, i, j): rij for (i, j), rij in r.items()}
-            actions = MappingProxyType({name: a1})
+
+        if self._direct_settings:
+            action = direct.Action.build(
+                system=quel1system, settings=self._direct_settings
+            )
         else:
-            box_settings = [
-                multi.BoxSetting(name, setting) for name, setting in settings.items()
-            ]
-            am = multi.Action.build(quel1system=quel1system, settings=box_settings)
-            # TODO check operation for CLASSIFICATION option
-            status, results = am.action()
-            actions = am._actions
-        return self.parse_capture_results(status, results, actions, m)
+            action = direct.Action.build(system=quel1system, settings=settings)
+        status, results = action.action()
+        return self.parse_capture_results(status, results, action, m)
 
     def parse_capture_results(
         self,
         status: dict[tuple[str, int], CaptureReturnCode],
         results: dict[tuple[str, int, int], npt.NDArray[np.complex64]],
-        actions: MappingProxyType[str, single.Action],
+        action: direct.Action,
         crmap: dict[str, Any],
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         bpc2target = {}
@@ -1548,8 +1568,13 @@ class Sequencer(Command):
         for (box, port, runit), datum in results.items():
             data[(box, port, runit)] = datum
         cprms = {}
-        for box, action in actions.items():
-            for runit_id, cprm in action._cprms.items():
+        if isinstance(action._action, direct.multi.Action):
+            for box, act in action._action._actions.items():
+                for runit_id, cprm in act._cprms.items():
+                    cprms[(box, runit_id.port, runit_id.runit)] = cprm
+        elif isinstance(action._action, tuple):
+            box, act = action._action
+            for runit_id, cprm in act._cprms.items():
                 cprms[(box, runit_id.port, runit_id.runit)] = cprm
         rstatus, rresults = {}, {}
         for (box, port, runit), target in bpc2target.items():
@@ -1810,41 +1835,42 @@ class Sequencer(Command):
         else:
             raise ValueError("this setting is not supported yet")
 
-    def create_quel1system(self, boxpool: BoxPool) -> multi.Quel1System:
-        quel1system = multi.Quel1System.create(
+    def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
+        quel1system = direct.Quel1System.create(
             clockmaster=boxpool._clock_master,
             boxes=[
-                multi.NamedBox(
+                direct.NamedBox(
                     name,
                     box,
                 )
                 for name, (box, _) in boxpool._boxes.items()
             ],
         )
+        quel1system.trigger = self.sysdb.trigger
+        for box_name, timing_shift in self.sysdb.timing_shift.items():
+            quel1system.timing_shift[box_name] = timing_shift
+        quel1system.displacement = self.sysdb.time_to_start
         return quel1system
 
     def convert(
         self,
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam],
         gen_e7_settings: dict[tuple[str, int, int], WaveSequence],
-    ) -> dict[
-        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-    ]:
-        settings: dict[
-            str,
-            list[single.AwgSetting | single.RunitSetting | single.TriggerSetting],
-        ] = defaultdict(list)
+    ) -> list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting]:
+        settings: list[
+            direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting
+        ] = []
         for (box_name, port, runit), e7 in cap_e7_settings.items():
-            settings[box_name].append(
-                single.RunitSetting(
-                    runit=single.RunitId(port=port, runit=runit),
+            settings.append(
+                direct.RunitSetting(
+                    runit=direct.RunitId(box=box_name, port=port, runit=runit),
                     cprm=e7,
                 )
             )
         for (box_name, port, channel), e7 in gen_e7_settings.items():
-            settings[box_name].append(
-                single.AwgSetting(
-                    awg=single.AwgId(port=port, channel=channel),
+            settings.append(
+                direct.AwgSetting(
+                    awg=direct.AwgId(box=box_name, port=port, channel=channel),
                     wseq=e7,
                 )
             )
@@ -1852,61 +1878,84 @@ class Sequencer(Command):
 
     @staticmethod
     def is_empty_trigger(
-        settings: dict[
-            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-        ],
+        settings: list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting],
     ) -> bool:
-        counter = 0
-        for name, setting in settings.items():
-            for s in setting:
-                if isinstance(s, single.TriggerSetting):
-                    counter += 1
-        return counter == 0
+        for s in settings:
+            if isinstance(s, direct.TriggerSetting):
+                return False
+        return True
 
     def select_trigger(
         self,
-        quel1system: multi.Quel1System,
-        settings: dict[
-            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-        ],
-    ) -> dict[
-        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-    ]:
+        quel1system: direct.Quel1System,
+        settings: list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting],
+    ) -> list[direct.TriggerSetting]:
         if not self.is_empty_trigger(settings):
             raise ValueError("trigger is already set")
 
-        caps: list[tuple[str, int, single.RunitId]] = []
-        gens: list[tuple[str, int, single.AwgId]] = []
-        for name, box_setting in settings.items():
-            box = quel1system.box[name]
-            for setting in box_setting:
-                if isinstance(setting, single.RunitSetting):
-                    port, subport = box._decode_port(setting.runit.port)
-                    group, rline = box._convert_any_port(port)
-                    # capmod = box.rmap.get_capture_module_of_rline(group, rline)
-                    caps.append((name, group, setting.runit))
-                elif isinstance(setting, single.AwgSetting):
-                    port, subport = box._decode_port(setting.awg.port)
-                    group, rline = box._convert_any_port(port)
-                    gens.append((name, group, setting.awg))
+        # トリガを自動で設定する
+        result: list[direct.TriggerSetting] = []
+        caps: list[tuple[int, direct.RunitId]] = []
+        gens: list[tuple[int, direct.AwgId]] = []
+        for setting in settings:
+            if isinstance(setting, direct.RunitSetting):
+                # 右肺か左肺かの情報を付加して runit の設定を抽出する
+                box = quel1system.box[setting.runit.box]
+                port, subport = box._decode_port(setting.runit.port)
+                group, rline = box._convert_any_port(port)
+                # capmod = box.rmap.get_capture_module_of_rline(group, rline)
+                caps.append((group, setting.runit))
+            elif isinstance(setting, direct.AwgSetting):
+                # 右肺か左肺かの情報を付加して awg の設定を抽出する
+                box = quel1system.box[setting.awg.box]
+                port, subport = box._decode_port(setting.awg.port)
+                group, rline = box._convert_any_port(port)
+                gens.append((group, setting.awg))
+        # もし quel1system に明示的に trigger が設定されているならそれを使う
+        defined_awgs = [s.awg for s in settings if isinstance(s, direct.AwgSetting)]
+        for runit_group, runit_id in caps:
+            if (runit_id.box, runit_id.port) in quel1system.trigger:
+                trig_name, trig_nport, trig_nchannel = quel1system.trigger[
+                    (runit_id.box, runit_id.port)
+                ]
+                awg = direct.AwgId(
+                    box=trig_name, port=trig_nport, channel=trig_nchannel
+                )
+                if runit_id.box != trig_name:
+                    raise ValueError(
+                        f"invalid trigger {runit_id.box, runit_id.port} for {trig_name, trig_nport, trig_nchannel}"
+                    )
+                if awg not in defined_awgs:
+                    raise ValueError(
+                        f"trigger {trig_name, trig_nport, trig_nchannel} not found in settings"
+                    )
+                result.append(
+                    direct.TriggerSetting(
+                        triggerd_port=runit_id.port,
+                        trigger_awg=awg,
+                    )
+                )
         # もし capture のみあるいは awgs のみなら tigger は設定しない
         if all([bool(caps), not bool(gens)]) or all([not bool(caps), bool(gens)]):
-            return settings
-        for runit_name, runit_group, runit_id in caps:
-            for awg_name, awg_group, awg_id in gens:
-                if runit_name == awg_name and runit_group == awg_group:
-                    settings[runit_name].append(
-                        single.TriggerSetting(
+            return result
+        pre_defined_triggers = {(s.trigger_awg.box, s.triggerd_port) for s in result}
+        for runit_group, runit_id in caps:
+            if (runit_id.box, runit_id.port) in pre_defined_triggers:
+                continue  # もしすでに trigger が設定されているならスキップ
+            for awg_group, awg_id in gens:
+                if runit_id.box == awg_id.box and runit_group == awg_group:
+                    result.append(
+                        direct.TriggerSetting(
                             triggerd_port=runit_id.port,
                             trigger_awg=awg_id,
                         )
                     )
                     break
             # 別の group の trigger を割り当てるようにチャレンジ
-            for awg_name, awg_group, awg_id in gens:
-                if runit_name == awg_name:
-                    settings[runit_name].append(
-                        single.TriggerSetting(
+            for awg_group, awg_id in gens:
+                if runit_id.box == awg_id.box:
+                    result.append(
+                        direct.TriggerSetting(
                             triggerd_port=runit_id.port,
                             trigger_awg=awg_id,
                         )
@@ -1914,7 +1963,7 @@ class Sequencer(Command):
                     break
             else:
                 raise ValueError("invalid trigger")
-        return settings
+        return result
 
     @classmethod
     def convert_key_from_bmu_to_target(
@@ -2263,6 +2312,9 @@ class SystemConfigDatabase:
         self._relation_channel_port: Final[
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
+        self.timing_shift: Final[dict[str, int]] = {}
+        self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
+        self.time_to_start: int = 0
 
     def define_clockmaster(
         self,
@@ -2546,7 +2598,7 @@ class SystemConfigDatabase:
         )
         if reconnect:
             if not all([_ for _ in box.link_status().values()]):
-                box.relinkup(use_204b=False)
+                box.relinkup(use_204b=False, background_noise_threshold=350)
             status = box.reconnect()
             for mxfe_idx, _ in status.items():
                 if not _:
@@ -2626,6 +2678,33 @@ class SystemConfigDatabase:
         rct = self._relation_channel_target
         relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
         return relation_target_channel
+
+    def get_target_by_channel(
+        self,
+        box_name: str,
+        port: int,
+        channel: int,
+    ) -> str:
+        relation_target_channel = self.get_target_by_port(box_name=box_name, port=port)
+        channels = {c for t, c in relation_target_channel}
+        if not channels:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        try:
+            channel_id = {
+                p["channel_number"]: c
+                for c, p in self._relation_channel_port
+                if c in channels
+            }[channel]
+        except KeyError:
+            raise ValueError(f"invalid channel number {box_name, port, channel}")
+        targets = {t for t, c in relation_target_channel if c == channel_id}
+        if not targets:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        return next(iter(targets))
 
 
 def find_primary_component(
