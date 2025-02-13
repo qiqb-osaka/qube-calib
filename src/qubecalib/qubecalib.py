@@ -27,6 +27,7 @@ from typing import (
 
 import numpy as np
 import numpy.typing as npt
+import yaml
 from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
@@ -199,8 +200,15 @@ class QubeCalib:
         for target_name, gss in gen_sampled_sequence.items():
             if target_name not in settings:
                 raise ValueError(f"target({target_name}) is not defined")
-            tgtset = settings[target_name]
-            skew = tgtset["skew"] if "skew" in tgtset else 0
+            box_names = self.system_config_database.get_boxes_by_target(target_name)
+            if not box_names:
+                raise ValueError(f"target({target_name}) is not assigned to any box")
+            if len(box_names) > 1:
+                raise ValueError(f"target({target_name}) is assigned to multiple boxes")
+            # tgtset = settings[target_name]
+            # skew = tgtset["skew"] if "skew" in tgtset else 0
+            box_name = list(box_names)[0]
+            skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
             gss.padding += skew
 
         items_by_target = sequence._get_group_items_by_target()
@@ -1881,6 +1889,7 @@ class SystemConfigDatabase:
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
         self.timing_shift: Final[dict[str, int]] = {}
+        self.skew: Final[dict[str, int]] = {}
         self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
         self.time_to_start: int = 0
 
@@ -1952,6 +1961,26 @@ class SystemConfigDatabase:
         settings["relation_channel_port"] = relation_channel_port
         # TODO ----------
         self.set(**settings)
+
+    def load_skew_setting(self, filename: str) -> None:
+        with open(Path(os.getcwd()) / Path(filename), "r") as file:
+            config = yaml.safe_load(file)
+        for box_name, v in config["box_setting"].items():
+            self.timing_shift[box_name] = v["slot"] * 16  # words
+            self.skew[box_name] = v["wait"]  # samples
+        self.time_to_start = config["time_to_start"]
+        return config
+
+    def save_skew_setting(self, filename: str) -> None:
+        config = {
+            "time_to_start": self.time_to_start,
+            "box_setting": {
+                box_name: {"slot": v // 16, "wait": self.skew[box_name]}
+                for box_name, v in self.timing_shift.items()
+            },
+        }
+        with open(Path(os.getcwd()) / Path(filename), "w") as file:
+            yaml.safe_dump(config, file)
 
     def add_box_setting(
         self,

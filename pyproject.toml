@@ -30,3 +30,6 @@ version = { attr = "qubecalib.__version__" }
 [tool.pytest.ini_options]
 # cf. https://docs.pytest.org/en/6.2.x/pythonpath.html#import-modes
 addopts = "--import-mode=importlib"
+
+[tool.mypy]
+ignore_missing_imports = true
