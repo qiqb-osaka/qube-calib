@@ -89,6 +89,20 @@ class QubeCalib:
     def sysdb(self) -> SystemConfigDatabase:
         return self._system_config_database
 
+    # def create_skew(self, box_names: list[str]) -> quel1_tool.Skew:
+    #     system = self.create_quel1system(box_names)
+    #     skew = quel1_tool.Skew(system, qubecalib=self)
+    #     return skew
+
+    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+        if self.sysdb._clockmaster_setting is None:
+            raise ValueError("clock master is not found")
+        system = direct.Quel1System.create(
+            clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
+            boxes=[self.create_named_box(b) for b in box_names],
+        )
+        return system
+
     def execute(self) -> tuple:
         """queue に登録されている command を実行する（未実装）"""
         return "", "", ""

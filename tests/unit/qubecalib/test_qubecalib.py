@@ -24,6 +24,10 @@ def qubecalib() -> Generator[QubeCalib, None, None]:
     os.chdir(cwd)  # Restore the current working directory
 
 
+def test_test() -> None:
+    assert True
+
+
 def test_empty_init() -> None:
     """QubeCalib should initialize with no arguments."""
     qc = QubeCalib()
