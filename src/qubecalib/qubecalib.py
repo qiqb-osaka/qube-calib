@@ -1034,13 +1034,21 @@ class PortConfigAcquirer:
         if port in box.get_input_ports():
             fnco_freq = dp["runits"][channel]["fnco_freq"]
             if port in box.get_read_input_ports():
-                lpbackp = next(iter(box.get_loopbacks_of_port(port)))
-                dumped_port = dump_box[lpbackp]
-                sideband = dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                lpbackps = box.get_loopbacks_of_port(port)
+                if lpbackps:
+                    lpbackp = next(iter(lpbackps))
+                    dumped_port = dump_box[lpbackp]
+                    sideband = (
+                        dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                    )
             elif port in box.get_monitor_input_ports():
-                lpbackp = next(iter(box.get_loopbacks_of_port(port)))
-                dumped_port = dump_box[lpbackp]
-                sideband = dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                lpbackps = box.get_loopbacks_of_port(port)
+                if lpbackps:
+                    lpbackp = next(iter(lpbackps))
+                    dumped_port = dump_box[lpbackp]
+                    sideband = (
+                        dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                    )
         self.lo_freq: float = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
