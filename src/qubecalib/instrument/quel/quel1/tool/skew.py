@@ -184,32 +184,6 @@ class Skew:
             if box_name in box_names  #  and (box_name, nport) != self._reference_port
         }
 
-    def adjust(
-        self,
-        *,
-        offset: int = 1,  # multiplied by 128 ns
-        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
-    ) -> dict[tuple[str, int], dict[str, int]]:
-        target_ports = self.target_from_box(list(self._system.boxes))
-        for target_box, target_nport in tqdm(target_ports):
-            target_port = (target_box, target_nport)
-            self._measure(
-                target_port,
-                offset=offset,
-                extra_capture_range=extra_capture_range,
-                show_reference=False,
-                reset_skew_parameter=True,
-            )
-            self._adjust(target_port)
-            self._skew_adjust.push()
-        return {
-            p: {
-                "slot": self._skew_adjust.slot[p],
-                "wait": self._skew_adjust.wait[p],
-            }
-            for p in target_ports
-        }
-
     def measure(
         self,
         *,
@@ -275,10 +249,14 @@ class Skew:
                         raise ValueError("fogi port is not supported yet")
                     system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
         backup = (
+            self._skew_adjust.slot[reference_port],
+            self._skew_adjust.wait[reference_port],
             self._skew_adjust.slot[target_port],
             self._skew_adjust.wait[target_port],
         )
         if reset_skew_parameter:
+            self._skew_adjust.slot[reference_port] = 0
+            self._skew_adjust.wait[reference_port] = 0
             self._skew_adjust.slot[target_port] = 0
             self._skew_adjust.wait[target_port] = 0
             self._skew_adjust.push()
@@ -324,24 +302,71 @@ class Skew:
 
         if reset_skew_parameter:
             adj = self._skew_adjust
-            adj.slot[target_port], adj.wait[target_port] = backup
+            (
+                adj.slot[reference_port],
+                adj.wait[reference_port],
+                adj.slot[target_port],
+                adj.wait[target_port],
+            ) = backup
 
         return iqs
 
     def _adjust(
         self,
         target_port: tuple[str, int],
+        reference_idx: int,
     ) -> tuple[int, int, npt.NDArray]:
         measured = self._measured[target_port]
         offset = self._offset[target_port]
-        slot, wait, estimated = self.fit_pulse(measured)
-        self._skew_adjust.slot[target_port] = slot - offset
-        self._skew_adjust.wait[target_port] = 64 - wait
+        idx, estimated = self._fit_pulse(measured)
+        delta = idx - reference_idx
+        slot = delta // 64 + 1
+        wait = 64 - delta % 64
+        self._skew_adjust.slot[target_port] = -slot
+        self._skew_adjust.wait[target_port] = wait
         self._estimated[target_port] = estimated
         return slot, wait, estimated
 
+    def adjust(
+        self,
+        *,
+        offset: int = 1,  # multiplied by 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
+    ) -> dict[tuple[str, int], dict[str, int]]:
+        target_ports = self.target_from_box(list(self._system.boxes))
+        for target_box, target_nport in tqdm(target_ports):
+            target_port = (target_box, target_nport)
+            iqs = self._measure(
+                target_port,
+                offset=offset,
+                extra_capture_range=extra_capture_range,
+                show_reference=False,
+                reset_skew_parameter=True,
+            )
+            if target_port == self._reference_port:
+                reference_idx, _ = self._fit_pulse(iqs)
+        for target_port in target_ports:
+            self._adjust(target_port, reference_idx)
+        min_slot = min([self._skew_adjust.slot[p] for p in target_ports])
+        for p in target_ports:
+            self._skew_adjust.slot[p] -= min_slot
+        self._skew_adjust.push()
+        return {
+            p: {
+                "slot": self._skew_adjust.slot[p],
+                "wait": self._skew_adjust.wait[p],
+            }
+            for p in target_ports
+        }
+
     @classmethod
     def fit_pulse(cls, iqs: npt.NDArray) -> tuple[int, int, npt.NDArray]:
+        idx, estimated = cls._fit_pulse(iqs)
+        slot, wait = idx // 64, idx % 64
+        return slot, wait, estimated
+
+    @classmethod
+    def _fit_pulse(cls, iqs: npt.NDArray) -> tuple[int, npt.NDArray]:
         # ref_waveform = np.ones(64)
         # abs_iqs = np.abs(iqs).reshape(-1, 64)
         # corr = ref_waveform.reshape(-1, 64) / len(ref_waveform) * abs_iqs
@@ -351,16 +376,16 @@ class Skew:
         #     dif_waveform, np.abs(iqs)[slot * 64 : (slot + 1) * 64], "valid"
         # )
         conv = np.convolve(dif_waveform, np.abs(iqs), "valid")
-        iloc = int(conv.argmax()) + 1
-        slot = iloc // 64
-        idx = iloc % 64
+        idx = int(conv.argmax()) + 1
+        # slot = iloc // 64
+        # idx = iloc % 64
         estimated = np.zeros(iqs.size)
-        estimated[slot * 64 + idx : slot * 64 + idx + 64] = np.ones(64)
+        estimated[idx : idx + 64] = np.ones(64)
         estimated *= np.sqrt((np.abs(iqs).var())) / np.sqrt(estimated.var())
         estimated += np.abs(iqs).mean() - estimated.mean()
-        wait = idx
+        # wait = idx
         # dif_waveform = np.array([])
-        return slot, wait, estimated
+        return idx, estimated
 
     def plot(self) -> None:
         measured = self._measured
