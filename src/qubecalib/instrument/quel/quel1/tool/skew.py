@@ -321,12 +321,6 @@ class Skew:
                 iqs = iqs[0].sum(axis=1).squeeze()
                 self._measured[target_port] = iqs
                 self._offset[target_port] = offset
-        # slot, wait, estimated = self.fit_pulse(iqs)
-        # self._offset[target_port] = offset
-        # self._slot[target_port] = slot - offset
-        # self._wait[target_port] = wait
-        # self._measured[target_port] = iqs
-        # self._estimated[target_port] = estimated
 
         if reset_skew_parameter:
             adj = self._skew_adjust

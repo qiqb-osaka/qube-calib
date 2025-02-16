@@ -77,7 +77,7 @@ class QubeCalib:
         self._system_config_database: Final[SystemConfigDatabase] = (
             SystemConfigDatabase()
         )
-        self._executor: Final[Executor] = Executor()
+        self._executor: Final[Executor] = Executor(self._system_config_database)
         self._box_configs: dict[str, dict[str, Any]] = {}
 
         if path_to_database_file is not None:
@@ -101,8 +101,7 @@ class QubeCalib:
         return system
 
     def execute(self) -> tuple:
-        """queue に登録されている command を実行する（未実装）"""
-        return "", "", ""
+        return self._executor.execute()
 
     def step_execute(
         self,
@@ -112,53 +111,13 @@ class QubeCalib:
         dsp_demodulation: bool = True,
         software_demodulation: bool = False,
     ) -> Executor:
-        """queue に登録されている command を実行する iterator を返す"""
-        # work queue を舐めて必要な box を生成する
-        boxes = self._executor.collect_boxes()
-        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
-        if (
-            len(boxes) > 1
-            and self.system_config_database._clockmaster_setting is not None
-        ):
-            self._executor._boxpool.create_clock_master(
-                ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr)
-            )
-        # boxpool を生成する
-        for box_name in boxes:
-            setting = self._system_config_database._box_settings[box_name]
-            box = self._executor._boxpool.create(
-                box_name,
-                ipaddr_wss=str(setting.ipaddr_wss),
-                ipaddr_sss=str(setting.ipaddr_sss),
-                ipaddr_css=str(setting.ipaddr_css),
-                boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
-            )
-            status = box.reconnect()
-            for mxfe_idx, s in status.items():
-                if not s:
-                    logger.error(
-                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
-                    )
-
-        # sequencer に measurement_option を設定する
-        for sequencer in self._executor.collect_sequencers():
-            if sequencer.interval is None:
-                new_interval = interval
-            else:
-                new_interval = sequencer.interval
-            sequencer.set_measurement_option(
-                repeats=repeats,
-                interval=new_interval,
-                integral_mode=integral_mode,
-                dsp_demodulation=dsp_demodulation,
-                software_demodulation=software_demodulation,
-            )
-
-        return self._executor
+        return self._executor.step_execute(
+            repeats=repeats,
+            interval=interval,
+            integral_mode=integral_mode,
+            dsp_demodulation=dsp_demodulation,
+            software_demodulation=software_demodulation,
+        )
 
     def modify_target_frequency(self, target_name: str, frequency: float) -> None:
         self.system_config_database._target_settings[target_name]["frequency"] = (
@@ -176,7 +135,6 @@ class QubeCalib:
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
-        # skew: dict[str, int] = {},  # {target_name: skew [Sa]}
     ) -> None:
         # TODO ここは仕様変更が必要
         # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
@@ -185,10 +143,6 @@ class QubeCalib:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
-        # for target_name, skew_in_sa in skew.items():
-        #     if target_name not in gen_sampled_sequence:
-        #         raise ValueError(f"target({target_name}) is not found in gen_sequence")
-        #     gen_sampled_sequence[target_name].padding += skew_in_sa
         settings = self.system_config_database._target_settings
         for target_name, gss in gen_sampled_sequence.items():
             if target_name not in settings:
@@ -1654,10 +1608,11 @@ class ConfigChannel(Command):
 
 
 class Executor:
-    def __init__(self) -> None:
+    def __init__(self, sysdb: SystemConfigDatabase) -> None:
         self._work_queue: Final[deque] = deque()
         self._boxpool: BoxPool = BoxPool()
         self._config_buffer: Final[deque] = deque()
+        self.sysdb = sysdb
 
     def reset(self) -> None:
         self._work_queue.clear()
@@ -1794,6 +1749,63 @@ class Executor:
 
     def clear_log(self) -> None:
         self._config_buffer.clear()
+
+    def execute(self) -> tuple:
+        """queue に登録されている command を実行する（未実装）"""
+        return "", "", ""
+
+    def step_execute(
+        self,
+        repeats: int = 1,
+        interval: float = 10240,
+        integral_mode: str = "integral",  # "single"
+        dsp_demodulation: bool = True,
+        software_demodulation: bool = False,
+    ) -> Executor:
+        """queue に登録されている command を実行する iterator を返す"""
+        # work queue を舐めて必要な box を生成する
+        boxes = self.collect_boxes()
+        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
+        if len(boxes) > 1 and self.sysdb._clockmaster_setting is not None:
+            self._boxpool.create_clock_master(
+                ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
+            )
+        # boxpool を生成する
+        for box_name in boxes:
+            setting = self.sysdb._box_settings[box_name]
+            box = self._boxpool.create(
+                box_name,
+                ipaddr_wss=str(setting.ipaddr_wss),
+                ipaddr_sss=str(setting.ipaddr_sss),
+                ipaddr_css=str(setting.ipaddr_css),
+                boxtype=setting.boxtype,
+                config_root=Path(setting.config_root)
+                if setting.config_root is not None
+                else None,
+                config_options=setting.config_options,
+            )
+            status = box.reconnect()
+            for mxfe_idx, s in status.items():
+                if not s:
+                    logger.error(
+                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+                    )
+
+        # sequencer に measurement_option を設定する
+        for sequencer in self.collect_sequencers():
+            if sequencer.interval is None:
+                new_interval = interval
+            else:
+                new_interval = sequencer.interval
+            sequencer.set_measurement_option(
+                repeats=repeats,
+                interval=new_interval,
+                integral_mode=integral_mode,
+                dsp_demodulation=dsp_demodulation,
+                software_demodulation=software_demodulation,
+            )
+
+        return self
 
 
 @dataclass
