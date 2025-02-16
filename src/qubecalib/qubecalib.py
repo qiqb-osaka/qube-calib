@@ -27,7 +27,6 @@ from typing import (
 
 import numpy as np
 import numpy.typing as npt
-import yaml
 from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
 from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
@@ -89,11 +88,6 @@ class QubeCalib:
     def sysdb(self) -> SystemConfigDatabase:
         return self._system_config_database
 
-    # def create_skew(self, box_names: list[str]) -> quel1_tool.Skew:
-    #     system = self.create_quel1system(box_names)
-    #     skew = quel1_tool.Skew(system, qubecalib=self)
-    #     return skew
-
     def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
         if self.sysdb._clockmaster_setting is None:
             raise ValueError("clock master is not found")
@@ -146,24 +140,6 @@ class QubeCalib:
                     logger.error(
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
-
-        # db = self.system_config_database
-        # if db._clockmaster_setting is None:
-        #     raise ValueError("clock master is not found")
-        # quel1system = multi.Quel1System.create(
-        #     clockmaster=QuBEMasterClient(db._clockmaster_setting.ipaddr),
-        #     boxes=[
-        #         multi.NamedBox(
-        #             name=name,
-        #             box=Quel1BoxWithRawWss.create(
-        #                 ipaddr_wss=str(db._box_settings[name].ipaddr_wss),
-        #                 boxtype=db._box_settings[name].boxtype,
-        #             ),
-        #         )
-        #         for name in boxes
-        #     ],
-        # )
-        # self._executor._quel1system = quel1system
 
         # sequencer に measurement_option を設定する
         for sequencer in self._executor.collect_sequencers():
@@ -283,12 +259,6 @@ class QubeCalib:
                 rfswitch=rfswitch,
             )
         )
-
-    # def create_pulsecap(self, boxpool: BoxPool) -> PulseCap:
-    #     return PulseCap(boxpool)
-
-    # def create_pulsegen(self, boxpool: BoxPool) -> PulseGen:
-    #     return PulseGen(boxpool)
 
     def define_target(
         self,
@@ -1983,26 +1953,6 @@ class SystemConfigDatabase:
         settings["relation_channel_port"] = relation_channel_port
         # TODO ----------
         self.set(**settings)
-
-    def load_skew_setting(self, filename: str) -> None:
-        with open(Path(os.getcwd()) / Path(filename), "r") as file:
-            config = yaml.safe_load(file)
-        for box_name, v in config["box_setting"].items():
-            self.timing_shift[box_name] = v["slot"] * 16  # words
-            self.skew[box_name] = v["wait"]  # samples
-        self.time_to_start = config["time_to_start"]
-        return config
-
-    def save_skew_setting(self, filename: str) -> None:
-        config = {
-            "time_to_start": self.time_to_start,
-            "box_setting": {
-                box_name: {"slot": v // 16, "wait": self.skew[box_name]}
-                for box_name, v in self.timing_shift.items()
-            },
-        }
-        with open(Path(os.getcwd()) / Path(filename), "w") as file:
-            yaml.safe_dump(config, file)
 
     def add_box_setting(
         self,
