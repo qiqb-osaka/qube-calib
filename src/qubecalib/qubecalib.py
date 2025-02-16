@@ -66,6 +66,9 @@ class Sideband(Enum):
     LowerSideBand = "L"
 
 
+DEFAULT_SIDEBAND = "U"
+
+
 class QubeCalib:
     def __init__(
         self,
@@ -324,7 +327,7 @@ class QubeCalib:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: str = "U",
+        sideband: str = DEFAULT_SIDEBAND,
         vatt: int = 0x800,
         fnco_freq: Optional[
             tuple[float] | tuple[float, float] | tuple[float, float, float]
@@ -997,7 +1000,7 @@ class PortConfigAcquirer:
             boxpool._box_config_cache[box_name] = box.dump_box()
         dump_box = boxpool._box_config_cache[box_name]["ports"]
         self.dump_config = dp = dump_box[port]
-        sideband = dp["sideband"] if "sideband" in dp else "U"
+        sideband = dp["sideband"] if "sideband" in dp else DEFAULT_SIDEBAND
         fnco_freq = 0
         if port in box.get_output_ports():
             fnco_freq = dp["channels"][channel]["fnco_freq"]
@@ -1009,7 +1012,9 @@ class PortConfigAcquirer:
                     lpbackp = next(iter(lpbackps))
                     dumped_port = dump_box[lpbackp]
                     sideband = (
-                        dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                        dumped_port["sideband"]
+                        if "sideband" in dumped_port
+                        else DEFAULT_SIDEBAND
                     )
             elif port in box.get_monitor_input_ports():
                 lpbackps = box.get_loopbacks_of_port(port)
@@ -1017,7 +1022,9 @@ class PortConfigAcquirer:
                     lpbackp = next(iter(lpbackps))
                     dumped_port = dump_box[lpbackp]
                     sideband = (
-                        dumped_port["sideband"] if "sideband" in dumped_port else "U"
+                        dumped_port["sideband"]
+                        if "sideband" in dumped_port
+                        else DEFAULT_SIDEBAND
                     )
         self.lo_freq: float = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
@@ -1855,7 +1862,7 @@ class PortSetting:
     port: int
     lo_freq: Optional[float] = None  # will be obsolete
     cnco_freq: Optional[float] = None  # will be obsolete
-    sideband: str = "U"  # will be obsolete
+    sideband: str = DEFAULT_SIDEBAND  # will be obsolete
     vatt: int = 0x800  # will be obsolete
     fnco_freq: Optional[tuple[float, ...]] = None  # will be obsolete
     ndelay_or_nwait: tuple[int, ...] = ()
@@ -2130,7 +2137,7 @@ class SystemConfigDatabase:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: str = "U",
+        sideband: str = DEFAULT_SIDEBAND,
         vatt: int = 0x800,
         fnco_freq: Optional[
             tuple[float] | tuple[float, float] | tuple[float, float, float]
@@ -2175,6 +2182,26 @@ class SystemConfigDatabase:
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
         return box
+
+    def create_named_box(
+        self, box_name: str, *, reconnect: bool = True
+    ) -> direct.NamedBox:
+        return direct.NamedBox(
+            name=box_name,
+            box=self.create_box(
+                box_name,
+                reconnect=reconnect,
+            ),
+        )
+
+    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+        if self._clockmaster_setting is None:
+            raise ValueError("clock master is not found")
+        system = direct.Quel1System.create(
+            clockmaster=QuBEMasterClient(self._clockmaster_setting.ipaddr),
+            boxes=[self.create_named_box(b) for b in box_names],
+        )
+        return system
 
     def asdict(self) -> dict[str, Any]:
         return {

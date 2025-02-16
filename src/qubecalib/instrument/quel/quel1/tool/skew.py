@@ -17,7 +17,15 @@ from .....instrument.quel.quel1.driver import Quel1System
 from .....neopulse import Blank, Capture, Flushleft, Rectangle, Sequence, Series
 from .....qubecalib import QubeCalib, SystemConfigDatabase
 
+DEFAULT_FREQUENCY = 9.75
+DEFAULT_LO_FREQ = 11000e6
+DEFAULT_CNCO_FREQ = 1250e6
+DEFAULT_FNCO_FREQ = 0.0
+DEFAULT_SIDEBAND = "L"
+DEFAULT_VATT = 0x900
+
 REPETITION_PERIOD = 1280 * 128  # words
+EXTRA_CAPTURE_RANGE = 1024  # words
 
 
 def str2port(v: str) -> tuple[str, int]:
@@ -74,8 +82,6 @@ class Skew:
         self._trigger_nport: int = trigger_nport
         self._reference_port: tuple[str, int] = reference_port
         self._scale: dict[tuple[str, int], float] = {}
-        # self._slot: dict[tuple[str, int], int] = {}
-        # self._wait: dict[tuple[str, int], int] = {}
         self._measured: dict[tuple[str, int], npt.NDArray] = {}
         self._estimated: dict[tuple[str, int], npt.NDArray] = {}
         self._offset: dict[tuple[str, int], int] = {}
@@ -114,11 +120,11 @@ class Skew:
         read_port: tuple[str, int],
         trig_port_number: int,
         *,
-        lo_freq: float = 11000e6,
-        cnco_freq: float = 1250e6,
-        sideband: str = "L",
+        lo_freq: float = DEFAULT_LO_FREQ,
+        cnco_freq: float = DEFAULT_CNCO_FREQ,
+        sideband: str = DEFAULT_SIDEBAND,
         rfswitch: str = "open",
-        vatt: int = 0x900,
+        vatt: int = DEFAULT_VATT,
     ) -> None:
         box_name, read_port_number = read_port
         box = self._system.box[box_name]
@@ -130,7 +136,7 @@ class Skew:
             vatt=vatt,
         )
         for channel in box.get_channels_of_port(trig_port_number):
-            box.config_channel(trig_port_number, channel, fnco_freq=0.0)
+            box.config_channel(trig_port_number, channel, fnco_freq=DEFAULT_FNCO_FREQ)
         box.config_port(
             read_port_number,
             lo_freq=lo_freq,
@@ -142,11 +148,11 @@ class Skew:
         self,
         ctrl_port: tuple[str, int],
         *,
-        lo_freq: float = 11000e6,
-        cnco_freq: float = 1250e6,
-        sideband: str = "L",
+        lo_freq: float = DEFAULT_LO_FREQ,
+        cnco_freq: float = DEFAULT_CNCO_FREQ,
+        sideband: str = DEFAULT_SIDEBAND,
         rfswitch: str = "pass",
-        vatt: int = 0x900,
+        vatt: int = DEFAULT_VATT,
     ) -> None:
         ctrl_box, ctrl_port_number = ctrl_port
         box = self._system.box[ctrl_box]
@@ -159,7 +165,7 @@ class Skew:
             vatt=vatt,
         )
         for channel in box.get_channels_of_port(ctrl_port_number):
-            box.config_channel(ctrl_port_number, channel, fnco_freq=0.0)
+            box.config_channel(ctrl_port_number, channel, fnco_freq=DEFAULT_FNCO_FREQ)
 
     @classmethod
     def acquire_target(
@@ -182,7 +188,7 @@ class Skew:
         self,
         *,
         offset: int = 1,  # multiplied by 128 ns
-        extra_capture_range: int = 1024,  # multiple of 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
     ) -> dict[tuple[str, int], dict[str, int]]:
         target_ports = self.target_from_box(list(self._system.boxes))
         for target_box, target_nport in tqdm(target_ports):
@@ -208,7 +214,7 @@ class Skew:
         self,
         *,
         offset: int = 1,  # multiplied by 128 ns
-        extra_capture_range: int = 1024,  # multiple of 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
         show_reference: bool = True,
         reset_skew_parameter: bool = False,
     ) -> None:
@@ -226,11 +232,9 @@ class Skew:
     def _measure(
         self,
         target_port: tuple[str, int],
-        # target_box: str = "",
         *,
         offset: int = 0,  # multiplied by 128 ns
-        # target_port: tuple[str, int] = ("", 0),
-        extra_capture_range: int = 1024,  # multiple of 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
         reset_skew_parameter: bool = True,
         show_reference: bool = False,
     ) -> npt.NDArray:
@@ -240,17 +244,15 @@ class Skew:
         monitor_port = self._monitor_port
         monitor_box_name, _ = monitor_port
         trigger_port: tuple[str, int] = (monitor_box_name, self._trigger_nport)
-        # target_port = (
-        #     (target_box, self._target_port[target_box])
-        #     if target_port == ("", 0)
-        #     else target_port
-        # )
-        target_box, _ = target_port
         target_ports = set([target_port])
         for p in [monitor_port, trigger_port, reference_port]:
-            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(frequency=9.75)
+            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(
+                frequency=DEFAULT_FREQUENCY
+            )
         for p in target_ports:
-            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(frequency=9.75)
+            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(
+                frequency=DEFAULT_FREQUENCY
+            )
         trigger_box_name, trigger_port_number = trigger_port
         trigger_channel: tuple[str, int, int] = (
             trigger_box_name,
@@ -310,7 +312,7 @@ class Skew:
 
         for _, data, _ in qc.step_execute(
             repeats=100,
-            interval=1280 * 128,
+            interval=REPETITION_PERIOD,
             integral_mode="single",
             dsp_demodulation=False,
             software_demodulation=True,
