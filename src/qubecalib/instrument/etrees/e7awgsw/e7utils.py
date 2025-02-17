@@ -9,7 +9,7 @@ import numpy as np
 # from dataclasses import dataclass
 from e7awgsw import CaptureParam, DspUnit, IqWave, WaveSequence
 
-from .neopulse import CapSampledSequence, GenSampledSequence
+from ....neopulse import CapSampledSequence, GenSampledSequence
 
 # import json
 

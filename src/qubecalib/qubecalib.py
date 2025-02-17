@@ -33,7 +33,7 @@ from quel_ic_config import (
 )
 
 from . import __version__, neopulse
-from .e7utils import (
+from .instrument.etrees.e7awgsw.e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
