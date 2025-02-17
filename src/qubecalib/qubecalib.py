@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-import copy
 import datetime
 import getpass
 import json
 import logging
 import math
 import os
-import pathlib
-import pickle
 import time
 import warnings
-from collections import Counter, defaultdict, deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from types import MappingProxyType
 from typing import (
     Any,
+    Collection,
     Final,
     Iterable,
     MutableMapping,
@@ -44,10 +41,9 @@ from . import __version__, neopulse
 from .e7utils import (
     CaptureParamTools,
     WaveSequenceTools,
-    _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
 )
-from .general_looptest_common_mod import BoxPool, PulseCap, PulseGen, PulseGen_
+from .instrument.quel.quel1 import driver as direct
 from .neopulse import (
     CapSampledSequence,
     Capture,
@@ -56,7 +52,6 @@ from .neopulse import (
     Slot,
     Waveform,
 )
-from .task.quelware.direct import multi, single
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +62,11 @@ class Direction(Enum):
 
 
 class Sideband(Enum):
-    UpperSideBand: str = "U"
-    LowerSideBand: str = "L"
+    UpperSideBand = "U"
+    LowerSideBand = "L"
+
+
+DEFAULT_SIDEBAND = "U"
 
 
 class QubeCalib:
@@ -79,7 +77,7 @@ class QubeCalib:
         self._system_config_database: Final[SystemConfigDatabase] = (
             SystemConfigDatabase()
         )
-        self._executor: Final[Executor] = Executor()
+        self._executor: Final[Executor] = Executor(self._system_config_database)
         self._box_configs: dict[str, dict[str, Any]] = {}
 
         if path_to_database_file is not None:
@@ -89,9 +87,21 @@ class QubeCalib:
     def system_config_database(self) -> SystemConfigDatabase:
         return self._system_config_database
 
+    @property
+    def sysdb(self) -> SystemConfigDatabase:
+        return self._system_config_database
+
+    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+        if self.sysdb._clockmaster_setting is None:
+            raise ValueError("clock master is not found")
+        system = direct.Quel1System.create(
+            clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
+            boxes=[self.create_named_box(b) for b in box_names],
+        )
+        return system
+
     def execute(self) -> tuple:
-        """queue に登録されている command を実行する（未実装）"""
-        return "", "", ""
+        return self._executor.execute()
 
     def step_execute(
         self,
@@ -101,71 +111,13 @@ class QubeCalib:
         dsp_demodulation: bool = True,
         software_demodulation: bool = False,
     ) -> Executor:
-        """queue に登録されている command を実行する iterator を返す"""
-        # work queue を舐めて必要な box を生成する
-        boxes = self._executor.collect_boxes()
-        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
-        if (
-            len(boxes) > 1
-            and self.system_config_database._clockmaster_setting is not None
-        ):
-            self._executor._boxpool.create_clock_master(
-                ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr)
-            )
-        # boxpool を生成する
-        for box_name in boxes:
-            setting = self._system_config_database._box_settings[box_name]
-            box = self._executor._boxpool.create(
-                box_name,
-                ipaddr_wss=str(setting.ipaddr_wss),
-                ipaddr_sss=str(setting.ipaddr_sss),
-                ipaddr_css=str(setting.ipaddr_css),
-                boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
-            )
-            status = box.reconnect()
-            for mxfe_idx, s in status.items():
-                if not s:
-                    logger.error(
-                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
-                    )
-
-        # db = self.system_config_database
-        # if db._clockmaster_setting is None:
-        #     raise ValueError("clock master is not found")
-        # quel1system = multi.Quel1System.create(
-        #     clockmaster=QuBEMasterClient(db._clockmaster_setting.ipaddr),
-        #     boxes=[
-        #         multi.NamedBox(
-        #             name=name,
-        #             box=Quel1BoxWithRawWss.create(
-        #                 ipaddr_wss=str(db._box_settings[name].ipaddr_wss),
-        #                 boxtype=db._box_settings[name].boxtype,
-        #             ),
-        #         )
-        #         for name in boxes
-        #     ],
-        # )
-        # self._executor._quel1system = quel1system
-
-        # sequencer に measurement_option を設定する
-        for sequencer in self._executor.collect_sequencers():
-            if sequencer.interval is None:
-                new_interval = interval
-            else:
-                new_interval = sequencer.interval
-            sequencer.set_measurement_option(
-                repeats=repeats,
-                interval=new_interval,
-                integral_mode=integral_mode,
-                dsp_demodulation=dsp_demodulation,
-                software_demodulation=software_demodulation,
-            )
-
-        return self._executor
+        return self._executor.step_execute(
+            repeats=repeats,
+            interval=interval,
+            integral_mode=integral_mode,
+            dsp_demodulation=dsp_demodulation,
+            software_demodulation=software_demodulation,
+        )
 
     def modify_target_frequency(self, target_name: str, frequency: float) -> None:
         self.system_config_database._target_settings[target_name]["frequency"] = (
@@ -191,6 +143,21 @@ class QubeCalib:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
+        settings = self.system_config_database._target_settings
+        for target_name, gss in gen_sampled_sequence.items():
+            if target_name not in settings:
+                raise ValueError(f"target({target_name}) is not defined")
+            box_names = self.system_config_database.get_boxes_by_target(target_name)
+            if not box_names:
+                raise ValueError(f"target({target_name}) is not assigned to any box")
+            if len(box_names) > 1:
+                raise ValueError(f"target({target_name}) is assigned to multiple boxes")
+            # tgtset = settings[target_name]
+            # skew = tgtset["skew"] if "skew" in tgtset else 0
+            box_name = list(box_names)[0]
+            skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
+            gss.padding += skew
+
         items_by_target = sequence._get_group_items_by_target()
 
         targets = set(
@@ -208,6 +175,7 @@ class QubeCalib:
                 time_offset=time_offset,
                 time_to_start=time_to_start,
                 interval=interval,
+                sysdb=self.system_config_database,
             )
         )
 
@@ -248,12 +216,6 @@ class QubeCalib:
                 rfswitch=rfswitch,
             )
         )
-
-    def create_pulsecap(self, boxpool: BoxPool) -> PulseCap:
-        return PulseCap(boxpool)
-
-    def create_pulsegen(self, boxpool: BoxPool) -> PulseGen:
-        return PulseGen(boxpool)
 
     def define_target(
         self,
@@ -319,7 +281,7 @@ class QubeCalib:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: str = "U",
+        sideband: str = DEFAULT_SIDEBAND,
         vatt: int = 0x800,
         fnco_freq: Optional[
             tuple[float] | tuple[float, float] | tuple[float, float, float]
@@ -405,6 +367,17 @@ class QubeCalib:
         return self.system_config_database.create_box(
             box_name=box_name,
             reconnect=reconnect,
+        )
+
+    def create_named_box(
+        self, box_name: str, *, reconnect: bool = True
+    ) -> direct.NamedBox:
+        return direct.NamedBox(
+            name=box_name,
+            box=self.create_box(
+                box_name,
+                reconnect=reconnect,
+            ),
         )
 
     def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
@@ -513,191 +486,9 @@ class QubeCalib:
                 if setting.config_root is not None
                 else None,
                 config_options=setting.config_options,
-                # ignore_crc_error_of_mxfe=args.ignore_crc_error_of_mxfe,
-                # ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780,
             )
             box.reconnect()
         return boxpool
-
-    def execute_raw_e7(
-        self,
-        boxpool: BoxPool,
-        e7_settings: dict[tuple[str, int, int], WaveSequence | CaptureParam],
-        disabled: list[DspUnit] = [],
-        time_offset: dict[str, int] = {},  # {box_name: time_offset}
-        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
-    ) -> tuple:
-        for (box_name, _, _), e7 in e7_settings.items():
-            if box_name not in boxpool._boxes:
-                raise ValueError(f"box({box_name}) is not defined")
-            if not isinstance(e7, WaveSequence) and not isinstance(e7, CaptureParam):
-                raise ValueError(f"e7({e7}) is not supported")
-        box_names = {box_name for box_name, _, _ in e7_settings}
-        pg, pc = PulseGen(boxpool), PulseCap(boxpool)
-        gen_e7_settings = {
-            (box_name, port, channel): e7
-            for (box_name, port, channel), e7 in e7_settings.items()
-            if isinstance(e7, WaveSequence)
-        }
-        for (box_name, port, channel), e7 in gen_e7_settings.items():
-            pg.create(
-                box_name=box_name,
-                port=port,
-                channel=channel,
-                waveseq=e7,
-            )
-        cap_e7_settings = {
-            (box_name, port, channel): e7
-            for (box_name, port, channel), e7 in e7_settings.items()
-            if isinstance(e7, CaptureParam)
-        }
-        for (box_name, port, channel), e7 in cap_e7_settings.items():
-            enabled = e7.dsp_units_enabled
-            for dsp_unit in disabled:
-                if dsp_unit in enabled:
-                    enabled.remove(dsp_unit)
-            e7_copied = copy.deepcopy(e7)
-            e7_copied.sel_dsp_units_to_enable(*enabled)
-            pc.create(
-                box_name=box_name,
-                port=port,
-                channel=channel,
-                capprm=e7_copied,
-            )
-        for o in list(pg.pulsegens) + list(pc.pulsecaps):
-            o.init()
-
-        box_names = {box_name for (box_name, _, _), _ in e7_settings.items()}
-        box_configs = {
-            box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
-        }
-        if pc.pulsecaps:
-            capmod_by_port_channel = {
-                (p.box_name, p.port, p.channel): (p.box_name, p.capmod)
-                for p in pc.pulsecaps
-            }
-        if not pg.pulsegens and pc.pulsecaps:  # case 2.
-            # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
-            status, iqs = pc.capture_now()
-            return (
-                status,
-                iqs,
-                {
-                    "cap_e7_settings": cap_e7_settings,
-                    "capmod_by_port_channel": capmod_by_port_channel,
-                    "box_configs": box_configs,
-                    "drive_mode": "case 2: capture_now",
-                },
-            )
-        elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
-            # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
-            # trigger を設定
-            triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
-            futures = pc.capture_at_trigger_of(triggering_pgs)
-            pg.emit_now()
-            status, iqs = pc.wait_until_capture_finishes(futures)
-            return (
-                status,
-                iqs,
-                {
-                    "cap_e7_settings": cap_e7_settings,
-                    "gen_e7_settings": gen_e7_settings,
-                    "capmod_by_port_channel": capmod_by_port_channel,
-                    "box_configs": box_configs,
-                    "drive_mode": "case 1: capture_at_trigger_of, emit_now",
-                },
-            )
-        elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
-            # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
-            pg.emit_now()
-            return (
-                {},
-                {},
-                {
-                    "gen_e7_settings": gen_e7_settings,
-                    "box_configs": box_configs,
-                    "drive_mode": "case 3: emit_now",
-                },
-            )
-        elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
-            # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
-            if boxpool._clock_master is None:
-                pg.emit_now()
-                return (
-                    {},
-                    {},
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "box_configs": box_configs,
-                        "drive_mode": "case 5: emit_now",
-                    },
-                )
-            else:
-                boxpool.measure_timediff()
-                pg.emit_at(
-                    offset=time_offset,
-                    tts=time_to_start,
-                )
-                return (
-                    {},
-                    {},
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "box_configs": box_configs,
-                        "drive_mode": "case 5: emit_at",
-                    },
-                )
-        elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
-            # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
-            if boxpool._clock_master is None:
-                triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
-                futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_now()
-                status, iqs = pc.wait_until_capture_finishes(futures)
-                return (
-                    status,
-                    iqs,
-                    {
-                        "cap_e7_settings": cap_e7_settings,
-                        "gen_e7_settings": gen_e7_settings,
-                        "capmod_by_port_channel": capmod_by_port_channel,
-                        "box_configs": box_configs,
-                        "drive_mode": "case 4: capture_at, emit_now",
-                    },
-                )
-            else:
-                boxpool.measure_timediff()
-                triggering_pgs = Sequencer.create_triggering_pgs(pg, pc)
-                futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_at(
-                    offset=time_offset,
-                    tts=time_to_start,
-                )
-                status, iqs = pc.wait_until_capture_finishes(futures)
-                return (
-                    status,
-                    iqs,
-                    {
-                        "cap_e7_settings": cap_e7_settings,
-                        "gen_e7_settings": gen_e7_settings,
-                        "capmod_by_port_channel": capmod_by_port_channel,
-                        "box_configs": box_configs,
-                        "drive_mode": "case 4: capture_at, emit_at",
-                    },
-                )
-        else:
-            raise ValueError("this setting is not supported yet")
-
-    def pickle_log(self, path_to_log_file: str | os.PathLike) -> None:
-        mypath = pathlib.Path(path_to_log_file)
-        with open(mypath, "wb") as fp:
-            fp.write(pickle.dumps(self._executor.get_log()))
-
-    def unpickle_log(self, path_to_log_file: str | os.PathLike) -> list:
-        mypath = pathlib.Path(path_to_log_file)
-        with open(mypath, "rb") as fp:
-            log = pickle.load(fp)
-        return log
 
 
 class Converter:
@@ -852,6 +643,11 @@ class Converter:
         repeats: int,
         interval: float,
     ) -> dict[tuple[str, int, int], WaveSequence]:
+        # for target_name, gss in gen_sampled_sequence.items():
+        #     print(target_name, gss.padding, end=" ")
+        #     # for sub in gss.sub_sequences:
+        #     #     print(sub.padding, end=" ")
+        # print()
         # WaveSequence の生成
         SAMPLING_PERIOD = 2
 
@@ -962,14 +758,11 @@ class Converter:
         }
         # 最初の subsequence の先頭に padding 分の 0 を追加する
         # TODO sampling_period を見るようにする
-        sequences = list(gen_sampled_sequence.values())
-        if sequences:
-            sequence = sequences[0]
-            padding = sequence.padding
-            for seq in gen_sampled_sequence.values():
-                subseq = seq.sub_sequences[0]
-                subseq.real = np.concatenate([np.zeros(padding), subseq.real])
-                subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
+        for target, seq in gen_sampled_sequence.items():
+            padding = seq.padding
+            subseq = seq.sub_sequences[0]
+            subseq.real = np.concatenate([np.zeros(padding), subseq.real])
+            subseq.imag = np.concatenate([np.zeros(padding), subseq.imag])
         # ここから全部の subseq で位相回転 (omega(t-t0))しないといけない
         # channel 毎に WaveSequence を生成する
         # 戻り値は {(box_name, port_number, channel_number): WaveSequence} の dict
@@ -1161,18 +954,32 @@ class PortConfigAcquirer:
             boxpool._box_config_cache[box_name] = box.dump_box()
         dump_box = boxpool._box_config_cache[box_name]["ports"]
         self.dump_config = dp = dump_box[port]
-        sideband = dp["sideband"] if "sideband" in dp else "U"
+        sideband = dp["sideband"] if "sideband" in dp else DEFAULT_SIDEBAND
         fnco_freq = 0
-        if "channels" in dp:
+        if port in box.get_output_ports():
             fnco_freq = dp["channels"][channel]["fnco_freq"]
-        if "runits" in dp:
+        if port in box.get_input_ports():
             fnco_freq = dp["runits"][channel]["fnco_freq"]
-            if port == 1:
-                sideband = dump_box[0]["sideband"] if "sideband" in dump_box[0] else "U"
-            elif port == 12:
-                sideband = (
-                    dump_box[13]["sideband"] if "sideband" in dump_box[13] else "U"
-                )
+            if port in box.get_read_input_ports():
+                lpbackps = box.get_loopbacks_of_port(port)
+                if lpbackps:
+                    lpbackp = next(iter(lpbackps))
+                    dumped_port = dump_box[lpbackp]
+                    sideband = (
+                        dumped_port["sideband"]
+                        if "sideband" in dumped_port
+                        else DEFAULT_SIDEBAND
+                    )
+            elif port in box.get_monitor_input_ports():
+                lpbackps = box.get_loopbacks_of_port(port)
+                if lpbackps:
+                    lpbackp = next(iter(lpbackps))
+                    dumped_port = dump_box[lpbackp]
+                    sideband = (
+                        dumped_port["sideband"]
+                        if "sideband" in dumped_port
+                        else DEFAULT_SIDEBAND
+                    )
         self.lo_freq: float = dp["lo_freq"]
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
@@ -1207,9 +1014,10 @@ class Sequencer(Command):
         resource_map: dict[
             str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, Any]]]
         ],
+        *,
+        sysdb: SystemConfigDatabase,
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
-        *,
         group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
         interval: Optional[float] = None,
     ):
@@ -1228,6 +1036,10 @@ class Sequencer(Command):
         #   "channel_number": channel_number,
         #   "target": db._target_settings[target_name],
         # }
+        self.sysdb = sysdb
+        self._sideload_settings: list[
+            direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting
+        ] = []  # サイドロード用の設定
 
         # readout の target set を作る
         readout_targets = {
@@ -1422,9 +1234,9 @@ class Sequencer(Command):
         first_padding = self.calc_first_padding()
 
         for target_name, cseq in self.cap_sampled_sequence.items():
-            cseq.padding = first_padding
+            cseq.padding += first_padding
         for target_name, gseq in self.gen_sampled_sequence.items():
-            gseq.padding = first_padding
+            gseq.padding += first_padding
 
         interval = self.interval if self.interval is not None else 10240
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
@@ -1473,43 +1285,51 @@ class Sequencer(Command):
         boxpool: BoxPool,
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         quel1system = self.create_quel1system(boxpool)
-        # ) -> dict[tuple[str, int, int], npt.NDArray[np.complex64]]:
         c, g, m = self.generate_e7_settings(boxpool)
-        # print(m)
-        settings: dict[
-            str, list[single.RunitSetting | single.AwgSetting | single.TriggerSetting]
-        ] = defaultdict(list)
+
+        settings: list[
+            direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting
+        ] = []
         for (name, port, runit), cprm in c.items():
-            settings[name].append(
-                single.RunitSetting(single.RunitId(port, runit), cprm)
+            settings.append(
+                direct.RunitSetting(
+                    runit=direct.RunitId(
+                        box=name,
+                        port=port,
+                        runit=runit,
+                    ),
+                    cprm=cprm,
+                )
             )
         for (name, port, channel), wseq in g.items():
-            settings[name].append(single.AwgSetting(single.AwgId(port, channel), wseq))
-        settings = self.select_trigger(quel1system, settings)
+            settings.append(
+                direct.AwgSetting(
+                    awg=direct.AwgId(
+                        box=name,
+                        port=port,
+                        channel=channel,
+                    ),
+                    wseq=wseq,
+                )
+            )
+        settings += self.select_trigger(quel1system, settings)
         if len(settings) == 0:
             raise ValueError("no settings")
-        elif len(settings) == 1:
-            name = next(iter(settings))
-            a1 = single.Action.build(box=quel1system.box[name], settings=settings[name])
-            s, r = a1.action()
-            status = {(name, i): si for i, si in s.items()}
-            results = {(name, i, j): rij for (i, j), rij in r.items()}
-            actions = MappingProxyType({name: a1})
+
+        if self._sideload_settings:
+            action = direct.Action.build(
+                system=quel1system, settings=self._sideload_settings
+            )
         else:
-            box_settings = [
-                multi.BoxSetting(name, setting) for name, setting in settings.items()
-            ]
-            am = multi.Action.build(quel1system=quel1system, settings=box_settings)
-            # TODO check operation for CLASSIFICATION option
-            status, results = am.action()
-            actions = am._actions
-        return self.parse_capture_results(status, results, actions, m)
+            action = direct.Action.build(system=quel1system, settings=settings)
+        status, results = action.action()
+        return self.parse_capture_results(status, results, action, m)
 
     def parse_capture_results(
         self,
         status: dict[tuple[str, int], CaptureReturnCode],
         results: dict[tuple[str, int, int], npt.NDArray[np.complex64]],
-        actions: MappingProxyType[str, single.Action],
+        action: direct.Action,
         crmap: dict[str, Any],
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
         bpc2target = {}
@@ -1523,9 +1343,14 @@ class Sequencer(Command):
         for (box, port, runit), datum in results.items():
             data[(box, port, runit)] = datum
         cprms = {}
-        for box, action in actions.items():
-            for (port, runit), cprm in action._cprms.items():
-                cprms[(box, port, runit)] = cprm
+        if isinstance(action._action, direct.multi.Action):
+            for box, act in action._action._actions.items():
+                for runit_id, cprm in act._cprms.items():
+                    cprms[(box, runit_id.port, runit_id.runit)] = cprm
+        elif isinstance(action._action, tuple):
+            box, act = action._action
+            for runit_id, cprm in act._cprms.items():
+                cprms[(box, runit_id.port, runit_id.runit)] = cprm
         rstatus, rresults = {}, {}
         for (box, port, runit), target in bpc2target.items():
             s, r = self.parse_capture_result(
@@ -1562,264 +1387,42 @@ class Sequencer(Command):
             result = [di.transpose() for di in c]
         return status, result
 
-    def execute_old(
-        self,
-        boxpool: BoxPool,
-    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
-        cap_e7_settings, gen_e7_settings, cap_resource_map = self.generate_e7_settings(
-            boxpool
-        )
-        cap_fmod = {
-            target_name: sequence.modulation_frequency
-            for target_name, sequence in self.cap_sampled_sequence.items()
-        }
-        first_padding = self.calc_first_padding()
-        csseq = self.cap_sampled_sequence
-        csseqchains_by_target = {
-            target: _convert_cap_sampled_sequence_to_blanks_and_durations_chain_use_original_values(
-                seq,
-            )
-            for target, seq in csseq.items()
-        }
-        reference_time_list_by_target = {
-            target: list(np.cumsum(np.array([v for v in chain if v is not None]))[::2])
-            for target, chain in csseqchains_by_target.items()
-        }
-        # just for information
-        gen_fmod = {
-            target_name: sequence.modulation_frequency
-            for target_name, sequence in self.gen_sampled_sequence.items()
-        }
-
-        pc = PulseCap(boxpool)
-        pg = PulseGen(boxpool)
-        for (box_name, port, channel), e7 in cap_e7_settings.items():
-            pc.create(
-                box_name=box_name,
-                port=port,
-                channel=channel,
-                capprm=e7,
-            )
-        for (box_name, port, channel), e7 in gen_e7_settings.items():
-            pg.create(
-                box_name=box_name,
-                port=port,
-                channel=channel,
-                waveseq=e7,
-            )
-        pg._pulsecap = pc
-        for o in list(pg.pulsegens) + list(pc.pulsecaps):
-            o.init()
-        bpc_capmod = {(_.box_name, _.port, _.channel): _.capmod for _ in pc.pulsecaps}
-        bmc_target: dict[tuple[Optional[str], CaptureModule, Optional[int]], str] = {
-            (
-                m["box"].box_name if isinstance(m["box"], BoxSetting) else None,
-                bpc_capmod[
-                    (
-                        m["box"].box_name if isinstance(m["box"], BoxSetting) else None,
-                        m["port"].port if isinstance(m["port"], PortSetting) else None,
-                        m["channel_number"],
-                    )
-                ],
-                m["channel_number"] if isinstance(m["channel_number"], int) else None,
-            ): target_name
-            for target_name, m in cap_resource_map.items()
-        }
-
-        box_names = {box_name for (box_name, _, _), _ in cap_e7_settings.items()}
-        box_names |= {box_name for (box_name, _, _), _ in gen_e7_settings.items()}
-        # box_configs = {
-        #     box_name: boxpool.get_box(box_name)[0].dump_box() for box_name in box_names
-        # }
-        # if box_name not in boxpool._box_config_cache:
-        #     boxpool._box_config_cache[box_name] = box.dump_box()
-        # dump_box = boxpool._box_config_cache[box_name]["ports"]
-        # self.dump_config = dp = dump_box[port]
-        # box_configs = {box_name: boxpool.get_box}
-        # TODO CW 出力については box の機能を使うのが良さげ
-        # 制御方式の自動選択
-        # TODO caps 及び gens が共に設定されていて機体数が複数台なら clock 系を使用
-        # TODO ~~single and caps and gens: capture_at(), emit_now() 1.~~
-        # TODO ~~single and caps and not gens: capture_now() 2.~~
-        # TODO ~~single and not caps and gens: emit_now() 3.~~
-        # TODO ~~single and not caps and not gens X~~
-        # TODO not single and caps and gens: capture_at(), emit_at() 4.
-        # TODO ~~not single and caps and not gens: capture_now() 2.~~
-        # TODO not single and not caps and gens: emit_at() 5.
-        # TODO ~~not single and not caps and not gens X~~
-        if not pg.pulsegens and pc.pulsecaps:  # case 2.
-            # 機体数に関わらず caps のみ設定されているなら非同期キャプチャする
-            _status, _iqs = pc.capture_now()
-            status, iqs = self.convert_key_from_bmu_to_target(bmc_target, _status, _iqs)
-            return (status, iqs) + (
-                {
-                    "cap_e7_settings": cap_e7_settings,
-                    # "box_configs": box_configs,
-                    "cap_sampled_sequence": self.cap_sampled_sequence,
-                    "modulation_frequencies_for_capture": cap_fmod,
-                    "first_padding": first_padding,
-                    "drive_mode": "case 2: catpure_now",
-                },
-            )
-        elif len(box_names) == 1 and pg.pulsegens and pc.pulsecaps:  # case 1.
-            # caps 及び gens が共に設定されていて機体数が 1 台のみなら clock 系をバイパス
-            # trigger を設定
-            triggering_pgs = self.create_triggering_pgs(pg, pc)
-            futures = pc.capture_at_trigger_of(triggering_pgs)
-            pg.emit_now()
-            _status, _iqs = pc.wait_until_capture_finishes(futures)
-            status, iqs = self.convert_key_from_bmu_to_target(bmc_target, _status, _iqs)
-            return (status, iqs) + (
-                {
-                    "cap_e7_settings": cap_e7_settings,
-                    "cap_sampled_sequence": self.cap_sampled_sequence,
-                    "modulation_frequencies_for_capture": cap_fmod,
-                    "reference_time_for_capture": reference_time_list_by_target,
-                    "gen_e7_settings": gen_e7_settings,
-                    "gen_sampled_sequence": self.gen_sampled_sequence,
-                    "modulation_frequencies_for_generator": gen_fmod,
-                    # "box_configs": box_configs,
-                    "first_padding": first_padding,
-                    "drive_mode": "case 1: capture_at_trigger_of, emit_now",
-                },
-            )
-        elif len(box_names) == 1 and pg.pulsegens and not pc.pulsecaps:  # case 3.
-            # gens のみ設定されていて機体数が 1 台のみなら clock 系をバイパスして同期出力する
-            pg.emit_now()
-            return (
-                {},
-                {},
-                {
-                    "gen_e7_settings": gen_e7_settings,
-                    "gen_sampled_sequence": self.gen_sampled_sequence,
-                    "modulation_frequencies_for_generator": gen_fmod,
-                    # "box_configs": box_configs,
-                    "first_padding": first_padding,
-                    "drive_mode": "case 3: emit_now",
-                },
-            )
-        elif len(box_names) != 1 and pg.pulsegens and not pc.pulsecaps:  # case 5.
-            # gens のみ設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
-            if boxpool._clock_master is None:
-                pg.emit_now()
-                return (
-                    {},
-                    {},
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "modulation_frequencies_for_generator": gen_fmod,
-                        # "box_configs": box_configs,
-                        "first_padding": first_padding,
-                        "drive_mode": "case 5: emit_now",
-                    },
-                )
-            else:
-                boxpool.measure_timediff()
-                pg.emit_at(
-                    offset=self.syncoffset_by_boxname,
-                    tts=self.timetostart_by_boxname,
-                )
-                return (
-                    {},
-                    {},
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "modulation_frequencies_for_generator": gen_fmod,
-                        # "box_configs": box_configs,
-                        "first_padding": first_padding,
-                        "drive_mode": "case 5: emit_at",
-                    },
-                )
-        elif len(box_names) != 1 and pg.pulsegens and pc.pulsecaps:  # case 4.
-            # caps 及び gens が共に設定されていて機体数が複数，clockmaster があるなら clock を経由して同期出力する
-            if boxpool._clock_master is None:
-                triggering_pgs = self.create_triggering_pgs(pg, pc)
-                futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_now()
-                _status, _iqs = pc.wait_until_capture_finishes(futures)
-                status, iqs = self.convert_key_from_bmu_to_target(
-                    bmc_target, _status, _iqs
-                )
-                return (status, iqs) + (
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "modulation_frequencies_for_generator": gen_fmod,
-                        "cap_e7_settings": cap_e7_settings,
-                        "cap_sampled_sequence": self.cap_sampled_sequence,
-                        "modulation_frequencies_for_capture": cap_fmod,
-                        "reference_time_for_capture": reference_time_list_by_target,
-                        # "box_configs": box_configs,
-                        "first_padding": first_padding,
-                        "drive_mode": "case 4: capture_at_trigger_of, emit_now",
-                    },
-                )
-            else:
-                boxpool.measure_timediff()
-                triggering_pgs = self.create_triggering_pgs(pg, pc)
-                futures = pc.capture_at_trigger_of(triggering_pgs)
-                pg.emit_at(
-                    offset=self.syncoffset_by_boxname,
-                    tts=self.timetostart_by_boxname,
-                )
-                _status, _iqs = pc.wait_until_capture_finishes(futures)
-                status, iqs = self.convert_key_from_bmu_to_target(
-                    bmc_target, _status, _iqs
-                )
-                return (status, iqs) + (
-                    {
-                        "gen_e7_settings": gen_e7_settings,
-                        "gen_sampled_sequence": self.gen_sampled_sequence,
-                        "modulation_frequencies_for_generator": gen_fmod,
-                        "cap_e7_settings": cap_e7_settings,
-                        "cap_sampled_sequence": self.cap_sampled_sequence,
-                        "modulation_frequencies_for_capture": cap_fmod,
-                        "reference_time_for_capture": reference_time_list_by_target,
-                        # "box_configs": box_configs,
-                        "first_padding": first_padding,
-                        "drive_mode": "case 4: capture_at_trigger_of, emit_at",
-                    },
-                )
-        else:
-            raise ValueError("this setting is not supported yet")
-
-    def create_quel1system(self, boxpool: BoxPool) -> multi.Quel1System:
-        quel1system = multi.Quel1System.create(
+    def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
+        quel1system = direct.Quel1System.create(
             clockmaster=boxpool._clock_master,
             boxes=[
-                multi.NamedBox(
+                direct.NamedBox(
                     name,
                     box,
                 )
                 for name, (box, _) in boxpool._boxes.items()
             ],
         )
+        quel1system.trigger = self.sysdb.trigger
+        for box_name, timing_shift in self.sysdb.timing_shift.items():
+            quel1system.timing_shift[box_name] = timing_shift
+        quel1system.displacement = self.sysdb.time_to_start
         return quel1system
 
     def convert(
         self,
         cap_e7_settings: dict[tuple[str, int, int], CaptureParam],
         gen_e7_settings: dict[tuple[str, int, int], WaveSequence],
-    ) -> dict[
-        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-    ]:
-        settings: dict[
-            str,
-            list[single.AwgSetting | single.RunitSetting | single.TriggerSetting],
-        ] = defaultdict(list)
+    ) -> list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting]:
+        settings: list[
+            direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting
+        ] = []
         for (box_name, port, runit), e7 in cap_e7_settings.items():
-            settings[box_name].append(
-                single.RunitSetting(
-                    runit=single.RunitId(port=port, runit=runit),
+            settings.append(
+                direct.RunitSetting(
+                    runit=direct.RunitId(box=box_name, port=port, runit=runit),
                     cprm=e7,
                 )
             )
         for (box_name, port, channel), e7 in gen_e7_settings.items():
-            settings[box_name].append(
-                single.AwgSetting(
-                    awg=single.AwgId(port=port, channel=channel),
+            settings.append(
+                direct.AwgSetting(
+                    awg=direct.AwgId(box=box_name, port=port, channel=channel),
                     wseq=e7,
                 )
             )
@@ -1827,61 +1430,84 @@ class Sequencer(Command):
 
     @staticmethod
     def is_empty_trigger(
-        settings: dict[
-            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-        ],
+        settings: list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting],
     ) -> bool:
-        counter = 0
-        for name, setting in settings.items():
-            for s in setting:
-                if isinstance(s, single.TriggerSetting):
-                    counter += 1
-        return counter == 0
+        for s in settings:
+            if isinstance(s, direct.TriggerSetting):
+                return False
+        return True
 
     def select_trigger(
         self,
-        quel1system: multi.Quel1System,
-        settings: dict[
-            str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-        ],
-    ) -> dict[
-        str, list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
-    ]:
+        quel1system: direct.Quel1System,
+        settings: list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting],
+    ) -> list[direct.TriggerSetting]:
         if not self.is_empty_trigger(settings):
             raise ValueError("trigger is already set")
 
-        caps: list[tuple[str, int, single.RunitId]] = []
-        gens: list[tuple[str, int, single.AwgId]] = []
-        for name, box_setting in settings.items():
-            box = quel1system.box[name]
-            for setting in box_setting:
-                if isinstance(setting, single.RunitSetting):
-                    port, subport = box._decode_port(setting.runit.port)
-                    group, rline = box._convert_any_port(port)
-                    # capmod = box.rmap.get_capture_module_of_rline(group, rline)
-                    caps.append((name, group, setting.runit))
-                elif isinstance(setting, single.AwgSetting):
-                    port, subport = box._decode_port(setting.awg.port)
-                    group, rline = box._convert_any_port(port)
-                    gens.append((name, group, setting.awg))
+        # トリガを自動で設定する
+        result: list[direct.TriggerSetting] = []
+        caps: list[tuple[int, direct.RunitId]] = []
+        gens: list[tuple[int, direct.AwgId]] = []
+        for setting in settings:
+            if isinstance(setting, direct.RunitSetting):
+                # 右肺か左肺かの情報を付加して runit の設定を抽出する
+                box = quel1system.box[setting.runit.box]
+                port, subport = box._decode_port(setting.runit.port)
+                group, rline = box._convert_any_port(port)
+                # capmod = box.rmap.get_capture_module_of_rline(group, rline)
+                caps.append((group, setting.runit))
+            elif isinstance(setting, direct.AwgSetting):
+                # 右肺か左肺かの情報を付加して awg の設定を抽出する
+                box = quel1system.box[setting.awg.box]
+                port, subport = box._decode_port(setting.awg.port)
+                group, rline = box._convert_any_port(port)
+                gens.append((group, setting.awg))
+        # もし quel1system に明示的に trigger が設定されているならそれを使う
+        defined_awgs = [s.awg for s in settings if isinstance(s, direct.AwgSetting)]
+        for runit_group, runit_id in caps:
+            if (runit_id.box, runit_id.port) in quel1system.trigger:
+                trig_name, trig_nport, trig_nchannel = quel1system.trigger[
+                    (runit_id.box, runit_id.port)
+                ]
+                awg = direct.AwgId(
+                    box=trig_name, port=trig_nport, channel=trig_nchannel
+                )
+                if runit_id.box != trig_name:
+                    raise ValueError(
+                        f"invalid trigger {runit_id.box, runit_id.port} for {trig_name, trig_nport, trig_nchannel}"
+                    )
+                if awg not in defined_awgs:
+                    raise ValueError(
+                        f"trigger {trig_name, trig_nport, trig_nchannel} not found in settings"
+                    )
+                result.append(
+                    direct.TriggerSetting(
+                        triggerd_port=runit_id.port,
+                        trigger_awg=awg,
+                    )
+                )
         # もし capture のみあるいは awgs のみなら tigger は設定しない
         if all([bool(caps), not bool(gens)]) or all([not bool(caps), bool(gens)]):
-            return settings
-        for runit_name, runit_group, runit_id in caps:
-            for awg_name, awg_group, awg_id in gens:
-                if runit_name == awg_name and runit_group == awg_group:
-                    settings[runit_name].append(
-                        single.TriggerSetting(
+            return result
+        pre_defined_triggers = {(s.trigger_awg.box, s.triggerd_port) for s in result}
+        for runit_group, runit_id in caps:
+            if (runit_id.box, runit_id.port) in pre_defined_triggers:
+                continue  # もしすでに trigger が設定されているならスキップ
+            for awg_group, awg_id in gens:
+                if runit_id.box == awg_id.box and runit_group == awg_group:
+                    result.append(
+                        direct.TriggerSetting(
                             triggerd_port=runit_id.port,
                             trigger_awg=awg_id,
                         )
                     )
                     break
             # 別の group の trigger を割り当てるようにチャレンジ
-            for awg_name, awg_group, awg_id in gens:
-                if runit_name == awg_name:
-                    settings[runit_name].append(
-                        single.TriggerSetting(
+            for awg_group, awg_id in gens:
+                if runit_id.box == awg_id.box:
+                    result.append(
+                        direct.TriggerSetting(
                             triggerd_port=runit_id.port,
                             trigger_awg=awg_id,
                         )
@@ -1889,7 +1515,7 @@ class Sequencer(Command):
                     break
             else:
                 raise ValueError("invalid trigger")
-        return settings
+        return result
 
     @classmethod
     def convert_key_from_bmu_to_target(
@@ -1913,29 +1539,6 @@ class Sequencer(Command):
         sorted_iqs = {key: _iqs[key] for key in sorted(_iqs)}
 
         return _status, sorted_iqs
-
-    @classmethod
-    def create_triggering_pgs(
-        cls,
-        pg: PulseGen,
-        pc: PulseCap,
-    ) -> dict[tuple[Any, Any], PulseGen_]:  # (box_name, capmod): PulseGen_
-        # (box_names, capmod) 毎に同一グループの trigger の何れかをを割り当てる
-        # 同一グループの awg が無ければエラーを返す
-        cap = {(_.box_name, _.group, _.capmod) for _ in pc.pulsecaps}
-        gen = {(_.box_name, _.group, _) for _ in pg.pulsegens}
-        triggering_pgs_ = {
-            (cap_[0], cap_[2]): {gen_[2] for gen_ in gen if cap_[:2] == gen_[:2]}
-            for cap_ in cap
-        }
-        if not all([bool(pgs) for pgs in triggering_pgs_.values()]):
-            # TODO 別の group の trigger を割り当てるようにチャレンジする
-            raise ValueError("invalid trigger")
-        triggering_pgs = {
-            (box_name, capmod): next(iter(gens))
-            for (box_name, capmod), gens in triggering_pgs_.items()
-        }
-        return triggering_pgs
 
 
 class Configurator(Command):
@@ -2005,10 +1608,11 @@ class ConfigChannel(Command):
 
 
 class Executor:
-    def __init__(self) -> None:
+    def __init__(self, sysdb: SystemConfigDatabase) -> None:
         self._work_queue: Final[deque] = deque()
         self._boxpool: BoxPool = BoxPool()
         self._config_buffer: Final[deque] = deque()
+        self.sysdb = sysdb
 
     def reset(self) -> None:
         self._work_queue.clear()
@@ -2146,6 +1750,63 @@ class Executor:
     def clear_log(self) -> None:
         self._config_buffer.clear()
 
+    def execute(self) -> tuple:
+        """queue に登録されている command を実行する（未実装）"""
+        return "", "", ""
+
+    def step_execute(
+        self,
+        repeats: int = 1,
+        interval: float = 10240,
+        integral_mode: str = "integral",  # "single"
+        dsp_demodulation: bool = True,
+        software_demodulation: bool = False,
+    ) -> Executor:
+        """queue に登録されている command を実行する iterator を返す"""
+        # work queue を舐めて必要な box を生成する
+        boxes = self.collect_boxes()
+        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
+        if len(boxes) > 1 and self.sysdb._clockmaster_setting is not None:
+            self._boxpool.create_clock_master(
+                ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
+            )
+        # boxpool を生成する
+        for box_name in boxes:
+            setting = self.sysdb._box_settings[box_name]
+            box = self._boxpool.create(
+                box_name,
+                ipaddr_wss=str(setting.ipaddr_wss),
+                ipaddr_sss=str(setting.ipaddr_sss),
+                ipaddr_css=str(setting.ipaddr_css),
+                boxtype=setting.boxtype,
+                config_root=Path(setting.config_root)
+                if setting.config_root is not None
+                else None,
+                config_options=setting.config_options,
+            )
+            status = box.reconnect()
+            for mxfe_idx, s in status.items():
+                if not s:
+                    logger.error(
+                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+                    )
+
+        # sequencer に measurement_option を設定する
+        for sequencer in self.collect_sequencers():
+            if sequencer.interval is None:
+                new_interval = interval
+            else:
+                new_interval = sequencer.interval
+            sequencer.set_measurement_option(
+                repeats=repeats,
+                interval=new_interval,
+                integral_mode=integral_mode,
+                dsp_demodulation=dsp_demodulation,
+                software_demodulation=software_demodulation,
+            )
+
+        return self
+
 
 @dataclass
 class ClockmasterSetting:
@@ -2213,7 +1874,7 @@ class PortSetting:
     port: int
     lo_freq: Optional[float] = None  # will be obsolete
     cnco_freq: Optional[float] = None  # will be obsolete
-    sideband: str = "U"  # will be obsolete
+    sideband: str = DEFAULT_SIDEBAND  # will be obsolete
     vatt: int = 0x800  # will be obsolete
     fnco_freq: Optional[tuple[float, ...]] = None  # will be obsolete
     ndelay_or_nwait: tuple[int, ...] = ()
@@ -2238,6 +1899,10 @@ class SystemConfigDatabase:
         self._relation_channel_port: Final[
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
+        self.timing_shift: Final[dict[str, int]] = {}
+        self.skew: Final[dict[str, int]] = {}
+        self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
+        self.time_to_start: int = 0
 
     def define_clockmaster(
         self,
@@ -2484,7 +2149,7 @@ class SystemConfigDatabase:
         port_number: int,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
-        sideband: str = "U",
+        sideband: str = DEFAULT_SIDEBAND,
         vatt: int = 0x800,
         fnco_freq: Optional[
             tuple[float] | tuple[float, float] | tuple[float, float, float]
@@ -2518,12 +2183,10 @@ class SystemConfigDatabase:
             ipaddr_sss=str(s.ipaddr_sss),
             ipaddr_css=str(s.ipaddr_css),
             boxtype=s.boxtype,
-            config_root=Path(s.config_root) if s.config_root is not None else None,
-            config_options=s.config_options if s.config_options else None,
         )
         if reconnect:
             if not all([_ for _ in box.link_status().values()]):
-                box.relinkup(use_204b=False)
+                box.relinkup(use_204b=False, background_noise_threshold=350)
             status = box.reconnect()
             for mxfe_idx, _ in status.items():
                 if not _:
@@ -2531,6 +2194,26 @@ class SystemConfigDatabase:
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
         return box
+
+    def create_named_box(
+        self, box_name: str, *, reconnect: bool = True
+    ) -> direct.NamedBox:
+        return direct.NamedBox(
+            name=box_name,
+            box=self.create_box(
+                box_name,
+                reconnect=reconnect,
+            ),
+        )
+
+    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+        if self._clockmaster_setting is None:
+            raise ValueError("clock master is not found")
+        system = direct.Quel1System.create(
+            clockmaster=QuBEMasterClient(self._clockmaster_setting.ipaddr),
+            boxes=[self.create_named_box(b) for b in box_names],
+        )
+        return system
 
     def asdict(self) -> dict[str, Any]:
         return {
@@ -2604,16 +2287,166 @@ class SystemConfigDatabase:
         relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
         return relation_target_channel
 
+    def get_target_by_channel(
+        self,
+        box_name: str,
+        port: int,
+        channel: int,
+    ) -> str:
+        relation_target_channel = self.get_target_by_port(box_name=box_name, port=port)
+        channels = {c for t, c in relation_target_channel}
+        if not channels:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        try:
+            channel_id = {
+                p["channel_number"]: c
+                for c, p in self._relation_channel_port
+                if c in channels
+            }[channel]
+        except KeyError:
+            raise ValueError(f"invalid channel number {box_name, port, channel}")
+        targets = {t for t, c in relation_target_channel if c == channel_id}
+        if not targets:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        return next(iter(targets))
 
-def find_primary_component(
-    x: npt.NDArray[np.float32], y: npt.NDArray[np.float32]
-) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], npt.NDArray[np.float32]]:
-    s = np.stack([x, y])
-    m = np.stack([s[0, :].mean(), s[1, :].mean()]).reshape(s.shape[0], 1)
-    x = s - m
-    r = np.dot(x, x.transpose()) / x.shape[1]
-    dd, ee = np.linalg.eig(r)
-    idx = dd.argsort()
-    d, e = dd[idx], ee[:, idx]
-    y = np.dot(e.transpose(), s)
-    return d, e, y
+
+class BoxPool:
+    SYSREF_PERIOD: int = 2_000
+    DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
+
+    def __init__(self) -> None:
+        self._clock_master = (
+            None  # QuBEMasterClient(settings["CLOCK_MASTER"]["ipaddr"])
+        )
+        self._boxes: dict[str, tuple[Quel1BoxWithRawWss, SequencerClient]] = {}
+        self._linkstatus: dict[str, bool] = {}
+        self._estimated_timediff: dict[str, int] = {}
+        self._cap_sysref_time_offset: int = 0
+        self._port_direction: dict[tuple[str, int], str] = {}
+        self._box_config_cache: dict[str, dict] = {}
+
+    def create_clock_master(
+        self,
+        ipaddr: str,
+    ) -> None:
+        self._clock_master = QuBEMasterClient(master_ipaddr=ipaddr)
+
+    def measure_timediff(
+        self, num_iters: int = DEFAULT_NUM_SYSREF_MEASUREMENTS
+    ) -> tuple[str, int]:
+        sqcs = {name: sqc for name, (_, sqc) in self._boxes.items()}
+        counter_at_sysref_clk = {name: 0 for name in self._boxes}
+        for _ in range(num_iters):
+            for name, sqc in sqcs.items():
+                m = sqc.read_clock()
+                if len(m) < 2:
+                    raise RuntimeError("firmware doesn't support this measurement")
+                counter_at_sysref_clk[name] += m[2] % self.SYSREF_PERIOD
+        avg: dict[str, int] = {
+            name: round(cntr / num_iters)
+            for name, cntr in counter_at_sysref_clk.items()
+        }
+        refname = list(self._boxes.keys())[0]
+        adj = avg[refname]
+        self._estimated_timediff = {name: cntr - adj for ipaddr, cntr in avg.items()}
+        self._cap_sysref_time_offset = avg[refname]
+        return refname, avg[refname]
+
+    def create(
+        self,
+        box_name: str,
+        *,
+        ipaddr_wss: str,
+        ipaddr_sss: str,
+        ipaddr_css: str,
+        boxtype: Quel1BoxType,
+        config_root: Optional[Path],
+        config_options: Optional[Collection[Quel1ConfigOption]] = None,
+    ) -> Quel1BoxWithRawWss:
+        box = Quel1BoxWithRawWss.create(
+            ipaddr_wss=ipaddr_wss,
+            ipaddr_sss=ipaddr_sss,
+            ipaddr_css=ipaddr_css,
+            boxtype=boxtype,
+            config_root=config_root,
+            config_options=config_options,
+        )
+        sqc = SequencerClient(ipaddr_sss)
+        self._boxes[box_name] = (box, sqc)
+        self._linkstatus[box_name] = False
+        return box
+
+    def init(self, reconnect: bool = True, resync: bool = True) -> None:
+        self.scan_link_status(reconnect=reconnect)
+        self.reset_awg()
+        if self._clock_master is None:
+            return
+
+        # if resync:
+        #     self.resync()
+        # if not self.check_clock():
+        #     raise RuntimeError("failed to acquire time count from some clocks")
+
+    def scan_link_status(
+        self,
+        reconnect: bool = False,
+    ) -> None:
+        for name, (box, sqc) in self._boxes.items():
+            link_status: bool = True
+            if reconnect:
+                if not all(box.reconnect().values()):
+                    if all(
+                        box.reconnect(
+                            ignore_crc_error_of_mxfe=box.css.get_all_groups()
+                        ).values()
+                    ):
+                        logger.warning(
+                            f"crc error has been detected on MxFEs of {name}"
+                        )
+                    else:
+                        logger.error(
+                            f"datalink between MxFE and FPGA of {name} is not working"
+                        )
+                        link_status = False
+            else:
+                if not all(box.link_status().values()):
+                    if all(
+                        box.link_status(
+                            ignore_crc_error_of_mxfe=box.css.get_all_groups()
+                        ).values()
+                    ):
+                        logger.warning(
+                            f"crc error has been detected on MxFEs of {name}"
+                        )
+                    else:
+                        logger.error(
+                            f"datalink between MxFE and FPGA of {name} is not working"
+                        )
+                        link_status = False
+            self._linkstatus[name] = link_status
+
+    def reset_awg(self) -> None:
+        for name, (box, _) in self._boxes.items():
+            box.easy_stop_all(control_port_rfswitch=True)
+            box.initialize_all_awgs()
+
+    def get_box(
+        self,
+        name: str,
+    ) -> tuple[Quel1BoxWithRawWss, SequencerClient]:
+        if name in self._boxes:
+            box, sqc = self._boxes[name]
+            return box, sqc
+        else:
+            raise ValueError(f"invalid name of box: '{name}'")
+
+    def get_port_direction(self, box_name: str, port: int) -> str:
+        if (box_name, port) not in self._port_direction:
+            box = self.get_box(box_name)[0]
+            self._port_direction[(box_name, port)] = box.dump_port(port)["direction"]
+        return self._port_direction[(box_name, port)]
