@@ -1,0 +1,58 @@
+box_setting:
+  Q2A:
+    slot: 2
+    wait: 22
+  Q73A:
+    slot: 1
+    wait: 29
+  R19A:
+    slot: 2
+    wait: 7
+  R20A:
+    slot: 3
+    wait: 0
+  R21B:
+    slot: 3
+    wait: 4
+  R23A:
+    slot: 1
+    wait: 13
+  R26A:
+    slot: 3
+    wait: 21
+  R31A:
+    slot: 0
+    wait: 23
+  U10B:
+    slot: 1
+    wait: 14
+  U13B:
+    slot: 1
+    wait: 2
+  U14A:
+    slot: 3
+    wait: 48
+  U15A:
+    slot: 2
+    wait: 20
+monitor_port: Q73A.12
+reference_port: Q73A.1
+scale:
+  Q2A.4: 0.125
+  Q73A.1: 0.125
+target_port: !!set
+  Q2A.4: null
+  Q73A.1: null
+  R19A.6: null
+  R20A.13: null
+  R21B.6: null
+  R23A.6: null
+  R26A.6: null
+  R31A.6: null
+  U10B.6: null
+  U13B.6: null
+  U13B.7: null
+  U14A.6: null
+  U15A.6: null
+time_to_start: 0
+trigger_nport: 10

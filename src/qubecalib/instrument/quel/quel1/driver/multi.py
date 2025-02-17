@@ -11,7 +11,6 @@ from quel_clock_master import QuBEMasterClient
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss
 
 from . import single
-from .single import AwgSetting, RunitSetting, TriggerSetting
 
 logger = getLogger(__name__)
 
@@ -23,7 +22,7 @@ class NamedBox(NamedTuple):
 
 class BoxSetting(NamedTuple):
     name: str
-    settings: list[AwgSetting | RunitSetting | TriggerSetting]
+    settings: list[single.AwgSetting | single.RunitSetting | single.TriggerSetting]
 
 
 class Quel1System:
@@ -34,6 +33,11 @@ class Quel1System:
     ) -> None:
         self._clockmaster: Final[QuBEMasterClient] = clockmaster
         self._boxes: Final[MappingProxyType[str, Quel1BoxWithRawWss]] = boxes
+        self.displacement: int = 0
+        self.timing_shift: Final[dict[str, int]] = {
+            b: 0 for b in boxes
+        }  # this parameter must be a multiple of 16
+        self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
 
     @classmethod
     def create(
@@ -95,7 +99,9 @@ class Action:
             box.initialize_all_awgs()
             box.initialize_all_capunits()
             awg_ids = [
-                s.awg for s in box_settings.settings if isinstance(s, AwgSetting)
+                (s.awg.port, s.awg.channel)
+                for s in box_settings.settings
+                if isinstance(s, single.AwgSetting)
             ]
             box.prepare_for_emission(awg_ids)
             current_time, last_sysref_time = box.read_current_and_latched_clock()
@@ -204,7 +210,7 @@ class Action:
         dict[tuple[str, int, int], npt.NDArray[np.complex64]],
     ]:
         futures = self.capture_start()
-        self.emit_at()
+        self.emit_at(displacement=self._quel1system.displacement)
         results = self.capture_stop(futures)
         return results
         # return {}
@@ -236,13 +242,21 @@ class Action:
                 f"large fluctuation (= {fluctuation}) of sysref is detected from the previous timing measurement"
             )
 
+        awgs = {}
+        for name, action in self._actions.items():
+            awgs[name] = set([(s.port, s.channel) for s in action._wseqs])
+
         base_time = current_time + min_time_offset
         tamate_offset = (16 - (base_time - self._ref_sysref_time_offset) % 16) % 16
         # tamate_offset = (base_time - self._ref_sysref_time_offset) % 16
         base_time += tamate_offset
         base_time += displacement  # inducing clock displacement for performance evaluation (must be 0 usually).
         base_time += self.TIMING_OFFSET
+        timediff = self._estimated_timediff
+        timing_shift = (
+            self._quel1system.timing_shift
+        )  # key existence is guaranteed by the initialization.
         for name, action in self._actions.items():
-            t = base_time + self._estimated_timediff[name]
-            action.box.reserve_emission(set(action._wseqs.keys()), t)
+            t = base_time + timediff[name] + timing_shift[name]
+            action.box.reserve_emission(awgs[name], t)
             logger.info(f"reserving emission of {name} at {t}")
