@@ -32,6 +32,7 @@ from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
     CaptureReturnCode,
+    Quel1Box,
     Quel1BoxType,
     Quel1BoxWithRawWss,
     Quel1ConfigOption,
@@ -2206,6 +2207,34 @@ class SystemConfigDatabase:
             status = box.reconnect()
             for mxfe_idx, _ in status.items():
                 if not _:
+                    logger.error(
+                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+                    )
+        return box
+
+    @classmethod
+    def _create_box(
+        cls,
+        *,
+        ipaddr_wss: str | IPv4Address | IPv6Address,
+        boxtype: Quel1BoxType,
+        box_class: type[Quel1Box] = Quel1BoxWithRawWss,
+        reconnect: bool = True,
+        auto_relinkup: bool = True,
+    ) -> Quel1Box:
+        box = box_class.create(
+            ipaddr_wss=str(ipaddr_wss),
+            boxtype=boxtype,
+        )
+        if reconnect:
+            if not all([_ for _ in box.link_status().values()]):
+                if auto_relinkup:
+                    box.relinkup(use_204b=False, background_noise_threshold=350)
+                else:
+                    raise ValueError("some of the mxfe is not linked-up properly")
+            status = box.reconnect()
+            for mxfe_idx, b in status.items():
+                if not b:
                     logger.error(
                         f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                     )
