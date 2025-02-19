@@ -143,20 +143,20 @@ class QubeCalib:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
-        settings = self.system_config_database._target_settings
-        for target_name, gss in gen_sampled_sequence.items():
-            if target_name not in settings:
-                raise ValueError(f"target({target_name}) is not defined")
-            box_names = self.system_config_database.get_boxes_by_target(target_name)
-            if not box_names:
-                raise ValueError(f"target({target_name}) is not assigned to any box")
-            if len(box_names) > 1:
-                raise ValueError(f"target({target_name}) is assigned to multiple boxes")
-            # tgtset = settings[target_name]
-            # skew = tgtset["skew"] if "skew" in tgtset else 0
-            box_name = list(box_names)[0]
-            skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
-            gss.padding += skew
+        # settings = self.system_config_database._target_settings
+        # for target_name, gss in gen_sampled_sequence.items():
+        #     if target_name not in settings:
+        #         raise ValueError(f"target({target_name}) is not defined")
+        #     box_names = self.system_config_database.get_boxes_by_target(target_name)
+        #     if not box_names:
+        #         raise ValueError(f"target({target_name}) is not assigned to any box")
+        #     if len(box_names) > 1:
+        #         raise ValueError(f"target({target_name}) is assigned to multiple boxes")
+        #     # tgtset = settings[target_name]
+        #     # skew = tgtset["skew"] if "skew" in tgtset else 0
+        #     box_name = list(box_names)[0]
+        #     skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
+        #     gss.padding += skew
 
         items_by_target = sequence._get_group_items_by_target()
 
@@ -1029,6 +1029,22 @@ class Sequencer(Command):
         self.syncoffset_by_boxname = time_offset  # taps
         self.timetostart_by_boxname = time_to_start  # sysref
         self.interval = interval
+
+        settings = sysdb._target_settings
+        for target_name, gss in gen_sampled_sequence.items():
+            if target_name not in settings:
+                raise ValueError(f"target({target_name}) is not defined")
+            box_names = sysdb.get_boxes_by_target(target_name)
+            if not box_names:
+                raise ValueError(f"target({target_name}) is not assigned to any box")
+            if len(box_names) > 1:
+                raise ValueError(f"target({target_name}) is assigned to multiple boxes")
+            # tgtset = settings[target_name]
+            # skew = tgtset["skew"] if "skew" in tgtset else 0
+            box_name = list(box_names)[0]
+            skew = sysdb.skew[box_name] if box_name in sysdb.skew else 0
+            gss.padding += skew
+
         # resource_map は以下の形式
         # {
         #   "box": db._box_settings[box_name],
