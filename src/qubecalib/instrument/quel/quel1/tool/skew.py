@@ -23,6 +23,7 @@ DEFAULT_CNCO_FREQ = 1250e6
 DEFAULT_FNCO_FREQ = 0.0
 DEFAULT_SIDEBAND = "L"
 DEFAULT_VATT = 0x900
+DEFAULT_CHANNEL_NUM = 0
 
 REPETITION_PERIOD = 1280 * 128  # words
 EXTRA_CAPTURE_RANGE = 1024  # words
@@ -115,6 +116,98 @@ class Skew:
     def set_scale(self, port: tuple[str, int], scale: float) -> None:
         self._scale[port] = scale
 
+    @classmethod
+    def _setup_monitor_port(
+        cls,
+        *,
+        target_port: tuple[str, int],
+        monitor_port: tuple[str, int],
+        system: Quel1System,
+        sysdb: SystemConfigDatabase,
+    ) -> None:
+        name, nport = target_port
+        box = system.box[name]
+        if not box.is_output_port(nport):
+            raise ValueError(f"{target_port} is not output port")
+        dump_port = box.dump_port(nport)
+        lo_freq = dump_port["lo_freq"]
+        cnco_freq = dump_port["cnco_freq"]
+        fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
+        # sideband = dump_port["sideband"]
+        frequency = (
+            sysdb._target_settings[cls.acquire_target(sysdb, target_port)]["frequency"]
+            if cls.acquire_target(sysdb, target_port) in sysdb._target_settings
+            else DEFAULT_FREQUENCY
+        )
+
+        name, nport = monitor_port
+        box = system.box[name]
+        if not box.is_input_port(nport):
+            raise ValueError(f"{monitor_port} is not input port")
+        box.config_port(
+            nport,
+            lo_freq=lo_freq,
+            cnco_freq=cnco_freq,
+        )
+        box.config_runit(
+            nport,
+            runit=0,
+            fnco_freq=fnco_freq,
+        )
+        sysdb._target_settings[
+            cls.acquire_target(
+                sysdb,
+                monitor_port,
+            )
+        ] = dict(frequency=frequency)
+
+    @classmethod
+    def _setup_trigger_port(
+        cls,
+        *,
+        target_port: tuple[str, int],
+        trigger_port: tuple[str, int],
+        system: Quel1System,
+        sysdb: SystemConfigDatabase,
+    ) -> None:
+        name, nport = target_port
+        box = system.box[name]
+        if not box.is_output_port(nport):
+            raise ValueError(f"{target_port} is not output port")
+        dump_port = box.dump_port(nport)
+        lo_freq = dump_port["lo_freq"]
+        cnco_freq = dump_port["cnco_freq"]
+        fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
+        sideband = dump_port["sideband"]
+        frequency = (
+            sysdb._target_settings[cls.acquire_target(sysdb, target_port)]["frequency"]
+            if cls.acquire_target(sysdb, target_port) in sysdb._target_settings
+            else DEFAULT_FREQUENCY
+        )
+
+        name, nport = trigger_port
+        box = system.box[name]
+        if not box.is_output_port(nport):
+            raise ValueError(f"{trigger_port} is not output port")
+        box.config_port(
+            nport,
+            lo_freq=lo_freq,
+            cnco_freq=cnco_freq,
+            sideband=sideband,
+            vatt=DEFAULT_VATT,
+        )
+        box.config_channel(
+            nport,
+            channel=0,
+            fnco_freq=fnco_freq,
+        )
+        sysdb._target_settings[
+            cls.acquire_target(
+                sysdb,
+                trigger_port,
+            )
+        ] = dict(frequency=frequency)
+
     def read_setup(
         self,
         read_port: tuple[str, int],
@@ -170,12 +263,22 @@ class Skew:
     @classmethod
     def acquire_target(
         cls,
-        qc: QubeCalib,
+        sysdb: SystemConfigDatabase,
         port: tuple[str, int],
-        channel: int = 0,
+        channel: int = DEFAULT_CHANNEL_NUM,
     ) -> str:
         channel_id: tuple[str, int, int] = (*port, channel)
-        return qc.sysdb.get_target_by_channel(*channel_id)
+        return sysdb.get_target_by_channel(*channel_id)
+
+    # @classmethod
+    # def acquire_target(
+    #     cls,
+    #     qc: QubeCalib,
+    #     port: tuple[str, int],
+    #     channel: int = 0,
+    # ) -> str:
+    #     channel_id: tuple[str, int, int] = (*port, channel)
+    #     return qc.sysdb.get_target_by_channel(*channel_id)
 
     def target_from_box(self, box_names: list[str]) -> set[tuple[str, int]]:
         return {
@@ -203,6 +306,10 @@ class Skew:
                 reset_skew_parameter=reset_skew_parameter,
             )
 
+    # update note: 2025/02/17
+    # reference_port のパルスを trigger_port に置き換えた。これにより、 reference_port の位相に影響を与えずにモニタすることができる。
+    # Q73A は PUMP0 なので周波数によってはフィルタ帯域に引っかかって極端に小さくなることがある
+    # monitor_port の lo, cnco, fnco を target_port に合わせるように変更した。これにより、 target_port の位相に影響を与えずにモニタすることができる
     def _measure(
         self,
         target_port: tuple[str, int],
@@ -219,12 +326,161 @@ class Skew:
         monitor_box_name, _ = monitor_port
         trigger_port: tuple[str, int] = (monitor_box_name, self._trigger_nport)
         target_ports = set([target_port])
+        # for p in [monitor_port, trigger_port, reference_port]:
+        #     qc.sysdb._target_settings[self.acquire_target(qc.sysdb, p)] = dict(
+        #         frequency=DEFAULT_FREQUENCY
+        #     )
+        # for p in target_ports:
+        #     qc.sysdb._target_settings[self.acquire_target(qc.sysdb, p)] = dict(
+        #         frequency=DEFAULT_FREQUENCY
+        #     )
+        trigger_box_name, trigger_port_number = trigger_port
+        trigger_channel: tuple[str, int, int] = (
+            trigger_box_name,
+            trigger_port_number,
+            0,
+        )
+        qc.sysdb.trigger = {monitor_port: trigger_channel}
+        # self.read_setup(monitor_port, trigger_port_number, rfswitch="open")
+        self._setup_monitor_port(
+            target_port=target_port,
+            monitor_port=monitor_port,
+            system=system,
+            sysdb=qc.sysdb,
+        )
+        self._setup_trigger_port(
+            target_port=target_port,
+            trigger_port=trigger_port,
+            system=system,
+            sysdb=qc.sysdb,
+        )
+        for ctrl_box, ctrl_nport in [reference_port] + [p for p in target_ports]:
+            # self.ctrl_setup(
+            #     (ctrl_box, ctrl_nport),
+            #     sideband="L",
+            #     rfswitch="pass",
+            #     vatt=0xC00,
+            # )
+            m = system.box[ctrl_box].get_monitor_input_ports()
+            if m:
+                for port in m:
+                    if isinstance(port, tuple):
+                        raise ValueError("fogi port is not supported yet")
+                    system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
+        backup = (
+            self._skew_adjust.slot[reference_port],
+            self._skew_adjust.wait[reference_port],
+            self._skew_adjust.slot[target_port],
+            self._skew_adjust.wait[target_port],
+        )
+        if reset_skew_parameter:
+            self._skew_adjust.slot[reference_port] = 0
+            self._skew_adjust.wait[reference_port] = 0
+            self._skew_adjust.slot[target_port] = 0
+            self._skew_adjust.wait[target_port] = 0
+            self._skew_adjust.push()
+
+        pulse = Rectangle(duration=128, amplitude=1.0)
+        blank = Blank(
+            duration=offset * 128
+        )  # reference と target の間に offset * 128ns の待ち時間を入れる
+        capture = Capture(
+            duration=2 * len(target_ports) * 128 + 128 + extra_capture_range
+        )
+
+        reference_scale = (
+            self._scale[reference_port] if reference_port in self._scale else 1
+        )
+        with Sequence() as seq:
+            with Flushleft():
+                with Series():
+                    scale = reference_scale if show_reference else 0
+                    pulse.scaled(scale).target(
+                        # self.acquire_target(qc.sysdb, reference_port)
+                        self.acquire_target(qc.sysdb, trigger_port)
+                    )
+                    if offset != 0:
+                        blank.target()
+                    scale = (
+                        self._scale[target_port] if target_port in self._scale else 1
+                    )
+                    pulse.scaled(scale).target(
+                        self.acquire_target(qc.sysdb, target_port)
+                    )
+                # pulse.scaled(0).target(self.acquire_target(qc.sysdb, trigger_port))
+                capture.target(self.acquire_target(qc.sysdb, monitor_port))
+
+        qc.add_sequence(seq)
+
+        for _, data, _ in qc.step_execute(
+            repeats=100,
+            interval=REPETITION_PERIOD,
+            integral_mode="single",
+            dsp_demodulation=False,
+            software_demodulation=True,
+        ):
+            for _, iqs in data.items():
+                iqs = iqs[0].sum(axis=1).squeeze()
+                self._measured[target_port] = iqs
+                self._offset[target_port] = offset
+
+        if reset_skew_parameter:
+            adj = self._skew_adjust
+            (
+                adj.slot[reference_port],
+                adj.wait[reference_port],
+                adj.slot[target_port],
+                adj.wait[target_port],
+            ) = backup
+
+        return iqs
+
+    def config_measure(
+        self,
+        *,
+        offset: int = 1,  # multiplied by 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
+        show_reference: bool = True,
+        reset_skew_parameter: bool = False,
+    ) -> None:
+        target_ports = self.target_from_box(list(self._system.boxes))
+        for target_box, target_nport in tqdm(target_ports):
+            target_port = (target_box, target_nport)
+            self._config_measure(
+                target_port,
+                offset=offset,
+                extra_capture_range=extra_capture_range,
+                show_reference=show_reference,
+                reset_skew_parameter=reset_skew_parameter,
+            )
+
+    # update note: 2025/02/17
+    # reference_port のパルスを trigger_port に置き換えた。これにより、 reference_port の位相に影響を与えずにモニタすることができる。
+    # Q73A は PUMP0 なので周波数によってはフィルタ帯域に引っかかって極端に小さくなることがある
+    # monitor_port の lo, cnco, fnco を target_port に合わせるように変更した。これにより、 target_port の位相に影響を与えずにモニタすることができる
+    def _config_measure(
+        self,
+        target_port: tuple[str, int],
+        *,
+        offset: int = 0,  # multiplied by 128 ns
+        extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
+        reset_skew_parameter: bool = True,
+        show_reference: bool = False,
+    ) -> npt.NDArray:
+        system = self._system
+        qc = self._qubecalib
+        sysdb = qc.sysdb
+        reference_port = self._reference_port
+        monitor_port = self._monitor_port
+        monitor_box_name, _ = monitor_port
+        trigger_port: tuple[str, int] = (monitor_box_name, self._trigger_nport)
+        target_ports = set([target_port])
         for p in [monitor_port, trigger_port, reference_port]:
-            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(
+            qc.sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
                 frequency=DEFAULT_FREQUENCY
             )
         for p in target_ports:
-            qc.sysdb._target_settings[self.acquire_target(qc, p)] = dict(
+            qc.sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
                 frequency=DEFAULT_FREQUENCY
             )
         trigger_box_name, trigger_port_number = trigger_port
@@ -276,15 +532,17 @@ class Skew:
             with Flushleft():
                 with Series():
                     scale = reference_scale if show_reference else 0
-                    pulse.scaled(scale).target(self.acquire_target(qc, reference_port))
+                    pulse.scaled(scale).target(
+                        self.acquire_target(sysdb, reference_port)
+                    )
                     if offset != 0:
                         blank.target()
                     scale = (
                         self._scale[target_port] if target_port in self._scale else 1
                     )
-                    pulse.scaled(scale).target(self.acquire_target(qc, target_port))
-                pulse.scaled(0).target(self.acquire_target(qc, trigger_port))
-                capture.target(self.acquire_target(qc, monitor_port))
+                    pulse.scaled(scale).target(self.acquire_target(sysdb, target_port))
+                pulse.scaled(0).target(self.acquire_target(sysdb, trigger_port))
+                capture.target(self.acquire_target(sysdb, monitor_port))
 
         qc.add_sequence(seq)
 
