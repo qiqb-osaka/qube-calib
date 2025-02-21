@@ -28,6 +28,8 @@ DEFAULT_CHANNEL_NUM = 0
 REPETITION_PERIOD = 1280 * 128  # words
 EXTRA_CAPTURE_RANGE = 1024  # words
 
+DEFAULT_FNCO_LIMIT = 500e6
+
 
 def str2port(v: str) -> tuple[str, int]:
     box_name, nport = v.split("-")[:2]
@@ -144,6 +146,9 @@ class Skew:
         box = system.box[name]
         if not box.is_input_port(nport):
             raise ValueError(f"{monitor_port} is not input port")
+        if abs(fnco_freq) >= DEFAULT_FNCO_LIMIT:
+            sign = fnco_freq / abs(fnco_freq)
+            fnco_freq = sign * (DEFAULT_FNCO_LIMIT - 1)
         box.config_port(
             nport,
             lo_freq=lo_freq,
@@ -684,11 +689,13 @@ class Skew:
             )
         fig.show()
 
-    def load(self, filename: str) -> None:
-        self._skew_adjust, _ = self._load(filename)
+    def load(self, filename: str, *, ignore_skew: bool = False) -> None:
+        self._skew_adjust, _ = self._load(filename, ignore_skew=ignore_skew)
         self._skew_adjust.push()
 
-    def _load(self, filename: str) -> tuple[SkewAdjust, dict]:
+    def _load(
+        self, filename: str, *, ignore_skew: bool = False
+    ) -> tuple[SkewAdjust, dict]:
         with open(Path(os.getcwd()) / Path(filename), "r") as file:
             config = yaml.safe_load(file)
         # sysdb = self._qubecalib.sysdb
@@ -698,13 +705,16 @@ class Skew:
         self._target_port = {str2port(v) for v in config["target_port"]}
         self._scale = {str2port(p): v for p, v in config["scale"].items()}
         skew_adjust = SkewAdjust(self._qubecalib.sysdb, target_ports=self._target_port)
-        box_setting = config["box_setting"]
-        for port in self._target_port:
-            box_name, _ = port
-            skew_adjust.slot[port] = box_setting[box_name]["slot"]
-            skew_adjust.wait[port] = box_setting[box_name]["wait"]
-        skew_adjust.time_to_start = config["time_to_start"]
-        return skew_adjust, config
+        if ignore_skew:
+            return skew_adjust, config
+        else:
+            box_setting = config["box_setting"]
+            for port in self._target_port:
+                box_name, _ = port
+                skew_adjust.slot[port] = box_setting[box_name]["slot"]
+                skew_adjust.wait[port] = box_setting[box_name]["wait"]
+            skew_adjust.time_to_start = config["time_to_start"]
+            return skew_adjust, config
 
     def save(self, filename: str) -> None:
         sysdb = self._qubecalib.sysdb
