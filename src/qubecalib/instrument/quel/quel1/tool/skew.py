@@ -13,9 +13,9 @@ import plotly.graph_objects as go
 import yaml
 from tqdm.auto import tqdm
 
+from .....executor import Executor
 from .....instrument.quel.quel1.driver import Quel1System
 from .....neopulse import Blank, Capture, Flushleft, Rectangle, Sequence, Series
-from .....qubecalib import QubeCalib
 from .....sysconfdb import SystemConfigDatabase
 
 DEFAULT_FREQUENCY = 9.75
@@ -70,18 +70,20 @@ class SkewAdjust:
         return o
 
 
-class Skew:
+class SkewMonitor:
     def __init__(
         self,
         system: Quel1System,
         *,
-        qubecalib: QubeCalib,
+        sysdb: SystemConfigDatabase,
+        executor: Executor,
         monitor_port: tuple[str, int] = ("", 0),
         trigger_nport: int = 0,
         reference_port: tuple[str, int] = ("", 0),
     ) -> None:  # TODO ここは多分変わります
         self._system: Final[Quel1System] = system
-        self._qubecalib: Final[QubeCalib] = qubecalib
+        self._sysdb: Final[SystemConfigDatabase] = sysdb
+        self._executor: Final[Executor] = executor
         self._monitor_port: tuple[str, int] = monitor_port
         self._trigger_nport: int = trigger_nport
         self._reference_port: tuple[str, int] = reference_port
@@ -90,7 +92,7 @@ class Skew:
         self._estimated: dict[tuple[str, int], npt.NDArray] = {}
         self._offset: dict[tuple[str, int], int] = {}
         self._target_port: set[tuple[str, int]] = set()
-        self._skew_adjust: SkewAdjust = SkewAdjust(qubecalib.sysdb)
+        self._skew_adjust: SkewAdjust = SkewAdjust(self._sysdb)
 
     @property
     def monitor_port(self) -> tuple[str, int]:
@@ -326,7 +328,7 @@ class Skew:
         show_reference: bool = False,
     ) -> npt.NDArray:
         system = self._system
-        qc = self._qubecalib
+        sysdb = self._sysdb
         reference_port = self._reference_port
         monitor_port = self._monitor_port
         monitor_box_name, _ = monitor_port
@@ -346,19 +348,19 @@ class Skew:
             trigger_port_number,
             0,
         )
-        qc.sysdb.trigger = {monitor_port: trigger_channel}
+        sysdb.trigger = {monitor_port: trigger_channel}
         # self.read_setup(monitor_port, trigger_port_number, rfswitch="open")
         self._setup_monitor_port(
             target_port=target_port,
             monitor_port=monitor_port,
             system=system,
-            sysdb=qc.sysdb,
+            sysdb=sysdb,
         )
         self._setup_trigger_port(
             target_port=target_port,
             trigger_port=trigger_port,
             system=system,
-            sysdb=qc.sysdb,
+            sysdb=sysdb,
         )
         for ctrl_box, ctrl_nport in [reference_port] + [p for p in target_ports]:
             # self.ctrl_setup(
@@ -403,22 +405,20 @@ class Skew:
                     scale = reference_scale if show_reference else 0
                     pulse.scaled(scale).target(
                         # self.acquire_target(qc.sysdb, reference_port)
-                        self.acquire_target(qc.sysdb, trigger_port)
+                        self.acquire_target(sysdb, trigger_port)
                     )
                     if offset != 0:
                         blank.target()
                     scale = (
                         self._scale[target_port] if target_port in self._scale else 1
                     )
-                    pulse.scaled(scale).target(
-                        self.acquire_target(qc.sysdb, target_port)
-                    )
+                    pulse.scaled(scale).target(self.acquire_target(sysdb, target_port))
                 # pulse.scaled(0).target(self.acquire_target(qc.sysdb, trigger_port))
-                capture.target(self.acquire_target(qc.sysdb, monitor_port))
+                capture.target(self.acquire_target(sysdb, monitor_port))
 
-        qc.add_sequence(seq)
+        self._executor.add_sequence(seq)
 
-        for _, data, _ in qc.step_execute(
+        for _, data, _ in self._executor.step_execute(
             repeats=100,
             interval=REPETITION_PERIOD,
             integral_mode="single",
@@ -474,19 +474,18 @@ class Skew:
         show_reference: bool = False,
     ) -> npt.NDArray:
         system = self._system
-        qc = self._qubecalib
-        sysdb = qc.sysdb
+        sysdb = self._sysdb
         reference_port = self._reference_port
         monitor_port = self._monitor_port
         monitor_box_name, _ = monitor_port
         trigger_port: tuple[str, int] = (monitor_box_name, self._trigger_nport)
         target_ports = set([target_port])
         for p in [monitor_port, trigger_port, reference_port]:
-            qc.sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
+            sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
                 frequency=DEFAULT_FREQUENCY
             )
         for p in target_ports:
-            qc.sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
+            sysdb._target_settings[self.acquire_target(sysdb, p)] = dict(
                 frequency=DEFAULT_FREQUENCY
             )
         trigger_box_name, trigger_port_number = trigger_port
@@ -495,7 +494,7 @@ class Skew:
             trigger_port_number,
             0,
         )
-        qc.sysdb.trigger = {monitor_port: trigger_channel}
+        sysdb.trigger = {monitor_port: trigger_channel}
         self.read_setup(monitor_port, trigger_port_number, rfswitch="open")
         for ctrl_box, ctrl_nport in [reference_port] + [p for p in target_ports]:
             self.ctrl_setup(
@@ -550,9 +549,9 @@ class Skew:
                 pulse.scaled(0).target(self.acquire_target(sysdb, trigger_port))
                 capture.target(self.acquire_target(sysdb, monitor_port))
 
-        qc.add_sequence(seq)
+        self._executor.add_sequence(seq)
 
-        for _, data, _ in qc.step_execute(
+        for _, data, _ in self._executor.step_execute(
             repeats=100,
             interval=REPETITION_PERIOD,
             integral_mode="single",
@@ -705,7 +704,7 @@ class Skew:
         self._trigger_nport = config["trigger_nport"]
         self._target_port = {str2port(v) for v in config["target_port"]}
         self._scale = {str2port(p): v for p, v in config["scale"].items()}
-        skew_adjust = SkewAdjust(self._qubecalib.sysdb, target_ports=self._target_port)
+        skew_adjust = SkewAdjust(self._sysdb, target_ports=self._target_port)
         if ignore_skew:
             return skew_adjust, config
         else:
@@ -718,7 +717,7 @@ class Skew:
             return skew_adjust, config
 
     def save(self, filename: str) -> None:
-        sysdb = self._qubecalib.sysdb
+        sysdb = self._sysdb
         config = {
             "time_to_start": sysdb.time_to_start,
             "box_setting": {

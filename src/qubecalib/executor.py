@@ -7,12 +7,13 @@ import os
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Iterable, MutableSequence, Optional
 
+from . import neopulse
 from .instrument.quel.quel1.command import Command
 from .instrument.quel.quel1.sequencer import Sequencer
 from .instrument.quel.quel1.system import BoxPool
-from .sysconfdb import SystemConfigDatabase
+from .sysconfdb import BoxSetting, PortSetting, SystemConfigDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -216,3 +217,85 @@ class Executor:
             )
 
         return self
+
+    def add_sequence(
+        self,
+        sequence: neopulse.Sequence,
+        *,
+        interval: Optional[float] = None,
+        time_offset: dict[str, int] = {},  # {box_name: time_offset}
+        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
+    ) -> None:
+        # TODO ここは仕様変更が必要
+        # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
+        # 情報を失わせ過ぎた
+        # capture に関連する gen_sequence を取り出して 変調 slice を作成する
+        gen_sampled_sequence, cap_sampled_sequence = (
+            sequence.convert_to_sampled_sequence()
+        )
+        # settings = self.system_config_database._target_settings
+        # for target_name, gss in gen_sampled_sequence.items():
+        #     if target_name not in settings:
+        #         raise ValueError(f"target({target_name}) is not defined")
+        #     box_names = self.system_config_database.get_boxes_by_target(target_name)
+        #     if not box_names:
+        #         raise ValueError(f"target({target_name}) is not assigned to any box")
+        #     if len(box_names) > 1:
+        #         raise ValueError(f"target({target_name}) is assigned to multiple boxes")
+        #     # tgtset = settings[target_name]
+        #     # skew = tgtset["skew"] if "skew" in tgtset else 0
+        #     box_name = list(box_names)[0]
+        #     skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
+        #     gss.padding += skew
+
+        items_by_target = sequence._get_group_items_by_target()
+
+        targets = set(
+            [gtarget for gtarget in gen_sampled_sequence]
+            + [ctarget for ctarget in cap_sampled_sequence]
+        )
+        resource_map = self._create_target_resource_map(targets)
+
+        self.add_command(
+            Sequencer(
+                gen_sampled_sequence=gen_sampled_sequence,
+                cap_sampled_sequence=cap_sampled_sequence,
+                resource_map=resource_map,
+                group_items_by_target=items_by_target,
+                time_offset=time_offset,
+                time_to_start=time_to_start,
+                interval=interval,
+                sysdb=self.sysdb,
+            )
+        )
+
+    def _create_target_resource_map(
+        self,
+        target_names: Iterable[str],
+    ) -> dict[
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, float]]]
+    ]:
+        # {target_name: sampled_sequence} の形式から
+        # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
+        # {target_name: {box, port, channel_number)}} へ変換
+        db = self.sysdb
+        targets_channels: MutableSequence[tuple[str, set[str]]] = [
+            (target_name, db.get_channels_by_target(target_name))
+            for target_name in target_names
+        ]
+        bpc_targets = {
+            target_name: [db.get_channel(_) for _ in channels]
+            for target_name, channels in targets_channels
+        }
+        return {
+            target_name: [
+                {
+                    "box": db._box_settings[box_name],
+                    "port": db._port_settings[port_name],
+                    "channel_number": channel_number,
+                    "target": db._target_settings[target_name],
+                }
+                for box_name, port_name, channel_number in _
+            ]
+            for target_name, _ in bpc_targets.items()
+        }

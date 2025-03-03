@@ -1,3 +1,3 @@
-from .skew import Skew
+from .skew import SkewMonitor
 
-__all__ = ["Skew"]
+__all__ = ["SkewMonitor"]
