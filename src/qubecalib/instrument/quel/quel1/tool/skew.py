@@ -15,7 +15,8 @@ from tqdm.auto import tqdm
 
 from .....instrument.quel.quel1.driver import Quel1System
 from .....neopulse import Blank, Capture, Flushleft, Rectangle, Sequence, Series
-from .....qubecalib import QubeCalib, SystemConfigDatabase
+from .....qubecalib import QubeCalib
+from .....sysconfdb import SystemConfigDatabase
 
 DEFAULT_FREQUENCY = 9.75
 DEFAULT_LO_FREQ = 11000e6
