@@ -7,7 +7,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
-    Final,
     MutableSequence,
     Optional,
 )
@@ -28,6 +27,7 @@ from .instrument.quel.quel1.tool import SkewMonitor
 from .sysconfdb import SystemConfigDatabase
 
 logger = logging.getLogger(__name__)
+from .base import QubeCalibBase
 
 
 class Direction(Enum):
@@ -43,15 +43,12 @@ class Sideband(Enum):
 DEFAULT_SIDEBAND = "U"
 
 
-class QubeCalib:
+class QubeCalib(QubeCalibBase):
     def __init__(
         self,
         path_to_database_file: Optional[str | os.PathLike] = None,
     ) -> None:
-        self._system_config_database: Final[SystemConfigDatabase] = (
-            SystemConfigDatabase()
-        )
-        self._executor: Final[Executor] = Executor(self._system_config_database)
+        super().__init__()
         self._box_configs: dict[str, dict[str, Any]] = {}
 
         if path_to_database_file is not None:
@@ -83,7 +80,7 @@ class QubeCalib:
         reference_port: tuple[str, int] = ("", 0),
     ) -> SkewMonitor:
         system = self.create_quel1system(box_names)
-        skew = SkewMonitor(
+        return SkewMonitor(
             system,
             sysdb=self.sysdb,
             executor=self._executor,
@@ -91,7 +88,6 @@ class QubeCalib:
             trigger_nport=trigger_nport,
             reference_port=reference_port,
         )
-        return skew
 
     def execute(self) -> tuple:
         return self._executor.execute()

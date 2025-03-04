@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import yaml
 from tqdm.auto import tqdm
 
+from .....base import QubeCalibBase
 from .....executor import Executor
 from .....instrument.quel.quel1.driver import Quel1System
 from .....neopulse import Blank, Capture, Flushleft, Rectangle, Sequence, Series
@@ -732,3 +733,13 @@ class SkewMonitor:
         }
         with open(Path(os.getcwd()) / Path(filename), "w") as file:
             yaml.safe_dump(config, file)
+
+
+# Legacy compatibility code
+class Skew(SkewMonitor):
+    def __init__(self, system: Quel1System, qubecalib: QubeCalibBase) -> None:
+        super().__init__(
+            system,
+            sysdb=qubecalib._system_config_database,
+            executor=qubecalib._executor,
+        )
