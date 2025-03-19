@@ -1394,8 +1394,9 @@ class Sequencer(Command):
             width = list(range(len(cprm.sum_section_list))[1:])
             result = np.hsplit(data, width)
         else:
+            b = DspUnit.DECIMATION in cprm.dsp_units_enabled
             ssl = cprm.sum_section_list
-            ws = [w for w, _ in ssl[:-1]]
+            ws = [w if b else int(w // 4) for w, _ in ssl[:-1]]
             word = cprm.NUM_SAMPLES_IN_ADC_WORD
             width = np.cumsum(np.array(ws))
             c = np.hsplit(data, width * word)
