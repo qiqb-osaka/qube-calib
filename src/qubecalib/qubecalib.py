@@ -813,18 +813,68 @@ class Converter:
         f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
         f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
         sideband = port_config.sideband
+
+        if port_config.dump_config["direction"] == "out":
+            f_diff = cls._calc_modulation_frequency(
+                target_freq=f_target,
+                lo_freq=f_lo,
+                cnco_freq=f_cnco,
+                fnco_freq=f_fnco,
+                sideband=sideband,
+            )
+
+            if 0.5 < abs(f_diff):
+                p = port_config
+                warnings.warn(
+                    f"Modulation frequency abs({f_diff}) of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
+                )
+        elif port_config.dump_config["direction"] == "in":
+            opposite = "L" if sideband == "U" else "U"
+            f_diff = cls._calc_modulation_frequency(
+                target_freq=f_target,
+                lo_freq=f_lo,
+                cnco_freq=f_cnco,
+                fnco_freq=f_fnco,
+                sideband=sideband,
+            )
+            o_f_diff = cls._calc_modulation_frequency(
+                target_freq=f_target,
+                lo_freq=f_lo,
+                cnco_freq=f_cnco,
+                fnco_freq=f_fnco,
+                sideband=opposite,
+            )
+            # TODO in port の sideband の取り扱いが曖昧
+            # Dsp の設定を見るべきかな
+            # とりあえず abs が小さい方で判定するが sideband の設定に応じた diff を復調周波数として採用
+            mindiff = f_diff if abs(f_diff) < abs(o_f_diff) else o_f_diff
+            if 0.5 < abs(mindiff):
+                p = port_config
+                warnings.warn(
+                    f"Modulation frequency abs({mindiff}) of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
+                )
+        else:
+            raise ValueError(f"{port_config} invalid direction")
+
+        return f_diff  # GHz
+
+    @classmethod
+    def _calc_modulation_frequency(
+        cls,
+        target_freq: float,
+        lo_freq: float,
+        cnco_freq: float,
+        fnco_freq: float,
+        sideband: str,
+    ) -> float:
+        """Calculate modulation frequency from target frequency and port configuration."""
+        # Note that port_config has frequencies in Hz.
         if sideband == Sideband.UpperSideBand.value:
-            f_diff = f_target - f_lo - (f_cnco + f_fnco)
+            f_diff = target_freq - lo_freq - (cnco_freq + fnco_freq)
         elif sideband == Sideband.LowerSideBand.value:
-            f_diff = -(f_target - f_lo) - (f_cnco + f_fnco)
+            f_diff = -(target_freq - lo_freq) - (cnco_freq + fnco_freq)
         else:
             raise ValueError("invalid ssb mode")
-
-        if 0.25 < abs(f_diff):
-            p = port_config
-            warnings.warn(
-                f"Modulation frequency of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"
-            )
 
         return f_diff  # GHz
 
@@ -1822,6 +1872,74 @@ class Executor:
             )
 
         return self
+
+    def _create_target_resource_map(
+        self,
+        target_names: Iterable[str],
+    ) -> dict[
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, float]]]
+    ]:
+        # {target_name: sampled_sequence} の形式から
+        # TODO {target_name: {box, group, line | rline, channel | runit)} へ変換　？？
+        # {target_name: {box, port, channel_number)}} へ変換
+        db = self.sysdb
+        targets_channels: MutableSequence[tuple[str, set[str]]] = [
+            (target_name, db.get_channels_by_target(target_name))
+            for target_name in target_names
+        ]
+        bpc_targets = {
+            target_name: [db.get_channel(_) for _ in channels]
+            for target_name, channels in targets_channels
+        }
+        return {
+            target_name: [
+                {
+                    "box": db._box_settings[box_name],
+                    "port": db._port_settings[port_name],
+                    "channel_number": channel_number,
+                    "target": db._target_settings[target_name],
+                }
+                for box_name, port_name, channel_number in _
+            ]
+            for target_name, _ in bpc_targets.items()
+        }
+
+    def add_sequence(
+        self,
+        sequence: neopulse.Sequence,
+        *,
+        interval: Optional[float] = None,
+        time_offset: dict[str, int] = {},  # {box_name: time_offset}
+        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
+    ) -> None:
+        # TODO ここは仕様変更が必要
+        # Readout send に位相合わせ機構を導入するため SebSequence にまとめてしまわず Slot 毎に分割しないといけない
+        # 情報を失わせ過ぎた
+        # capture に関連する gen_sequence を取り出して 変調 slice を作成する
+        gen_sampled_sequence, cap_sampled_sequence = (
+            sequence.convert_to_sampled_sequence()
+        )
+
+        items_by_target = sequence._get_group_items_by_target()
+
+        targets = set(
+            [gtarget for gtarget in gen_sampled_sequence]
+            + [ctarget for ctarget in cap_sampled_sequence]
+        )
+        resource_map = self._create_target_resource_map(targets)
+
+        self.add_command(
+            Sequencer(
+                gen_sampled_sequence=gen_sampled_sequence,
+                cap_sampled_sequence=cap_sampled_sequence,
+                resource_map=resource_map,
+                group_items_by_target=items_by_target,
+                time_offset=time_offset,
+                time_to_start=time_to_start,
+                interval=interval,
+                sysdb=self.sysdb,
+            )
+        )
 
 
 @dataclass
