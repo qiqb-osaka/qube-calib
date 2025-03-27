@@ -26,6 +26,6 @@ def test_acquire_freq_setting() -> None:
         Skew.acquire_freq_setting(f) for f in [6.805266, 10, 10.124, 10.125, 10.5]
     ]
     assert [s["sideband"] for s in setting] == ["L", "U", "U", "U", "U"]
-    assert [s["lo_freq"] for s in setting] == [8.5, 8.5, 8.5, 8.5, 9]
-    assert [s["cnco_freq"] for s in setting] == [1.625, 1.5, 1.5, 1.625, 1.5]
+    assert [s["lo_freq"] for s in setting] == [9.0, 8.0, 8.0, 8.0, 8.5]
+    assert [s["cnco_freq"] for s in setting] == [2.125, 2.0, 2.0, 2.125, 2.0]
     assert [s["fnco_freq"] for s in setting] == len(setting) * [0]
