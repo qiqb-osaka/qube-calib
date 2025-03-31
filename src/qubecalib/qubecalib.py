@@ -2411,6 +2411,17 @@ class SystemConfigDatabase:
         box_name: str,
         port: int,
     ) -> Set[tuple[str, str]]:
+        return self.get_targets_by_port(
+            box_name=box_name,
+            port=port,
+        )
+
+    def get_targets_by_port(
+        self,
+        *,
+        box_name: str,
+        port: int,
+    ) -> Set[tuple[str, str]]:
         ps = self._port_settings
         port_names = {
             n for n, s in ps.items() if s.box_name == box_name and s.port == port
@@ -2420,6 +2431,33 @@ class SystemConfigDatabase:
         rct = self._relation_channel_target
         relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
         return relation_target_channel
+
+    def get_targets_by_channel(
+        self,
+        box_name: str,
+        port: int,
+        channel: int,
+    ) -> Set[str]:
+        relation_target_channel = self.get_targets_by_port(box_name=box_name, port=port)
+        channels = {c for _, c in relation_target_channel}
+        if not channels:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        try:
+            channel_id = {
+                p["channel_number"]: c
+                for c, p in self._relation_channel_port
+                if c in channels
+            }[channel]
+        except KeyError:
+            raise ValueError(f"invalid channel number {box_name, port, channel}")
+        targets = {t for t, c in relation_target_channel if c == channel_id}
+        if not targets:
+            raise ValueError(
+                f"no target is assigned to the channel {box_name, port, channel}"
+            )
+        return targets
 
     def get_target_by_channel(
         self,
