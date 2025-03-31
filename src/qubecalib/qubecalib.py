@@ -257,7 +257,7 @@ class QubeCalib:
             config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            #config_root=config_root,
         )
 
     def define_channel(
@@ -482,10 +482,10 @@ class QubeCalib:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                #config_root=Path(setting.config_root)
+                #if setting.config_root is not None
+                #else None,
+                #config_options=setting.config_options,
             )
             box.reconnect()
         return boxpool
@@ -1795,10 +1795,10 @@ class Executor:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                #config_root=Path(setting.config_root),
+                #if setting.config_root is not None
+                #else None,
+                #config_options=setting.config_options,
             )
             status = box.reconnect()
             for mxfe_idx, s in status.items():
@@ -1840,8 +1840,8 @@ class BoxSetting:
     boxtype: Quel1BoxType
     ipaddr_sss: Optional[str | IPv4Address | IPv6Address] = None
     ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None
-    config_root: Optional[str | os.PathLike] = None
-    config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
+    #config_root: Optional[str | os.PathLike] = None
+    #config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if isinstance(self.ipaddr_wss, str):
@@ -1871,10 +1871,10 @@ class BoxSetting:
             "ipaddr_sss": str(self.ipaddr_sss),
             "ipaddr_css": str(self.ipaddr_css),
             "boxtype": self.boxtype,
-            "config_root": str(self.config_root)
-            if self.config_root is not None
-            else None,
-            "config_options": self.config_options,
+            #"config_root": str(self.config_root)
+            #if self.config_root is not None
+            #else None,
+            #"config_options": self.config_options,
         }
 
     def asjsonable(self) -> dict[str, Any]:
@@ -2007,8 +2007,8 @@ class SystemConfigDatabase:
             boxtype=boxtype,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
-            config_options=config_options,
+            #config_root=config_root,
+            #config_options=config_options,
         )
 
     def add_port_setting(
@@ -2123,10 +2123,10 @@ class SystemConfigDatabase:
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
             boxtype=QUEL1_BOXTYPE_ALIAS[boxtype],
-            config_options=config_options,
+            #config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            #config_root=config_root,
         )
         self._box_settings[box_name] = box_setting
         return box_setting.asdict()
@@ -2381,16 +2381,16 @@ class BoxPool:
         ipaddr_sss: str,
         ipaddr_css: str,
         boxtype: Quel1BoxType,
-        config_root: Optional[Path],
-        config_options: Optional[Collection[Quel1ConfigOption]] = None,
+        #config_root: Optional[Path],
+        #config_options: Optional[Collection[Quel1ConfigOption]] = None,
     ) -> Quel1BoxWithRawWss:
         box = Quel1BoxWithRawWss.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             boxtype=boxtype,
-            config_root=config_root,
-            config_options=config_options,
+            #config_root=config_root,
+            #config_options=config_options,
         )
         sqc = SequencerClient(ipaddr_sss)
         self._boxes[box_name] = (box, sqc)
