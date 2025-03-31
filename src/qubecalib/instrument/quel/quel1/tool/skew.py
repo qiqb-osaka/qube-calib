@@ -785,7 +785,7 @@ class Skew:
                 row=1 + i,
                 col=1,
             )
-        fig.show()
+        return fig
 
     def load(self, filename: str) -> None:
         with open(Path(os.getcwd()) / Path(filename), "r") as file:
