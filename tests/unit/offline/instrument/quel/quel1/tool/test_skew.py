@@ -13,7 +13,7 @@ def test_create_database() -> None:
 
 def test_load_skew_setting() -> None:
     """load_skew_setting should load the skew setting."""
-    with open("skew_work.yaml", "r") as f:
+    with open("./skew_work.yaml", "r") as f:
         config = yaml.safe_load(f)
     skew_setting = SkewSetting.load(config)
     assert isinstance(skew_setting, SkewSetting)
