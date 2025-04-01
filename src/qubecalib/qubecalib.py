@@ -89,6 +89,10 @@ class QubeCalib:
     def sysdb(self) -> SystemConfigDatabase:
         return self._system_config_database
 
+    @property
+    def Quel1BoxType(self) -> type[Quel1BoxType]:
+        return Quel1BoxType
+
     def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
         if self.sysdb._clockmaster_setting is None:
             raise ValueError("clock master is not found")

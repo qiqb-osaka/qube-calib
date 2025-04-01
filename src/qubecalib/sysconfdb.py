@@ -8,6 +8,7 @@ from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from typing import Any, Final, MutableSequence, Optional, Set
 
+import yaml
 from quel_clock_master import QuBEMasterClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
@@ -38,6 +39,10 @@ class SystemConfigDatabase:
         self.skew: Final[dict[str, int]] = {}
         self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
         self.time_to_start: int = 0
+
+    @property
+    def box_settings(self) -> dict[str, BoxSetting]:
+        return self._box_settings
 
     def define_clockmaster(
         self,
@@ -108,6 +113,31 @@ class SystemConfigDatabase:
         # TODO ----------
         self.set(**settings)
 
+    def load_box_yaml(self, filename: str) -> None:
+        with open(Path(os.getcwd()) / Path(filename), "r") as file:
+            yaml_dict = yaml.safe_load(file)
+        self._load_box_yaml(yaml_dict)
+
+    def _load_box_yaml(self, yaml_dict: dict) -> None:
+        for name, setting in yaml_dict.items():
+            self.add_box_setting(
+                box_name=name,
+                ipaddr_wss=setting["address"],
+                boxtype=setting["type"],
+                adapter=setting["adapter"],
+            )
+
+    def load_skew_yaml(self, filename: str) -> None:
+        with open(Path(os.getcwd()) / Path(filename), "r") as file:
+            yaml_dict = yaml.safe_load(file)
+        self._load_skew_yaml(yaml_dict)
+
+    def _load_skew_yaml(self, yaml_dict: dict) -> None:
+        for name, setting in yaml_dict["box_setting"].items():
+            self.timing_shift[name] = setting["slot"] * 16
+            self.skew[name] = setting["wait"]
+        self.time_to_start = yaml_dict["time_to_start"]
+
     def add_box_setting(
         self,
         box_name: str,
@@ -117,6 +147,7 @@ class SystemConfigDatabase:
         ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None,
         config_root: Optional[str | os.PathLike] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
+        adapter: str | None = None,
     ) -> None:
         if isinstance(boxtype, str):
             boxtype = QUEL1_BOXTYPE_ALIAS[boxtype]
@@ -128,6 +159,7 @@ class SystemConfigDatabase:
             ipaddr_css=ipaddr_css,
             config_root=config_root,
             config_options=config_options,
+            adapter=adapter,
         )
 
     def add_port_setting(
@@ -237,6 +269,7 @@ class SystemConfigDatabase:
         ipaddr_css: Optional[str] = None,
         config_root: Optional[str] = None,
         config_options: MutableSequence[Quel1ConfigOption] = [],
+        adapter: str | None = None,
     ) -> dict[str, object]:
         box_setting = BoxSetting(
             box_name=box_name,
@@ -246,6 +279,7 @@ class SystemConfigDatabase:
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             config_root=config_root,
+            adapter=adapter,
         )
         self._box_settings[box_name] = box_setting
         return box_setting.asdict()
@@ -506,6 +540,7 @@ class BoxSetting:
     ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None
     config_root: Optional[str | os.PathLike] = None
     config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
+    adapter: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.ipaddr_wss, str):
@@ -539,6 +574,7 @@ class BoxSetting:
             if self.config_root is not None
             else None,
             "config_options": self.config_options,
+            "adapter": self.adapter,
         }
 
     def asjsonable(self) -> dict[str, Any]:
