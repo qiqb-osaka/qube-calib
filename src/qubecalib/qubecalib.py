@@ -33,6 +33,7 @@ from quel_ic_config import (
     Quel1BoxWithRawWss,
     Quel1ConfigOption,
 )
+from typing_extensions import deprecated
 
 from . import __version__, neopulse
 from .e7utils import (
@@ -93,9 +94,15 @@ class QubeCalib:
     def Quel1BoxType(self) -> type[Quel1BoxType]:
         return Quel1BoxType
 
+    @deprecated("use sysdb.create_quel1system() instead")
     def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+        return self.quel1_create_quel1system(*box_names)
+
+    @deprecated("use sysdb.create_quel1system() instead")
+    def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
         if self.sysdb._clockmaster_setting is None:
             raise ValueError("clock master is not found")
+            # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
         system = direct.Quel1System.create(
             clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
             boxes=[self.create_named_box(b) for b in box_names],
@@ -371,6 +378,7 @@ class QubeCalib:
             reconnect=reconnect,
         )
 
+    @deprecated("use sysdb.create_named_box() instead")
     def create_named_box(
         self, box_name: str, *, reconnect: bool = True
     ) -> direct.NamedBox:
@@ -850,7 +858,7 @@ class Converter:
             # Dsp の設定を見るべきかな
             # とりあえず abs が小さい方で判定するが sideband の設定に応じた diff を復調周波数として採用
             mindiff = f_diff if abs(f_diff) < abs(o_f_diff) else o_f_diff
-            if 0.5 < abs(mindiff):
+            if 0.25 < abs(mindiff):
                 p = port_config
                 warnings.warn(
                     f"Modulation frequency abs({mindiff}) of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_lo={f_lo} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz, sideband={sideband}"

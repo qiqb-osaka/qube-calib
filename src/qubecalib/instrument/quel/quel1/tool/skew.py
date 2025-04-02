@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from logging import getLogger
 from pathlib import Path
 from types import TracebackType
-
-# from ......qubecalib import QubeCalib
 from typing import Final, Type, cast
 
 import numpy as np
@@ -18,7 +16,7 @@ from tqdm.auto import tqdm
 
 from .....instrument.quel.quel1.driver import Quel1System
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
-from .....qubecalib import Converter, Executor, QubeCalib, SystemConfigDatabase
+from .....qubecalib import Executor, PortSetting, QubeCalib, SystemConfigDatabase
 
 DEFAULT_FREQUENCY = 9.75
 DEFAULT_LO_FREQ = 11000e6
@@ -155,6 +153,12 @@ class SkewSetting:
         return SkewSetting.from_yaml_dict(config)
 
     @staticmethod
+    def from_yaml(filename: str) -> "SkewSetting":
+        with open(Path(os.getcwd()) / Path(filename), "r") as file:
+            config = yaml.safe_load(file)
+        return SkewSetting.from_yaml_dict(config)
+
+    @staticmethod
     def from_yaml_dict(
         yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
     ) -> "SkewSetting":
@@ -173,6 +177,15 @@ class SkewSetting:
             target_port=target_port,
             scale=scale,
         )
+
+    @property
+    def monitor_box_name(self) -> str:
+        box_name, _ = self.monitor_port
+        return box_name
+
+    @property
+    def target_box_names(self) -> set[str]:
+        return set({box_name for box_name, _ in self.target_port})
 
 
 class SkewAdjustResetter:
@@ -229,14 +242,21 @@ class Skew:
         self,
         system: Quel1System,
         *,
-        qubecalib: QubeCalib,
+        sysdb: SystemConfigDatabase | None = None,
+        # executor: Executor | None = None,
+        qubecalib: QubeCalib
+        | None = None,  # TODO: qubex の experiment.py:138 を修正してもらう
         monitor_port: PORT = ("", 0),
         trigger_nport: int = 0,
         reference_port: PORT = ("", 0),
     ) -> None:  # TODO ここは多分変わります
+        if qubecalib is not None:
+            sysdb = qubecalib.sysdb
+        if sysdb is None:
+            raise ValueError("sysdb and executor must be provided")
         self._system: Final[Quel1System] = system
-        self._sysdb: Final[SystemConfigDatabase] = qubecalib.sysdb
-        self._executor: Final[Executor] = qubecalib._executor
+        self._sysdb: Final[SystemConfigDatabase] = sysdb
+        self._executor: Final[Executor] = Executor(self.sysdb)
         self._monitor_port: PORT = monitor_port
         self._trigger_nport: int = trigger_nport
         self._reference_port: PORT = reference_port
@@ -245,12 +265,33 @@ class Skew:
         self._estimated: dict[PORT, npt.NDArray] = {}
         self._offset: dict[PORT, int] = {}
         self._target_port: set[PORT] = set()
-        self._skew_adjust: SkewAdjust = SkewAdjust(qubecalib.sysdb)
+        self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
         self._estimated_idx: dict[PORT, int] = {}
         self._estimated_slot: dict[PORT, int] = {}
         self._estimated_wait: dict[PORT, int] = {}
         self._estimated_pulse_params_: dict[PORT, EstimatedPulseParams] = {}
+        for box_name in self._system.boxes:
+            if not self.is_channel_defined(box_name, sysdb=self.sysdb):
+                self._define_channel_names(
+                    box_name, system=self._system, sysdb=self.sysdb
+                )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        setting: SkewSetting,
+        system: Quel1System,
+        sysdb: SystemConfigDatabase,
+    ) -> Skew:
+        skew = Skew(system=system, sysdb=sysdb)
+        skew.setting = setting
+        return skew
+
+    @property
+    def sysdb(self) -> SystemConfigDatabase:
+        return self._sysdb
 
     @property
     def setting(self) -> SkewSetting | None:
@@ -371,6 +412,149 @@ class Skew:
             if box_name in box_names  #  and (box_name, nport) != self._reference_port
         }
 
+    def sync_lo_nco(
+        self,
+        *,
+        src_port: PORT,
+        dest_port: PORT,
+    ) -> dict[str, str | float | dict[int, dict[str, float]]]:
+        """src_port の周波数を dest_port に合わせる"""
+        return self._sync_lo_nco(
+            src_port=src_port,
+            dest_port=dest_port,
+            system=self._system,
+        )
+
+    @classmethod
+    def _sync_lo_nco(
+        cls,
+        *,
+        src_port: PORT,
+        dest_port: PORT,
+        system: Quel1System,
+    ) -> dict[str, str | float | dict[int, dict[str, float]]]:
+        # src_port: (box_name, port_number)
+        # dest_port: (box_name, port_number)
+        boxname, nport = src_port
+        box = system.box[boxname]
+        dump_port = box.dump_port(nport)
+        kws = ["lo_freq", "cnco_freq", "runits", "channels", "sideband"]
+        freqs = {k: v for k, v in dump_port.items() if k in kws}
+        ch_freqs = freqs["channels"] if "channels" in freqs else freqs["runits"]
+        lo_freq, cnco_freq = freqs["lo_freq"], freqs["cnco_freq"]
+        kw = "fnco_freq"
+        usb_freqs = {i: lo_freq + (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
+        lsb_freqs = {i: lo_freq - (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
+        if "sideband" in freqs:
+            sideband = freqs["sideband"]
+        else:
+            sideband = "L" if lo_freq + cnco_freq < 9500e6 else "U"
+            freqs["sideband"] = sideband
+        if sideband == "U":
+            for i, v in usb_freqs.items():
+                freqs["channels"][i]["target_freq"] = v
+        else:
+            for i, v in lsb_freqs.items():
+                freqs["channels"][i]["target_freq"] = v
+
+        logger.debug(
+            f"{src_port} -> {dest_port}: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+        )
+
+        boxname, nport = dest_port
+        box = system.box[boxname]
+        dump_port = box.dump_port(nport)
+        if "channels" in dump_port:
+            ch = dump_port["channels"]
+            n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
+            box.config_port(
+                port=nport,
+                lo_freq=freqs["lo_freq"],
+                cnco_freq=freqs["cnco_freq"],
+            )
+            for i in range(n):
+                box.config_channel(
+                    port=nport,
+                    channel=i,
+                    fnco_freq=ch_freqs[i]["fnco_freq"],
+                )
+        elif "runits" in dump_port:
+            ch = dump_port["runits"]
+            n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
+            box.config_port(
+                port=nport,
+                lo_freq=freqs["lo_freq"],
+                cnco_freq=freqs["cnco_freq"],
+            )
+            for i in range(n):
+                box.config_runit(
+                    port=nport,
+                    runit=i,
+                    fnco_freq=ch_freqs[i]["fnco_freq"],
+                )
+        return freqs
+
+    def setup_monitor_port(
+        self,
+        *,
+        target_port: PORT,
+        monitor_port: PORT,
+    ) -> None:
+        """target に合わせて周波数を設定する"""
+        self._setup_monitor_port(
+            target_port=target_port,
+            monitor_port=monitor_port,
+            system=self._system,
+            sysdb=self._sysdb,
+        )
+
+    @classmethod
+    def is_channel_defined(
+        cls,
+        box_name: str,
+        *,
+        sysdb: SystemConfigDatabase,
+    ) -> bool:
+        channels = {
+            k: v for k, v in sysdb._port_settings.items() if v.box_name == box_name
+        }
+        return len(channels) != 0
+
+    @classmethod
+    def _define_channel_names(
+        cls,
+        box_name: str,
+        *,
+        system: Quel1System,
+        sysdb: SystemConfigDatabase,
+    ) -> None:
+        box = system.box[box_name]
+        ports = box.dump_box()["ports"]
+        for nport, v in ports.items():
+            nport = cast(int, nport)
+            port_name = f"{box_name}.PORT{nport}"
+            channels = v["channels" if "channels" in v else "runits"]
+            io = "IN" if v["direction"] == "in" else "OUT"
+            port_setting = PortSetting(
+                port_name=port_name,
+                box_name=box_name,
+                port=nport,
+                lo_freq=None,
+                cnco_freq=None,
+                sideband="U",
+                vatt=2048,
+                fnco_freq=None,
+                ndelay_or_nwait=tuple(
+                    len(channels) * [7 if io == "IN" else 0]
+                ),  # TODO: hard coding
+            )
+            sysdb._port_settings[port_name] = port_setting
+            for nchannel, v in channels.items():
+                channel_name = f"{box_name}.PORT{nport}.{io}{nchannel}"
+                sysdb._relation_channel_port.append(
+                    (channel_name, dict(port_name=port_name, channel_number=nchannel))
+                )
+
     @classmethod
     def _setup_monitor_port(
         cls,
@@ -385,53 +569,87 @@ class Skew:
         box = system.box[name]
         if not box.is_output_port(nport):
             raise ValueError(f"{target_port} is not output port")
+        freqs = cls._sync_lo_nco(
+            src_port=target_port,
+            dest_port=monitor_port,
+            system=system,
+        )
+        ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
+        DEFAULT_CHANNEL = 0
+        lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
+            cast(float, freqs["lo_freq"]) * 1e-9,
+            cast(float, freqs["cnco_freq"]) * 1e-9,
+            ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
+            ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
+            cast(str, freqs["sideband"]),
+        )
         target = cls.acquire_target(sysdb, target_port)
-        dump_port = box.dump_port(nport)
-        lo_freq = dump_port["lo_freq"]
-        cnco_freq = dump_port["cnco_freq"]
-        fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
-        sideband = dump_port["sideband"]
-        frequency = (
-            sysdb._target_settings[target]["frequency"]
-            if target in sysdb._target_settings
-            else DEFAULT_FREQUENCY
-        )
-        mod_freq = Converter._calc_modulation_frequency(
-            target_freq=frequency,
-            lo_freq=lo_freq * 1e-9,
-            cnco_freq=cnco_freq * 1e-9,
-            fnco_freq=fnco_freq * 1e-9,
-            sideband=sideband,
-        )
+        sysdb._target_settings[target] = dict(frequency=target_freq)
+        monitor = cls.acquire_target(sysdb, monitor_port)
+        sysdb._target_settings[monitor] = dict(frequency=target_freq)
         logger.debug(
-            f"Target {target}:{target_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
+            f"Target {target}:{target_port}, lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )
+        # dump_port = box.dump_port(nport)
+        # lo_freq = dump_port["lo_freq"]
+        # cnco_freq = dump_port["cnco_freq"]
+        # fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
+        # sideband = dump_port["sideband"]
+        # frequency = (
+        #     sysdb._target_settings[target]["frequency"]
+        #     if target in sysdb._target_settings
+        #     else DEFAULT_FREQUENCY
+        # )
+        # mod_freq = Converter._calc_modulation_frequency(
+        #     target_freq=frequency,
+        #     lo_freq=lo_freq * 1e-9,
+        #     cnco_freq=cnco_freq * 1e-9,
+        #     fnco_freq=fnco_freq * 1e-9,
+        #     sideband=sideband,
+        # )
+        # logger.debug(
+        #     f"Target {target}:{target_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
+        # )
 
-        name, nport = monitor_port
-        box = system.box[name]
-        if not box.is_input_port(nport):
-            raise ValueError(f"{monitor_port} is not input port")
+        # name, nport = monitor_port
+        # box = system.box[name]
+        # if not box.is_input_port(nport):
+        #     raise ValueError(f"{monitor_port} is not input port")
 
-        freq_setting = cls.acquire_freq_setting(frequency)
-        lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
-        cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
-        fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
-        sideband = cast(str, freq_setting["sideband"])
+        # freq_setting = cls.acquire_freq_setting(frequency)
+        # lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
+        # cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
+        # fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
+        # sideband = cast(str, freq_setting["sideband"])
 
-        logger.debug(
-            f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
-        )
+        # logger.debug(
+        #     f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
+        # )
 
-        if abs(fnco_freq) >= DEFAULT_FNCO_LIMIT:
-            sign = fnco_freq / abs(fnco_freq)
-            fnco_freq = sign * (DEFAULT_FNCO_LIMIT - 1)
+        # if abs(fnco_freq) >= DEFAULT_FNCO_LIMIT:
+        #     sign = fnco_freq / abs(fnco_freq)
+        #     fnco_freq = sign * (DEFAULT_FNCO_LIMIT - 1)
 
-        box.config_port(nport, lo_freq=lo_freq, cnco_freq=cnco_freq)
-        box.config_runit(nport, runit=0, fnco_freq=fnco_freq)
-        m = cls.acquire_target(sysdb, monitor_port)
-        sysdb._target_settings[m] = dict(frequency=frequency)
-        logger.debug(
-            f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
+        # box.config_port(nport, lo_freq=lo_freq, cnco_freq=cnco_freq)
+        # box.config_runit(nport, runit=0, fnco_freq=fnco_freq)
+        # m = cls.acquire_target(sysdb, monitor_port)
+        # sysdb._target_settings[m] = dict(frequency=frequency)
+        # logger.debug(
+        #     f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
+        # )
+
+    def setup_trigger_port(
+        self,
+        *,
+        target_port: PORT,
+        trigger_port: PORT,
+    ) -> None:
+        """target に合わせて周波数を設定する"""
+        self._setup_trigger_port(
+            target_port=target_port,
+            trigger_port=trigger_port,
+            system=self._system,
+            sysdb=self._sysdb,
         )
 
     @classmethod
@@ -448,57 +666,77 @@ class Skew:
         box = system.box[name]
         if not box.is_output_port(nport):
             raise ValueError(f"{target_port} is not output port")
+        freqs = cls._sync_lo_nco(
+            src_port=target_port,
+            dest_port=trigger_port,
+            system=system,
+        )
+        ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
+        DEFAULT_CHANNEL = 0
+        lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
+            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["cnco_freq"]),
+            ch_freqs[DEFAULT_CHANNEL]["fnco_freq"],
+            ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
+            cast(str, freqs["sideband"]),
+        )
         target = cls.acquire_target(sysdb, target_port)
-        dump_port = box.dump_port(nport)
-        lo_freq = dump_port["lo_freq"]
-        cnco_freq = dump_port["cnco_freq"]
-        fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
-        sideband = dump_port["sideband"]
-        frequency = (
-            sysdb._target_settings[target]["frequency"]
-            if target in sysdb._target_settings
-            else DEFAULT_FREQUENCY
-        )
-
-        name, nport = trigger_port
-        box = system.box[name]
-        if not box.is_output_port(nport):
-            raise ValueError(f"{trigger_port} is not output port")
-
-        freq_setting = cls.acquire_freq_setting(frequency)
-        lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
-        cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
-        fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
-        sideband = freq_setting["sideband"]
-
-        box.config_port(
-            nport,
-            lo_freq=lo_freq,
-            cnco_freq=cnco_freq,
-            sideband=sideband,
-            vatt=DEFAULT_VATT,
-        )
-        box.config_channel(
-            nport,
-            channel=0,
-            fnco_freq=fnco_freq,
-        )
-        sysdb._target_settings[
-            cls.acquire_target(
-                sysdb,
-                trigger_port,
-            )
-        ] = dict(frequency=frequency)
-        mod_freq = Converter._calc_modulation_frequency(
-            target_freq=frequency,
-            lo_freq=lo_freq * 1e-9,
-            cnco_freq=cnco_freq * 1e-9,
-            fnco_freq=fnco_freq * 1e-9,
-            sideband=sideband,
-        )
+        sysdb._target_settings[target] = dict(frequency=target_freq)
+        trigger = cls.acquire_target(sysdb, trigger_port)
+        sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
-            f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
+            f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
+        # dump_port = box.dump_port(nport)
+        # lo_freq = dump_port["lo_freq"]
+        # cnco_freq = dump_port["cnco_freq"]
+        # fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
+        # sideband = dump_port["sideband"]
+        # frequency = (
+        #     sysdb._target_settings[target]["frequency"]
+        #     if target in sysdb._target_settings
+        #     else DEFAULT_FREQUENCY
+        # )
+
+        # name, nport = trigger_port
+        # box = system.box[name]
+        # if not box.is_output_port(nport):
+        #     raise ValueError(f"{trigger_port} is not output port")
+
+        # freq_setting = cls.acquire_freq_setting(frequency)
+        # lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
+        # cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
+        # fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
+        # sideband = freq_setting["sideband"]
+
+        # box.config_port(
+        #     nport,
+        #     lo_freq=lo_freq,
+        #     cnco_freq=cnco_freq,
+        #     sideband=sideband,
+        #     vatt=DEFAULT_VATT,
+        # )
+        # box.config_channel(
+        #     nport,
+        #     channel=0,
+        #     fnco_freq=fnco_freq,
+        # )
+        # sysdb._target_settings[
+        #     cls.acquire_target(
+        #         sysdb,
+        #         trigger_port,
+        #     )
+        # ] = dict(frequency=frequency)
+        # mod_freq = Converter._calc_modulation_frequency(
+        #     target_freq=frequency,
+        #     lo_freq=lo_freq * 1e-9,
+        #     cnco_freq=cnco_freq * 1e-9,
+        #     fnco_freq=fnco_freq * 1e-9,
+        #     sideband=sideband,
+        # )
+        # logger.debug(
+        #     f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
+        # )
 
     def reset_skew_parameter(self) -> SkewAdjustResetter:
         # with reset_skew_parameter():
@@ -512,24 +750,35 @@ class Skew:
     def measure(
         self,
         *,
+        target_ports: set[PORT] | None = None,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
         reset_skew_parameter: bool = False,
     ) -> None:
+        target_ports = (
+            self.target_from_box(list(self._system.boxes))
+            if target_ports is None
+            else target_ports
+        )
+        self.define_targets(target_ports=target_ports)
         if reset_skew_parameter:
             with self.reset_skew_parameter():
-                self._measure_all_targets(
+                self._measure_targets(
+                    target_ports,
                     show_reference=show_reference,
                     extra_capture_range=extra_capture_range,
                 )
         else:
-            self._measure_all_targets(
+            self._measure_targets(
+                target_ports,
                 show_reference=show_reference,
                 extra_capture_range=extra_capture_range,
             )
 
-    def _measure_all_targets(
+    def _measure_targets(
         self,
+        target_ports: set[PORT],
+        *,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,
     ) -> None:
@@ -649,6 +898,58 @@ class Skew:
                     if isinstance(port, tuple):
                         raise ValueError("fogi port is not supported yet")
                     system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
+
+    @classmethod
+    def _define_targets(
+        cls,
+        *,
+        target_ports: set[PORT],
+        reference_port: PORT,
+        monitor_port: PORT,
+        trigger_nport: int,
+        sysdb: SystemConfigDatabase,
+    ) -> None:
+        box_name, _ = monitor_port
+        trigger_port = (box_name, trigger_nport)
+        defined_channel = set([c for c, _ in sysdb._relation_channel_target])
+        channel_names_by_channel: dict[tuple[str, int, int], str] = {}
+        for k, v in sysdb._relation_channel_port:
+            p = sysdb._port_settings[cast(str, v["port_name"])]
+            channel = (p.box_name, p.port, cast(int, v["channel_number"]))
+            channel_names_by_channel[channel] = k
+        for target_port in set(
+            list(target_ports) + [reference_port, monitor_port, trigger_port]
+        ):
+            channel = target_port + (0,)
+            target_name = channel_name = channel_names_by_channel[channel]
+            if channel_name not in defined_channel:
+                sysdb._relation_channel_target.append((target_name, channel_name))
+                sysdb._target_settings[target_name] = dict(frequency=0)
+            # sysdb._relation_channel_target.append((target_name, channel_name))
+            # sysdb._target_settings[target_name] = dict(frequency=0)
+
+    def define_targets(
+        self,
+        *,
+        target_ports: set[PORT],
+        reference_port: PORT | None = None,
+        monitor_port: PORT | None = None,
+        trigger_nport: int | None = None,
+    ) -> None:
+        # default values
+        reference_port = (
+            self._reference_port if reference_port is None else reference_port
+        )
+        monitor_port = self._monitor_port if monitor_port is None else monitor_port
+        trigger_nport = self._trigger_nport if trigger_nport is None else trigger_nport
+        # call the main function
+        self._define_targets(
+            target_ports=target_ports,
+            reference_port=reference_port,
+            monitor_port=monitor_port,
+            trigger_nport=trigger_nport,
+            sysdb=self._sysdb,
+        )
 
     def _measure(
         self,
