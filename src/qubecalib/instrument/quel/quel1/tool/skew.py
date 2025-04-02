@@ -458,19 +458,25 @@ class Skew:
                 freqs["channels"][i]["target_freq"] = v
 
         logger.debug(
-            f"{src_port} -> {dest_port}: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+            f"{src_port} ->: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
         )
 
         boxname, nport = dest_port
         box = system.box[boxname]
+        lo_freq, cnco_freq = (
+            freqs["lo_freq"],
+            freqs["cnco_freq"] + ch_freqs[0]["fnco_freq"],
+        )
+        for v in ch_freqs.values():
+            v["fnco_freq"] = 0
         dump_port = box.dump_port(nport)
         if "channels" in dump_port:
             ch = dump_port["channels"]
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
             box.config_port(
                 port=nport,
-                lo_freq=freqs["lo_freq"],
-                cnco_freq=freqs["cnco_freq"],
+                lo_freq=lo_freq,
+                cnco_freq=cnco_freq,
             )
             for i in range(n):
                 box.config_channel(
@@ -483,8 +489,8 @@ class Skew:
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
             box.config_port(
                 port=nport,
-                lo_freq=freqs["lo_freq"],
-                cnco_freq=freqs["cnco_freq"],
+                lo_freq=lo_freq,
+                cnco_freq=cnco_freq,
             )
             for i in range(n):
                 box.config_runit(
@@ -492,6 +498,11 @@ class Skew:
                     runit=i,
                     fnco_freq=ch_freqs[i]["fnco_freq"],
                 )
+
+        logger.debug(
+            f"-> {dest_port}: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+        )
+
         return freqs
 
     def setup_monitor_port(
