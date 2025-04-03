@@ -29,3 +29,8 @@ def test_acquire_freq_setting() -> None:
     assert [s["lo_freq"] for s in setting] == [9.0, 8.0, 8.0, 8.0, 8.5]
     assert [s["cnco_freq"] for s in setting] == [2.125, 2.0, 2.0, 2.125, 2.0]
     assert [s["fnco_freq"] for s in setting] == len(setting) * [0]
+
+
+def test_create_target_setting() -> None:
+    """create_target_setting should create a target setting."""
+    sysdb = SystemConfigDatabase()
