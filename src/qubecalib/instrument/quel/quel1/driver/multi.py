@@ -3,11 +3,11 @@ from __future__ import annotations
 from concurrent.futures import Future
 from logging import getLogger
 from types import MappingProxyType
-from typing import Final, NamedTuple, Optional
+from typing import Final, MutableSequence, NamedTuple, Optional
 
 import numpy as np
 import numpy.typing as npt
-from quel_clock_master import QuBEMasterClient
+from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss
 
 from . import single
@@ -61,6 +61,19 @@ class Quel1System:
     @property
     def box(self) -> MappingProxyType[str, Quel1BoxWithRawWss]:
         return self._boxes
+
+    def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
+        return [
+            SequencerClient(target_ipaddr=str(self.box[b].sss.ipaddress)).read_clock()
+            for b in box_names
+        ]
+
+    def resync(
+        self, *box_names: str
+    ) -> MutableSequence[tuple[bool, int, int] | tuple[bool, int]]:
+        master = self._clockmaster
+        master.kick_clock_synch([str(self.box[b].sss.ipaddress) for b in box_names])
+        return [self.read_clock(b) for b in box_names] + [master.read_clock()]
 
 
 class Action:
