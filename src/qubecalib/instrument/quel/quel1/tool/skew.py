@@ -67,8 +67,12 @@ class EstimatedPulseParams:
     idx: int
     scale: int
     mean: int
-    slot: int
-    wait: int
+    # slot: int = field(init=False)
+    # wait: int = field(init=False)
+
+    # def __post_init__(self) -> None:
+    #     self.slot = self.idx // 64
+    #     self.wait = self.idx % 64
 
 
 @dataclass
@@ -261,16 +265,16 @@ class Skew:
         self._trigger_nport: int = trigger_nport
         self._reference_port: PORT = reference_port
         self._scale: dict[PORT, float] = {}
-        self._measured: dict[PORT, npt.NDArray] = {}
-        self._estimated: dict[PORT, npt.NDArray] = {}
+        self._measured_waveform: dict[PORT, npt.NDArray] = {}
+        # self._estimated_waveform: dict[PORT, npt.NDArray] = {}
         self._offset: dict[PORT, int] = {}
         self._target_port: set[PORT] = set()
         self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
-        self._estimated_idx: dict[PORT, int] = {}
-        self._estimated_slot: dict[PORT, int] = {}
-        self._estimated_wait: dict[PORT, int] = {}
-        self._estimated_pulse_params_: dict[PORT, EstimatedPulseParams] = {}
+        # self._estimated_idx: dict[PORT, int] = {}
+        # self._estimated_slot: dict[PORT, int] = {}
+        # self._estimated_wait: dict[PORT, int] = {}
+        self._estimated: dict[PORT, EstimatedPulseParams] = {}
         for box_name in self._system.boxes:
             if not self.is_channel_defined(box_name, sysdb=self.sysdb):
                 self._define_channel_names(
@@ -601,53 +605,6 @@ class Skew:
         logger.debug(
             f"Target {target}:{target_port}, lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )
-        # dump_port = box.dump_port(nport)
-        # lo_freq = dump_port["lo_freq"]
-        # cnco_freq = dump_port["cnco_freq"]
-        # fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
-        # sideband = dump_port["sideband"]
-        # frequency = (
-        #     sysdb._target_settings[target]["frequency"]
-        #     if target in sysdb._target_settings
-        #     else DEFAULT_FREQUENCY
-        # )
-        # mod_freq = Converter._calc_modulation_frequency(
-        #     target_freq=frequency,
-        #     lo_freq=lo_freq * 1e-9,
-        #     cnco_freq=cnco_freq * 1e-9,
-        #     fnco_freq=fnco_freq * 1e-9,
-        #     sideband=sideband,
-        # )
-        # logger.debug(
-        #     f"Target {target}:{target_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
-        # )
-
-        # name, nport = monitor_port
-        # box = system.box[name]
-        # if not box.is_input_port(nport):
-        #     raise ValueError(f"{monitor_port} is not input port")
-
-        # freq_setting = cls.acquire_freq_setting(frequency)
-        # lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
-        # cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
-        # fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
-        # sideband = cast(str, freq_setting["sideband"])
-
-        # logger.debug(
-        #     f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
-        # )
-
-        # if abs(fnco_freq) >= DEFAULT_FNCO_LIMIT:
-        #     sign = fnco_freq / abs(fnco_freq)
-        #     fnco_freq = sign * (DEFAULT_FNCO_LIMIT - 1)
-
-        # box.config_port(nport, lo_freq=lo_freq, cnco_freq=cnco_freq)
-        # box.config_runit(nport, runit=0, fnco_freq=fnco_freq)
-        # m = cls.acquire_target(sysdb, monitor_port)
-        # sysdb._target_settings[m] = dict(frequency=frequency)
-        # logger.debug(
-        #     f"Monitor {monitor_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}"
-        # )
 
     def setup_trigger_port(
         self,
@@ -698,56 +655,6 @@ class Skew:
         logger.debug(
             f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
-        # dump_port = box.dump_port(nport)
-        # lo_freq = dump_port["lo_freq"]
-        # cnco_freq = dump_port["cnco_freq"]
-        # fnco_freq = dump_port["channels"][DEFAULT_CHANNEL_NUM]["fnco_freq"]
-        # sideband = dump_port["sideband"]
-        # frequency = (
-        #     sysdb._target_settings[target]["frequency"]
-        #     if target in sysdb._target_settings
-        #     else DEFAULT_FREQUENCY
-        # )
-
-        # name, nport = trigger_port
-        # box = system.box[name]
-        # if not box.is_output_port(nport):
-        #     raise ValueError(f"{trigger_port} is not output port")
-
-        # freq_setting = cls.acquire_freq_setting(frequency)
-        # lo_freq = cast(float, freq_setting["lo_freq"]) * 1e9
-        # cnco_freq = cast(float, freq_setting["cnco_freq"]) * 1e9
-        # fnco_freq = cast(float, freq_setting["fnco_freq"]) * 1e9
-        # sideband = freq_setting["sideband"]
-
-        # box.config_port(
-        #     nport,
-        #     lo_freq=lo_freq,
-        #     cnco_freq=cnco_freq,
-        #     sideband=sideband,
-        #     vatt=DEFAULT_VATT,
-        # )
-        # box.config_channel(
-        #     nport,
-        #     channel=0,
-        #     fnco_freq=fnco_freq,
-        # )
-        # sysdb._target_settings[
-        #     cls.acquire_target(
-        #         sysdb,
-        #         trigger_port,
-        #     )
-        # ] = dict(frequency=frequency)
-        # mod_freq = Converter._calc_modulation_frequency(
-        #     target_freq=frequency,
-        #     lo_freq=lo_freq * 1e-9,
-        #     cnco_freq=cnco_freq * 1e-9,
-        #     fnco_freq=fnco_freq * 1e-9,
-        #     sideband=sideband,
-        # )
-        # logger.debug(
-        #     f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={frequency}, mod_freq={mod_freq}, sideband={sideband}"
-        # )
 
     def reset_skew_parameter(self) -> SkewAdjustResetter:
         # with reset_skew_parameter():
@@ -849,7 +756,7 @@ class Skew:
         return iqs
 
     def _store(self, target_port: PORT, iqs: npt.NDArray) -> None:
-        self._measured[target_port] = iqs
+        self._measured_waveform[target_port] = iqs
 
     def _config_ports(
         self,
@@ -984,70 +891,22 @@ class Skew:
         iqs = self._execute(seq)
         self._store(target_port, iqs)
 
-    # def _adjust(
-    #     self,
-    #     target_port: PORT,
-    #     reference_idx: int,
-    # ) -> tuple[int, int, npt.NDArray]:
-    #     measured = self._measured[target_port]
-    #     offset = self._offset[target_port]
-    #     idx, estimated = self._fit_pulse(measured)
-    #     delta = idx - reference_idx
-    #     slot = delta // 64 + 1
-    #     wait = 64 - delta % 64
-    #     self._skew_adjust.slot[target_port] = -slot
-    #     self._skew_adjust.wait[target_port] = wait
-    #     self._estimated[target_port] = estimated
-    #     return slot, wait, estimated
-
-    # def adjust(
-    #     self,
-    #     *,
-    #     extra_capture_range: int = EXTRA_CAPTURE_RANGE,  # multiple of 128 ns
-    # ) -> dict[PORT, dict[str, int]]:
-    #     target_ports = self.target_from_box(list(self._system.boxes))
-    #     for target_box, target_nport in tqdm(target_ports):
-    #         target_port = (target_box, target_nport)
-    #         self._measure(
-    #             target_port,
-    #             extra_capture_range=extra_capture_range,
-    #             show_reference=False,
-    #         )
-    #         iqs = self._measured[target_port]
-    #         if target_port == self._reference_port:
-    #             reference_idx, _ = self._fit_pulse(iqs)
-    #     for target_port in target_ports:
-    #         self._adjust(target_port, reference_idx)
-    #     min_slot = min([self._skew_adjust.slot[p] for p in target_ports])
-    #     for p in target_ports:
-    #         self._skew_adjust.slot[p] -= min_slot
-    #     self._skew_adjust.push()
-    #     return {
-    #         p: {
-    #             "slot": self._skew_adjust.slot[p],
-    #             "wait": self._skew_adjust.wait[p],
-    #         }
-    #         for p in target_ports
-    #     }
-
-    def estimate_pulse_params(self) -> None:
-        for forcused_port, iqs in self._measured.items():
-            self._estimated_pulse_params = e = self._estimate_pulse_params(iqs)
-            idx = e.idx
-            slot, wait = idx // 64, idx % 64
-            self._estimated[forcused_port] = e.waveform
-            self._estimated_idx[forcused_port] = idx
-            self._estimated_slot[forcused_port] = slot
-            self._estimated_wait[forcused_port] = wait
+    def estimate(self) -> None:
+        for focused_port, iqs in self._measured_waveform.items():
+            self._estimated[focused_port] = self._estimate(iqs)
 
     @classmethod
-    def _estimate_pulse_params(cls, iqs: npt.NDArray) -> EstimatedPulseParams:
-        dif_waveform = np.array([-1, 0, 1])[::-1]
-        conv = np.convolve(dif_waveform, np.abs(iqs), "valid")
-        idx = int(conv.argmax()) + 1
-        estimated = np.zeros(iqs.size)
+    def _estimate(cls, iqs: npt.NDArray) -> EstimatedPulseParams:
+        # A filter used to identify the position of a pulse by maximizing the energy
+        # within a fixed-length window. The filter detects the region where the pulse
+        # energy is highest.
+        pulse_window_filter = np.array(64 * [1])
+        conv = np.convolve(pulse_window_filter, np.abs(iqs), "valid")
+        # Allocate a container for estimated pulses.
+        idx = int(conv.argmax())
+        estimated = np.zeros(iqs.size).astype(np.float64)
         estimated[idx : idx + 64] = np.ones(64)
-        scale = np.sqrt((np.abs(iqs).var())) / np.sqrt(estimated.var())
+        scale = np.sqrt(np.abs(iqs).var()) / np.sqrt(estimated.var())
         estimated *= scale
         mean = np.abs(iqs).mean() - estimated.mean()
         estimated += mean
@@ -1056,44 +915,72 @@ class Skew:
             idx=idx,
             scale=scale,
             mean=mean,
-            slot=-1,
-            wait=-1,
         )
 
-    def plot(self) -> None:
-        measured = self._measured
-        estimated = self._estimated
+    def plot(self) -> go.FigureWidget:
+        return self._plot(
+            measured_waveform=self._measured_waveform,
+            estimated=self._estimated,
+            reference_port=self._reference_port,
+        )
+
+    @classmethod
+    def _plot(
+        cls,
+        *,
+        measured_waveform: dict[PORT, npt.NDArray],
+        estimated: dict[PORT, EstimatedPulseParams],
+        reference_port: PORT,
+    ) -> go.FigureWidget:
         fig = go.FigureWidget(
             layout=go.Layout(
-                height=len(measured) * 100 + 100,
+                height=len(measured_waveform) * 100 + 100,
                 width=None,
                 autosize=True,
-                showlegend=True,
+                showlegend=False,
             ),
         ).set_subplots(
-            rows=len(measured),
+            rows=len(measured_waveform),
             cols=1,
             shared_xaxes=True,
         )
-        for i, (focused_port, iqs) in enumerate(measured.items()):
+        for i, focused_port in enumerate(measured_waveform):
+            iqs = measured_waveform[focused_port]
             fig.add_trace(
                 go.Scatter(
                     x=2 * np.arange(len(iqs)),
                     y=np.abs(iqs),
                     mode="lines",
-                    name=f"{focused_port}: measured",
+                    # name=f"{focused_port}: measured",
                 ),
                 row=1 + i,
                 col=1,
             )
-        for i, (focused_port, iqs) in enumerate(estimated.items()):
+            if focused_port not in estimated:  # if estimate is empty
+                continue
+            iqs = estimated[focused_port].waveform
             fig.add_trace(
                 go.Scatter(
                     x=2 * np.arange(len(iqs)),
                     y=iqs,
                     mode="lines",
-                    name=f"{focused_port}: estimated",
+                    # name=f"{focused_port}: estimated",
                 ),
+                row=1 + i,
+                col=1,
+            )
+            e = estimated[focused_port]
+            fig.add_annotation(
+                text=("Reference " if focused_port == reference_port else "")
+                + f"{focused_port}"
+                + f", idx={e.idx}",
+                xref="paper",
+                yref="y domain" if i == 0 else f"y{i + 1} domain",
+                xanchor="right",
+                yanchor="top",
+                x=(2 * np.arange(len(iqs)))[-1],
+                y=1,
+                showarrow=False,
                 row=1 + i,
                 col=1,
             )
