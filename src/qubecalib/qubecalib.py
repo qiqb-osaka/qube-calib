@@ -13,7 +13,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
-    Collection,
     Final,
     Iterable,
     MutableMapping,
@@ -31,7 +30,6 @@ from quel_ic_config import (
     CaptureReturnCode,
     Quel1BoxType,
     Quel1BoxWithRawWss,
-    Quel1ConfigOption,
 )
 from typing_extensions import deprecated
 
@@ -256,17 +254,17 @@ class QubeCalib:
         boxtype: str,
         ipaddr_sss: Optional[str] = None,
         ipaddr_css: Optional[str] = None,
-        config_root: Optional[str] = None,
-        config_options: MutableSequence[Quel1ConfigOption] = [],
+        # config_root: Optional[str] = None,
+        # config_options: MutableSequence[Quel1ConfigOption] = [],
     ) -> dict[str, Any]:
         return self.system_config_database.define_box(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
             boxtype=boxtype,
-            config_options=config_options,
+            # config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            # config_root=config_root,
         )
 
     def define_channel(
@@ -492,10 +490,10 @@ class QubeCalib:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root)
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
             )
             box.reconnect()
         return boxpool
@@ -1855,10 +1853,10 @@ class Executor:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root),
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
             )
             status = box.reconnect()
             for mxfe_idx, s in status.items():
@@ -2002,16 +2000,16 @@ class BoxPool:
         ipaddr_sss: str,
         ipaddr_css: str,
         boxtype: Quel1BoxType,
-        config_root: Optional[Path],
-        config_options: Optional[Collection[Quel1ConfigOption]] = None,
+        # config_root: Optional[Path],
+        # config_options: Optional[Collection[Quel1ConfigOption]] = None,
     ) -> Quel1BoxWithRawWss:
         box = Quel1BoxWithRawWss.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             boxtype=boxtype,
-            config_root=config_root,
-            config_options=config_options,
+            # config_root=config_root,
+            # config_options=config_options,
         )
         sqc = SequencerClient(ipaddr_sss)
         self._boxes[box_name] = (box, sqc)
