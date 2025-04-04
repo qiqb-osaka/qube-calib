@@ -95,7 +95,7 @@ class QubeCalib:
 
     @deprecated("use sysdb.create_quel1system() instead")
     def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
-        return self.quel1_create_quel1system(*box_names)
+        return self.sysdb.create_quel1system(*box_names)
 
     @deprecated("use sysdb.create_quel1system() instead")
     def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
@@ -104,7 +104,7 @@ class QubeCalib:
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
         system = direct.Quel1System.create(
             clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
-            boxes=[self.create_named_box(b) for b in box_names],
+            boxes=[self.sysdb.create_named_box(b) for b in box_names],
         )
         return system
 

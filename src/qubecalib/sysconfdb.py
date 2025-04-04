@@ -385,15 +385,6 @@ class SystemConfigDatabase:
         )
         return system
 
-    # def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
-    #     if self._clockmaster_setting is None:
-    #         raise ValueError("clock master is not found")
-    #     system = direct.Quel1System.create(
-    #         clockmaster=QuBEMasterClient(self._clockmaster_setting.ipaddr),
-    #         boxes=[self.create_named_box(b) for b in box_names],
-    #     )
-    #     return system
-
     def asdict(self) -> dict[str, object]:
         return {
             "clockmaster_setting": self._clockmaster_setting.asdict()
@@ -449,6 +440,12 @@ class SystemConfigDatabase:
         rct = self._relation_channel_target
         relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
         return relation_target_channel
+
+    def get_targets_by_box(
+        self,
+        box_name: str,
+    ) -> Set[tuple[str, str]]:
+        return self.get_target_name(box_name=box_name)
 
     def get_target_by_port(
         self,
