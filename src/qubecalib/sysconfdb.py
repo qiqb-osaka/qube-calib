@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
 from typing import Any, Final, MutableSequence, Optional, Set
@@ -14,6 +14,7 @@ from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
     Quel1BoxType,
     Quel1BoxWithRawWss,
+    Quel1ConfigOption,
 )
 
 from .instrument.quel.quel1 import driver as direct
@@ -144,8 +145,8 @@ class SystemConfigDatabase:
         boxtype: Quel1BoxType,
         ipaddr_sss: Optional[str | IPv4Address | IPv6Address] = None,
         ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None,
-        # config_root: Optional[str | os.PathLike] = None,
-        # config_options: MutableSequence[Quel1ConfigOption] = [],
+        config_root: Optional[str | os.PathLike] = None,
+        config_options: MutableSequence[Quel1ConfigOption] = [],
         adapter: str | None = None,
     ) -> None:
         if isinstance(boxtype, str):
@@ -156,8 +157,8 @@ class SystemConfigDatabase:
             boxtype=boxtype,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            # config_root=config_root,
-            # config_options=config_options,
+            config_root=config_root,
+            config_options=config_options,
             adapter=adapter,
         )
 
@@ -266,18 +267,18 @@ class SystemConfigDatabase:
         boxtype: str,
         ipaddr_sss: Optional[str] = None,
         ipaddr_css: Optional[str] = None,
-        # config_root: Optional[str] = None,
-        # config_options: MutableSequence[Quel1ConfigOption] = [],
+        config_root: Optional[str] = None,
+        config_options: MutableSequence[Quel1ConfigOption] = [],
         adapter: str | None = None,
     ) -> dict[str, object]:
         box_setting = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
             boxtype=QUEL1_BOXTYPE_ALIAS[boxtype],
-            # config_options=config_options,
+            config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            # config_root=config_root,
+            config_root=config_root,
             adapter=adapter,
         )
         self._box_settings[box_name] = box_setting
@@ -547,8 +548,8 @@ class BoxSetting:
     boxtype: Quel1BoxType
     ipaddr_sss: Optional[str | IPv4Address | IPv6Address] = None
     ipaddr_css: Optional[str | IPv4Address | IPv6Address] = None
-    # config_root: Optional[str | os.PathLike] = None
-    # config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
+    config_root: Optional[str | os.PathLike] = None
+    config_options: MutableSequence[Quel1ConfigOption] = field(default_factory=list)
     adapter: str | None = None
 
     def __post_init__(self) -> None:
@@ -571,7 +572,7 @@ class BoxSetting:
         elif not isinstance(self.ipaddr_css, (IPv4Address, IPv6Address)):
             raise ValueError("ipaddr_css should be instance of IPvxAddress")
 
-        # self.config_options = []
+        self.config_options = []
 
     def asdict(self) -> dict[str, Any]:
         return {
@@ -579,10 +580,10 @@ class BoxSetting:
             "ipaddr_sss": str(self.ipaddr_sss),
             "ipaddr_css": str(self.ipaddr_css),
             "boxtype": self.boxtype,
-            # "config_root": str(self.config_root)
-            # if self.config_root is not None
-            # else None,
-            # "config_options": self.config_options,
+            "config_root": str(self.config_root)
+            if self.config_root is not None
+            else None,
+            "config_options": self.config_options,
             "adapter": self.adapter,
         }
 
