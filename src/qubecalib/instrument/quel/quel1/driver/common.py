@@ -9,11 +9,12 @@ from e7awgsw import CaptureParam, WaveSequence
 from quel_ic_config import CaptureReturnCode
 
 from . import multi, single
+from .single import Quel1PortType
 
 
 class AwgId(NamedTuple):
     box: str
-    port: int
+    port: Quel1PortType
     channel: int
 
 

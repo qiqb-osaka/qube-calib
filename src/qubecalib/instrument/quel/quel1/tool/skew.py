@@ -830,7 +830,7 @@ class Skew:
         box_name, _ = monitor_port
         trigger_port = (box_name, trigger_nport)
         defined_channel = set([c for c, _ in sysdb._relation_channel_target])
-        channel_names_by_channel: dict[tuple[str, int, int], str] = {}
+        channel_names_by_channel: dict[tuple[str, int | tuple[int, int], int], str] = {}
         for k, v in sysdb._relation_channel_port:
             p = sysdb._port_settings[cast(str, v["port_name"])]
             channel = (p.box_name, p.port, cast(int, v["channel_number"]))
