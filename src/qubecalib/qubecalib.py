@@ -801,6 +801,22 @@ class Converter:
         }
 
     @classmethod
+    def calc_modulation_frequency_for_direct_conversion_transceiver(
+        cls,
+        f_target: float,
+        port_config: PortConfigAcquirer,
+    ) -> float:
+        f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
+        f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
+        f_diff = f_target - (f_cnco + f_fnco)
+        if 0.5 < abs(f_diff):
+            p = port_config
+            warnings.warn(
+                f"Modulation frequency abs({f_diff}) of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz"
+            )
+        return f_diff  # GHz
+
+    @classmethod
     def calc_modulation_frequency(
         cls,
         f_target: float,
@@ -822,6 +838,11 @@ class Converter:
             Modulation frequency in GHz.
         """
         # Note that port_config has frequencies in Hz.
+        if port_config.lo_freq is None:
+            return cls.calc_modulation_frequency_for_direct_conversion_transceiver(
+                f_target=f_target,
+                port_config=port_config,
+            )
         f_lo = port_config.lo_freq * 1e-9  # Hz -> GHz
         f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
         f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
@@ -1043,7 +1064,7 @@ class PortConfigAcquirer:
                         if "sideband" in dumped_port
                         else DEFAULT_SIDEBAND
                     )
-        self.lo_freq: float = dp["lo_freq"]
+        self.lo_freq: float | None = dp["lo_freq"] if "lo_freq" in dp else None
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
         self.sideband: str = sideband

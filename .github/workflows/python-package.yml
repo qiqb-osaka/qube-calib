@@ -24,7 +24,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt install libgirepository1.0-dev
           sudo apt-get install -y libcairo2-dev
           python -m pip install --upgrade pip==24.0
           python -m pip install flake8 pytest pytest-mock
