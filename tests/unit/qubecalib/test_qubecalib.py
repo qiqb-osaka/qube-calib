@@ -2,7 +2,7 @@ import os
 from typing import Generator
 
 import pytest
-from qubecalib import QubeCalib
+from qubecalib.qubecalib import QubeCalib
 
 CONFIG_KEYS = {
     "clockmaster_setting",

@@ -13,7 +13,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
-    Collection,
     Final,
     Iterable,
     MutableMapping,
@@ -50,7 +49,7 @@ from .neopulse import (
     Slot,
     Waveform,
 )
-from .sysconfdb import BoxSetting, PortSetting, SystemConfigDatabase
+from .sysconfdb import BoxSetting, PortSetting, Quel1PortType, SystemConfigDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +81,10 @@ class QubeCalib:
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
 
+    def new_session(self) -> Executor:
+        """Create a new session."""
+        return Executor(self.system_config_database.copy())
+
     @property
     def system_config_database(self) -> SystemConfigDatabase:
         return self._system_config_database
@@ -96,7 +99,7 @@ class QubeCalib:
 
     @deprecated("use sysdb.create_quel1system() instead")
     def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
-        return self.quel1_create_quel1system(*box_names)
+        return self.sysdb.create_quel1system(*box_names)
 
     @deprecated("use sysdb.create_quel1system() instead")
     def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
@@ -105,7 +108,7 @@ class QubeCalib:
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
         system = direct.Quel1System.create(
             clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
-            boxes=[self.create_named_box(b) for b in box_names],
+            boxes=[self.sysdb.create_named_box(b) for b in box_names],
         )
         return system
 
@@ -266,7 +269,7 @@ class QubeCalib:
             config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
-            config_root=config_root,
+            # config_root=config_root,
         )
 
     def define_channel(
@@ -492,10 +495,10 @@ class QubeCalib:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root)
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
             )
             box.reconnect()
         return boxpool
@@ -514,7 +517,7 @@ class Converter:
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
-    ) -> dict[tuple[str, int, int], WaveSequence | CaptureParam]:
+    ) -> dict[tuple[str, Quel1PortType, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
         capseq = cls.convert_to_cap_device_specific_sequence(
@@ -652,7 +655,7 @@ class Converter:
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
-    ) -> dict[tuple[str, int, int], WaveSequence]:
+    ) -> dict[tuple[str, Quel1PortType, int], WaveSequence]:
         # for target_name, gss in gen_sampled_sequence.items():
         #     print(target_name, gss.padding, end=" ")
         #     # for sub in gss.sub_sequences:
@@ -663,7 +666,7 @@ class Converter:
 
         # target 毎の変調周波数の計算と channel 毎にデータを束ねる
         targets_freqs: MutableMapping[str, float] = {}
-        targets_ids: MutableMapping[str, tuple[str, int, int]] = {}
+        targets_ids: MutableMapping[str, tuple[str, Quel1PortType, int]] = {}
         for target_name, rmap in resource_map.items():
             # target 毎の変調周波数の計算
             rmap_target = rmap["target"]
@@ -744,7 +747,7 @@ class Converter:
         }
         # (box_name, port_number, channel_number) と {target_name: sampled_sequence} とのマップを作成する
         ids_sampled_sequences: dict[
-            tuple[str, int, int], dict[str, GenSampledSequence]
+            tuple[str, Quel1PortType, int], dict[str, GenSampledSequence]
         ] = {}
         for target, box_port_channel in targets_ids.items():
             if target in gen_sampled_sequence:
@@ -798,6 +801,22 @@ class Converter:
         }
 
     @classmethod
+    def calc_modulation_frequency_for_direct_conversion_transceiver(
+        cls,
+        f_target: float,
+        port_config: PortConfigAcquirer,
+    ) -> float:
+        f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
+        f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
+        f_diff = f_target - (f_cnco + f_fnco)
+        if 0.5 < abs(f_diff):
+            p = port_config
+            warnings.warn(
+                f"Modulation frequency abs({f_diff}) of {p._box_name}:{p._port}:{p._channel} is too high. f_target={f_target} GHz, f_cnco={f_cnco} GHz, f_fnco={f_fnco} GHz"
+            )
+        return f_diff  # GHz
+
+    @classmethod
     def calc_modulation_frequency(
         cls,
         f_target: float,
@@ -819,6 +838,11 @@ class Converter:
             Modulation frequency in GHz.
         """
         # Note that port_config has frequencies in Hz.
+        if port_config.lo_freq is None:
+            return cls.calc_modulation_frequency_for_direct_conversion_transceiver(
+                f_target=f_target,
+                port_config=port_config,
+            )
         f_lo = port_config.lo_freq * 1e-9  # Hz -> GHz
         f_cnco = port_config.cnco_freq * 1e-9  # Hz -> GHz
         f_fnco = port_config.fnco_freq * 1e-9  # Hz -> GHz
@@ -1040,7 +1064,7 @@ class PortConfigAcquirer:
                         if "sideband" in dumped_port
                         else DEFAULT_SIDEBAND
                     )
-        self.lo_freq: float = dp["lo_freq"]
+        self.lo_freq: float | None = dp["lo_freq"] if "lo_freq" in dp else None
         self.cnco_freq: float = dp["cnco_freq"]
         self.fnco_freq: float = fnco_freq
         self.sideband: str = sideband
@@ -1241,7 +1265,7 @@ class Sequencer(Command):
         boxpool: BoxPool,
     ) -> tuple[
         dict[tuple[str, int, int], CaptureParam],
-        dict[tuple[str, int, int], WaveSequence],
+        dict[tuple[str, Quel1PortType, int], WaveSequence],
         dict[str, Any],
     ]:
         # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
@@ -1344,7 +1368,7 @@ class Sequencer(Command):
             )
             for target_name, m in gen_target_bpc.items()
         }
-        gen_e7_settings: dict[tuple[str, int, int], WaveSequence] = (
+        gen_e7_settings: dict[tuple[str, Quel1PortType, int], WaveSequence] = (
             Converter.convert_to_gen_device_specific_sequence(
                 gen_sampled_sequence=self.gen_sampled_sequence,
                 cap_sampled_sequence=self.cap_sampled_sequence,
@@ -1366,23 +1390,23 @@ class Sequencer(Command):
         settings: list[
             direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting
         ] = []
-        for (name, port, runit), cprm in c.items():
+        for (name, cport, runit), cprm in c.items():
             settings.append(
                 direct.RunitSetting(
                     runit=direct.RunitId(
                         box=name,
-                        port=port,
+                        port=cport,
                         runit=runit,
                     ),
                     cprm=cprm,
                 )
             )
-        for (name, port, channel), wseq in g.items():
+        for (name, gport, channel), wseq in g.items():
             settings.append(
                 direct.AwgSetting(
                     awg=direct.AwgId(
                         box=name,
-                        port=port,
+                        port=gport,
                         channel=channel,
                     ),
                     wseq=wseq,
@@ -1855,10 +1879,10 @@ class Executor:
                 ipaddr_sss=str(setting.ipaddr_sss),
                 ipaddr_css=str(setting.ipaddr_css),
                 boxtype=setting.boxtype,
-                config_root=Path(setting.config_root)
-                if setting.config_root is not None
-                else None,
-                config_options=setting.config_options,
+                # config_root=Path(setting.config_root),
+                # if setting.config_root is not None
+                # else None,
+                # config_options=setting.config_options,
             )
             status = box.reconnect()
             for mxfe_idx, s in status.items():
@@ -1964,7 +1988,7 @@ class BoxPool:
         self._linkstatus: dict[str, bool] = {}
         self._estimated_timediff: dict[str, int] = {}
         self._cap_sysref_time_offset: int = 0
-        self._port_direction: dict[tuple[str, int], str] = {}
+        self._port_direction: dict[tuple[str, Quel1PortType], str] = {}
         self._box_config_cache: dict[str, dict] = {}
 
     def create_clock_master(
@@ -2002,16 +2026,16 @@ class BoxPool:
         ipaddr_sss: str,
         ipaddr_css: str,
         boxtype: Quel1BoxType,
-        config_root: Optional[Path],
-        config_options: Optional[Collection[Quel1ConfigOption]] = None,
+        # config_root: Optional[Path],
+        # config_options: Optional[Collection[Quel1ConfigOption]] = None,
     ) -> Quel1BoxWithRawWss:
         box = Quel1BoxWithRawWss.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             boxtype=boxtype,
-            config_root=config_root,
-            config_options=config_options,
+            # config_root=config_root,
+            # config_options=config_options,
         )
         sqc = SequencerClient(ipaddr_sss)
         self._boxes[box_name] = (box, sqc)
@@ -2082,7 +2106,7 @@ class BoxPool:
         else:
             raise ValueError(f"invalid name of box: '{name}'")
 
-    def get_port_direction(self, box_name: str, port: int) -> str:
+    def get_port_direction(self, box_name: str, port: Quel1PortType) -> str:
         if (box_name, port) not in self._port_direction:
             box = self.get_box(box_name)[0]
             self._port_direction[(box_name, port)] = box.dump_port(port)["direction"]
