@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
@@ -18,6 +19,7 @@ from quel_ic_config import (
 )
 
 from .instrument.quel.quel1 import driver as direct
+from .instrument.quel.quel1.driver import Quel1PortType
 
 DEFAULT_SIDEBAND = "U"
 
@@ -37,12 +39,16 @@ class SystemConfigDatabase:
         ] = []
         self.timing_shift: Final[dict[str, int]] = {}
         self.skew: Final[dict[str, int]] = {}
-        self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
+        self.trigger: dict[tuple[str, int], tuple[str, Quel1PortType, int]] = {}
         self.time_to_start: int = 0
 
     @property
     def box_settings(self) -> dict[str, BoxSetting]:
         return self._box_settings
+
+    def copy(self) -> SystemConfigDatabase:
+        """Return a copy of the current instance."""
+        return deepcopy(self)
 
     def define_clockmaster(
         self,
@@ -166,7 +172,7 @@ class SystemConfigDatabase:
         self,
         port_name: str,
         box_name: str,
-        port: int,
+        port: Quel1PortType,
         lo_freq: float = 0,
         cnco_freq: float = 0,
         sideband: str = "",
@@ -195,6 +201,24 @@ class SystemConfigDatabase:
             for channel, target in self._relation_channel_target
             if target == target_name
         }
+
+    def assign_target_to_channel(self, *, target: str, channel: str) -> None:
+        self._relation_channel_target.append((channel, target))
+
+    def define_target(
+        self,
+        target: str,
+        *,
+        frequency: float = 0,
+        channels: list[str] | None = None,
+    ) -> None:
+        if target in self._target_settings:
+            raise ValueError(f"target {target} is already defined")
+        self._target_settings[target] = {"frequency": frequency}
+        if channels is not None:
+            for channel in channels:
+                if (channel, target) not in self._relation_channel_target:
+                    self.assign_target_to_channel(channel=channel, target=target)
 
     def get_channel_numbers_by_target(
         self,
@@ -248,9 +272,10 @@ class SystemConfigDatabase:
     def get_port_numbers_by_target(
         self,
         target_name: str,
-    ) -> __builtins__.set[int]:
+    ) -> __builtins__.set[Quel1PortType]:
         return {
-            self._port_settings[_].port for _ in self.get_ports_by_target(target_name)
+            self._port_settings[ports].port
+            for ports in self.get_ports_by_target(target_name)
         }
 
     def get_boxes_by_target(
@@ -315,7 +340,7 @@ class SystemConfigDatabase:
         self,
         port_name: str,
         box_name: str,
-        port_number: int,
+        port_number: Quel1PortType,
         lo_freq: Optional[float] = None,
         cnco_freq: Optional[float] = None,
         sideband: str = DEFAULT_SIDEBAND,
@@ -385,15 +410,6 @@ class SystemConfigDatabase:
         )
         return system
 
-    # def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
-    #     if self._clockmaster_setting is None:
-    #         raise ValueError("clock master is not found")
-    #     system = direct.Quel1System.create(
-    #         clockmaster=QuBEMasterClient(self._clockmaster_setting.ipaddr),
-    #         boxes=[self.create_named_box(b) for b in box_names],
-    #     )
-    #     return system
-
     def asdict(self) -> dict[str, object]:
         return {
             "clockmaster_setting": self._clockmaster_setting.asdict()
@@ -449,6 +465,12 @@ class SystemConfigDatabase:
         rct = self._relation_channel_target
         relation_target_channel = {(t, c) for c, t in rct if c in channel_names}
         return relation_target_channel
+
+    def get_targets_by_box(
+        self,
+        box_name: str,
+    ) -> Set[tuple[str, str]]:
+        return self.get_target_name(box_name=box_name)
 
     def get_target_by_port(
         self,
@@ -597,7 +619,7 @@ class BoxSetting:
 class PortSetting:
     port_name: str
     box_name: str
-    port: int
+    port: Quel1PortType
     lo_freq: Optional[float] = None  # will be obsolete
     cnco_freq: Optional[float] = None  # will be obsolete
     sideband: str = DEFAULT_SIDEBAND  # will be obsolete

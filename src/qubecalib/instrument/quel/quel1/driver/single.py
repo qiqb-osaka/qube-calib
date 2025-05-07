@@ -3,16 +3,18 @@ from __future__ import annotations
 from collections import defaultdict
 from concurrent.futures import Future
 from types import MappingProxyType
-from typing import Final, NamedTuple, Optional
+from typing import Final, NamedTuple, Optional, Union
 
 import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss, Quel1WaveSubsystem
 
+Quel1PortType = Union[int, tuple[int, int]]
+
 
 class AwgId(NamedTuple):
-    port: int
+    port: Quel1PortType
     channel: int
 
 

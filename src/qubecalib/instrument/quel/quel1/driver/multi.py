@@ -11,6 +11,7 @@ from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss
 
 from . import single
+from .single import Quel1PortType
 
 logger = getLogger(__name__)
 
@@ -37,7 +38,7 @@ class Quel1System:
         self.timing_shift: Final[dict[str, int]] = {
             b: 0 for b in boxes
         }  # this parameter must be a multiple of 16
-        self.trigger: dict[tuple[str, int], tuple[str, int, int]] = {}
+        self.trigger: dict[tuple[str, int], tuple[str, Quel1PortType, int]] = {}
 
     @classmethod
     def create(
@@ -71,6 +72,8 @@ class Quel1System:
     def resync(
         self, *box_names: str
     ) -> MutableSequence[tuple[bool, int, int] | tuple[bool, int]]:
+        if len(box_names) == 0:
+            box_names = tuple(self.boxes.keys())
         master = self._clockmaster
         master.kick_clock_synch([str(self.box[b].sss.ipaddress) for b in box_names])
         return [self.read_clock(b) for b in box_names] + [master.read_clock()]

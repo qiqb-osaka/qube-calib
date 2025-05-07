@@ -3,9 +3,6 @@ from __future__ import annotations
 from typing import Any, Type
 
 import error
-
-error
-
 from e7awgsw import AWG, CaptureUnit, WaveSequence
 from pytest_mock import MockerFixture
 from qubecalib.neopulse import (
@@ -26,6 +23,8 @@ from qubecalib.qubecalib import (
     SystemConfigDatabase,
 )
 from quel_ic_config import Quel1BoxType
+
+error
 
 
 class ResourceMap:
