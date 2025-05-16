@@ -280,6 +280,7 @@ class Skew:
                 self._define_channel_names(
                     box_name, system=self._system, sysdb=self.sysdb
                 )
+        self._repeats = 100
 
     @classmethod
     def create(
@@ -462,7 +463,7 @@ class Skew:
                 freqs["channels"][i]["target_freq"] = v
 
         logger.debug(
-            f"{src_port} ->: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
         )
 
         boxname, nport = dest_port
@@ -504,7 +505,7 @@ class Skew:
                 )
 
         logger.debug(
-            f"-> {dest_port}: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
         )
 
         return freqs
@@ -603,7 +604,7 @@ class Skew:
         monitor = cls.acquire_target(sysdb, monitor_port)
         sysdb._target_settings[monitor] = dict(frequency=target_freq)
         logger.debug(
-            f"Target {target}:{target_port}, lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
+            f"_setup_monitor_port(): Target {target}:{target_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )
 
     def setup_trigger_port(
@@ -653,7 +654,7 @@ class Skew:
         trigger = cls.acquire_target(sysdb, trigger_port)
         sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
-            f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
+            f"setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
     def reset_skew_parameter(self) -> SkewAdjustResetter:
@@ -707,6 +708,38 @@ class Skew:
                 show_reference=show_reference,
                 extra_capture_range=extra_capture_range,
             )
+            logger.debug(
+                f"-------- _measure_targets(): Target{target_port} finished --------"
+            )
+
+    def _measure(
+        self,
+        target_port: PORT,
+        *,
+        reference_port: PORT | None = None,
+        monitor_port: PORT | None = None,
+        trigger_nport: int | None = None,
+        show_reference: bool | None = None,
+        extra_capture_range: int | None = None,  # multiple of 128 ns
+    ) -> None:
+        self._config_ports(
+            target_port,
+            reference_port=reference_port,
+            monitor_port=monitor_port,
+            trigger_nport=trigger_nport,
+            show_reference=show_reference,
+            extra_capture_range=extra_capture_range,
+        )
+        extra_capture_range = (
+            extra_capture_range
+            if extra_capture_range is not None
+            else EXTRA_CAPTURE_RANGE
+        )
+        seq = self._create_check_sequence(
+            target_port, capture_range=extra_capture_range
+        )
+        iqs = self._execute(seq)
+        self._store(target_port, iqs)
 
     def _create_check_sequence(
         self,
@@ -721,7 +754,9 @@ class Skew:
         monitor_box_name, _ = monitor_port
         trigger_nport = self._trigger_nport if trigger_nport is None else trigger_nport
         trigger_port: PORT = (monitor_box_name, trigger_nport)
-        capture_range = DEFAULT_CAPTURE_RANGE
+        capture_range = (
+            DEFAULT_CAPTURE_RANGE if capture_range is None else capture_range
+        )
         # create pulse sequence
         pulse = Rectangle(duration=128, amplitude=1.0)
         capture = Capture(duration=capture_range)
@@ -744,7 +779,7 @@ class Skew:
         """Executes the measurement, assuming that the sequence contains only a single capture."""
         self._executor.add_sequence(sequence)
         for _, data, _ in self._executor.step_execute(
-            repeats=100,
+            repeats=self._repeats,
             interval=REPETITION_PERIOD,
             integral_mode="single",
             dsp_demodulation=False,
@@ -868,28 +903,6 @@ class Skew:
             trigger_nport=trigger_nport,
             sysdb=self._sysdb,
         )
-
-    def _measure(
-        self,
-        target_port: PORT,
-        *,
-        reference_port: PORT | None = None,
-        monitor_port: PORT | None = None,
-        trigger_nport: int | None = None,
-        show_reference: bool | None = None,
-        extra_capture_range: int | None = None,  # multiple of 128 ns
-    ) -> None:
-        self._config_ports(
-            target_port,
-            reference_port=reference_port,
-            monitor_port=monitor_port,
-            trigger_nport=trigger_nport,
-            show_reference=show_reference,
-            extra_capture_range=extra_capture_range,
-        )
-        seq = self._create_check_sequence(target_port)
-        iqs = self._execute(seq)
-        self._store(target_port, iqs)
 
     def estimate(self) -> None:
         for focused_port, iqs in self._measured_waveform.items():
