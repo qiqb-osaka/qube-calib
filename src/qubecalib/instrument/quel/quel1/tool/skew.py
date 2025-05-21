@@ -30,6 +30,7 @@ DEFAULT_CAPTURE_RANGE = 8 * 128  # ns
 REPETITION_PERIOD = 1280 * 128  # words
 EXTRA_CAPTURE_RANGE = 1024  # words
 
+DEFAULT_CNCO_LIMIT = 3e9
 DEFAULT_FNCO_LIMIT = 500e6
 
 
@@ -242,6 +243,8 @@ class SkewAdjustResetter:
 
 
 class Skew:
+    DEFAULT_CHANNEL = 0
+
     def __init__(
         self,
         system: Quel1System,
@@ -280,6 +283,7 @@ class Skew:
                 self._define_channel_names(
                     box_name, system=self._system, sysdb=self.sysdb
                 )
+        self._repeats = 100
 
     @classmethod
     def create(
@@ -421,7 +425,7 @@ class Skew:
         *,
         src_port: PORT,
         dest_port: PORT,
-    ) -> dict[str, str | float | dict[int, dict[str, float]]]:
+    ) -> dict[str, str | float | dict[str, float] | dict[int, dict[str, float]]]:
         """src_port の周波数を dest_port に合わせる"""
         return self._sync_lo_nco(
             src_port=src_port,
@@ -430,22 +434,29 @@ class Skew:
         )
 
     @classmethod
-    def _sync_lo_nco(
+    def _parse_freqs_from_dump_port(
         cls,
         *,
-        src_port: PORT,
-        dest_port: PORT,
+        dump_port: dict[str, dict[str, float]],
         system: Quel1System,
-    ) -> dict[str, str | float | dict[int, dict[str, float]]]:
-        # src_port: (box_name, port_number)
-        # dest_port: (box_name, port_number)
-        boxname, nport = src_port
-        box = system.box[boxname]
-        dump_port = box.dump_port(nport)
+    ) -> tuple[
+        dict[str, str | float | dict[str, float] | dict[int, dict[str, float]]],
+        dict[int, dict[str, float]],
+    ]:
+        # dump_port = box.dump_port(nport)
         kws = ["lo_freq", "cnco_freq", "runits", "channels", "sideband"]
-        freqs = {k: v for k, v in dump_port.items() if k in kws}
-        ch_freqs = freqs["channels"] if "channels" in freqs else freqs["runits"]
-        lo_freq, cnco_freq = freqs["lo_freq"], freqs["cnco_freq"]
+        freqs: dict[
+            str, str | float | dict[str, float] | dict[int, dict[str, float]]
+        ] = {k: v for k, v in dump_port.items() if k in kws}
+        ch_freqs = (
+            cast(dict[int, dict[str, float]], freqs["channels"])
+            if "channels" in freqs
+            else cast(dict[int, dict[str, float]], freqs["runits"])
+        )
+        lo_freq, cnco_freq = (
+            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["cnco_freq"]),
+        )
         kw = "fnco_freq"
         usb_freqs = {i: lo_freq + (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
         lsb_freqs = {i: lo_freq - (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
@@ -456,20 +467,39 @@ class Skew:
             freqs["sideband"] = sideband
         if sideband == "U":
             for i, v in usb_freqs.items():
-                freqs["channels"][i]["target_freq"] = v
+                ch_freqs[i]["target_freq"] = v
         else:
             for i, v in lsb_freqs.items():
-                freqs["channels"][i]["target_freq"] = v
+                ch_freqs[i]["target_freq"] = v
+        return freqs, ch_freqs
+
+    @classmethod
+    def _sync_lo_nco(
+        cls,
+        *,
+        src_port: PORT,
+        dest_port: PORT,
+        system: Quel1System,
+    ) -> dict[str, str | float | dict[str, float] | dict[int, dict[str, float]]]:
+        # src_port: (box_name, port_number)
+        # dest_port: (box_name, port_number)
+        boxname, nport = src_port
+        box = system.box[boxname]
+        dump_port = box.dump_port(nport)
+        freqs, ch_freqs = cls._parse_freqs_from_dump_port(
+            dump_port=dump_port,
+            system=system,
+        )
 
         logger.debug(
-            f"{src_port} ->: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq']}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
 
         boxname, nport = dest_port
         box = system.box[boxname]
         lo_freq, cnco_freq = (
-            freqs["lo_freq"],
-            freqs["cnco_freq"] + ch_freqs[0]["fnco_freq"],
+            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["cnco_freq"]) + ch_freqs[0]["fnco_freq"],
         )
         for v in ch_freqs.values():
             v["fnco_freq"] = 0
@@ -491,6 +521,16 @@ class Skew:
         elif "runits" in dump_port:
             ch = dump_port["runits"]
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
+            # ADC の cnco 周波数は 3000MHz 未満である必要がある
+            # cnco_freq を 500MHz 減らし， lo_freq で補う
+            if cnco_freq >= DEFAULT_FNCO_LIMIT:
+                target_freq = ch_freqs[0]["target_freq"]
+                if lo_freq < target_freq:  # USB
+                    lo_freq += 500e6
+                    cnco_freq -= 500e6
+                else:  # LSB
+                    lo_freq -= 500e6
+                    cnco_freq -= 500e6
             box.config_port(
                 port=nport,
                 lo_freq=lo_freq,
@@ -504,7 +544,7 @@ class Skew:
                 )
 
         logger.debug(
-            f"-> {dest_port}: lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={sideband}"
+            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
 
         return freqs
@@ -603,18 +643,16 @@ class Skew:
         monitor = cls.acquire_target(sysdb, monitor_port)
         sysdb._target_settings[monitor] = dict(frequency=target_freq)
         logger.debug(
-            f"Target {target}:{target_port}, lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
+            f"_setup_monitor_port(): Target {target}:{target_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )
 
     def setup_trigger_port(
         self,
         *,
-        target_port: PORT,
         trigger_port: PORT,
     ) -> None:
-        """target に合わせて周波数を設定する"""
+        """trigger の target 周波数を設定する"""
         self._setup_trigger_port(
-            target_port=target_port,
             trigger_port=trigger_port,
             system=self._system,
             sysdb=self._sysdb,
@@ -624,36 +662,28 @@ class Skew:
     def _setup_trigger_port(
         cls,
         *,
-        target_port: PORT,
         trigger_port: PORT,
         system: Quel1System,
         sysdb: SystemConfigDatabase,
     ) -> None:
-        """target に合わせて周波数を設定する"""
-        name, nport = target_port
-        box = system.box[name]
-        if not box.is_output_port(nport):
-            raise ValueError(f"{target_port} is not output port")
-        freqs = cls._sync_lo_nco(
-            src_port=target_port,
-            dest_port=trigger_port,
-            system=system,
+        # """nco 設定に合わせて target 周波数を設定する"""
+        boxname, nport = trigger_port
+        box = system.box[boxname]
+        dump_port = box.dump_port(nport)
+        freqs, ch_freqs = cls._parse_freqs_from_dump_port(
+            dump_port=dump_port, system=system
         )
-        ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
-        DEFAULT_CHANNEL = 0
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
             cast(float, freqs["lo_freq"]),
             cast(float, freqs["cnco_freq"]),
-            ch_freqs[DEFAULT_CHANNEL]["fnco_freq"],
-            ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
+            ch_freqs[cls.DEFAULT_CHANNEL]["fnco_freq"],
+            ch_freqs[cls.DEFAULT_CHANNEL]["target_freq"] * 1e-9,
             cast(str, freqs["sideband"]),
         )
-        target = cls.acquire_target(sysdb, target_port)
-        sysdb._target_settings[target] = dict(frequency=target_freq)
         trigger = cls.acquire_target(sysdb, trigger_port)
         sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
-            f"Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
+            f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
     def reset_skew_parameter(self) -> SkewAdjustResetter:
@@ -701,12 +731,47 @@ class Skew:
         extra_capture_range: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        for target_port in tqdm(target_ports):
-            self._measure(
-                target_port,
-                show_reference=show_reference,
-                extra_capture_range=extra_capture_range,
-            )
+        with tqdm(target_ports) as t:
+            for target_port in t:
+                t.postfix = f"Target: {target_port}"
+                t.update()
+                self._measure(
+                    target_port,
+                    show_reference=show_reference,
+                    extra_capture_range=extra_capture_range,
+                )
+                logger.debug(
+                    f"-------- _measure_targets(): Target{target_port} finished --------"
+                )
+
+    def _measure(
+        self,
+        target_port: PORT,
+        *,
+        reference_port: PORT | None = None,
+        monitor_port: PORT | None = None,
+        trigger_nport: int | None = None,
+        show_reference: bool | None = None,
+        extra_capture_range: int | None = None,  # multiple of 128 ns
+    ) -> None:
+        self._config_ports(
+            target_port,
+            reference_port=reference_port,
+            monitor_port=monitor_port,
+            trigger_nport=trigger_nport,
+            show_reference=show_reference,
+            extra_capture_range=extra_capture_range,
+        )
+        extra_capture_range = (
+            extra_capture_range
+            if extra_capture_range is not None
+            else EXTRA_CAPTURE_RANGE
+        )
+        seq = self._create_check_sequence(
+            target_port, capture_range=extra_capture_range
+        )
+        iqs = self._execute(seq)
+        self._store(target_port, iqs)
 
     def _create_check_sequence(
         self,
@@ -721,7 +786,9 @@ class Skew:
         monitor_box_name, _ = monitor_port
         trigger_nport = self._trigger_nport if trigger_nport is None else trigger_nport
         trigger_port: PORT = (monitor_box_name, trigger_nport)
-        capture_range = DEFAULT_CAPTURE_RANGE
+        capture_range = (
+            DEFAULT_CAPTURE_RANGE if capture_range is None else capture_range
+        )
         # create pulse sequence
         pulse = Rectangle(duration=128, amplitude=1.0)
         capture = Capture(duration=capture_range)
@@ -744,7 +811,7 @@ class Skew:
         """Executes the measurement, assuming that the sequence contains only a single capture."""
         self._executor.add_sequence(sequence)
         for _, data, _ in self._executor.step_execute(
-            repeats=100,
+            repeats=self._repeats,
             interval=REPETITION_PERIOD,
             integral_mode="single",
             dsp_demodulation=False,
@@ -801,9 +868,8 @@ class Skew:
             system=system,
             sysdb=sysdb,
         )
-        # trigger の周波数を target に合わせる
+        # trigger の target 周波数を設定する
         self._setup_trigger_port(
-            target_port=target_port,
             trigger_port=trigger_port,
             system=system,
             sysdb=sysdb,
@@ -839,8 +905,31 @@ class Skew:
             list(target_ports) + [reference_port, monitor_port, trigger_port]
         ):
             channel = target_port + (0,)
-            target_name = channel_name = channel_names_by_channel[channel]
+            # Define a temporary channel name for provisional use
+            if channel not in channel_names_by_channel:
+                bname, nport, ch = channel
+                port_name = f"{bname}.PORT{nport}"
+                channel_name = f"{port_name}.CH{ch}"
+                sysdb.add_port_setting(
+                    port_name=port_name,
+                    box_name=bname,
+                    port=nport,
+                    ndelay_or_nwait=tuple([0]),
+                )
+                sysdb._relation_channel_port.append(
+                    (
+                        channel_name,
+                        {
+                            "port_name": port_name,
+                            "channel_number": ch,
+                        },
+                    ),
+                )
+            else:
+                channel_name = channel_names_by_channel[channel]
+            # Define a temporary target for provisional use
             if channel_name not in defined_channel:
+                target_name = channel_name
                 sysdb._relation_channel_target.append((target_name, channel_name))
                 sysdb._target_settings[target_name] = dict(frequency=0)
             # sysdb._relation_channel_target.append((target_name, channel_name))
@@ -868,28 +957,6 @@ class Skew:
             trigger_nport=trigger_nport,
             sysdb=self._sysdb,
         )
-
-    def _measure(
-        self,
-        target_port: PORT,
-        *,
-        reference_port: PORT | None = None,
-        monitor_port: PORT | None = None,
-        trigger_nport: int | None = None,
-        show_reference: bool | None = None,
-        extra_capture_range: int | None = None,  # multiple of 128 ns
-    ) -> None:
-        self._config_ports(
-            target_port,
-            reference_port=reference_port,
-            monitor_port=monitor_port,
-            trigger_nport=trigger_nport,
-            show_reference=show_reference,
-            extra_capture_range=extra_capture_range,
-        )
-        seq = self._create_check_sequence(target_port)
-        iqs = self._execute(seq)
-        self._store(target_port, iqs)
 
     def estimate(self) -> None:
         for focused_port, iqs in self._measured_waveform.items():

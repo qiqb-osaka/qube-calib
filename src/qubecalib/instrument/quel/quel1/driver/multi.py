@@ -78,6 +78,13 @@ class Quel1System:
         master.kick_clock_synch([str(self.box[b].sss.ipaddress) for b in box_names])
         return [self.read_clock(b) for b in box_names] + [master.read_clock()]
 
+    def initialize(self, *boxes: str) -> None:
+        if not boxes:
+            boxes = tuple(self.boxes.keys())
+        for box_name in boxes:
+            self.box[box_name].initialize_all_awgs()
+            self.box[box_name].initialize_all_capunits()
+
 
 class Action:
     SYSREF_PERIOD: Final[int] = 2_000
@@ -112,8 +119,6 @@ class Action:
         for box_settings in settings:
             name = box_settings.name
             box = quel1system.box[name]
-            box.initialize_all_awgs()
-            box.initialize_all_capunits()
             awg_ids = [
                 (s.awg.port, s.awg.channel)
                 for s in box_settings.settings
