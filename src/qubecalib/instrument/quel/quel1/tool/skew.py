@@ -683,7 +683,7 @@ class Skew:
         trigger = cls.acquire_target(sysdb, trigger_port)
         sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
-            f"setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
+            f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
     def reset_skew_parameter(self) -> SkewAdjustResetter:
@@ -731,15 +731,18 @@ class Skew:
         extra_capture_range: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        for target_port in tqdm(target_ports):
-            self._measure(
-                target_port,
-                show_reference=show_reference,
-                extra_capture_range=extra_capture_range,
-            )
-            logger.debug(
-                f"-------- _measure_targets(): Target{target_port} finished --------"
-            )
+        with tqdm(target_ports) as t:
+            for target_port in t:
+                t.postfix = f"Target: {target_port}"
+                t.update()
+                self._measure(
+                    target_port,
+                    show_reference=show_reference,
+                    extra_capture_range=extra_capture_range,
+                )
+                logger.debug(
+                    f"-------- _measure_targets(): Target{target_port} finished --------"
+                )
 
     def _measure(
         self,
