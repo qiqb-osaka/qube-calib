@@ -30,6 +30,7 @@ DEFAULT_CAPTURE_RANGE = 8 * 128  # ns
 REPETITION_PERIOD = 1280 * 128  # words
 EXTRA_CAPTURE_RANGE = 1024  # words
 
+DEFAULT_CNCO_LIMIT = 3e9
 DEFAULT_FNCO_LIMIT = 500e6
 
 
@@ -520,6 +521,16 @@ class Skew:
         elif "runits" in dump_port:
             ch = dump_port["runits"]
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
+            # ADC の cnco 周波数は 3000MHz 未満である必要がある
+            # cnco_freq を 500MHz 減らし， lo_freq で補う
+            if cnco_freq >= DEFAULT_FNCO_LIMIT:
+                target_freq = ch_freqs[0]["target_freq"]
+                if lo_freq < target_freq:  # USB
+                    lo_freq += 500e6
+                    cnco_freq -= 500e6
+                else:  # LSB
+                    lo_freq -= 500e6
+                    cnco_freq -= 500e6
             box.config_port(
                 port=nport,
                 lo_freq=lo_freq,
