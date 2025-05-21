@@ -902,8 +902,31 @@ class Skew:
             list(target_ports) + [reference_port, monitor_port, trigger_port]
         ):
             channel = target_port + (0,)
-            target_name = channel_name = channel_names_by_channel[channel]
+            # Define a temporary channel name for provisional use
+            if channel not in channel_names_by_channel:
+                bname, nport, ch = channel
+                port_name = f"{bname}.PORT{nport}"
+                channel_name = f"{port_name}.CH{ch}"
+                sysdb.add_port_setting(
+                    port_name=port_name,
+                    box_name=bname,
+                    port=nport,
+                    ndelay_or_nwait=tuple([0]),
+                )
+                sysdb._relation_channel_port.append(
+                    (
+                        channel_name,
+                        {
+                            "port_name": port_name,
+                            "channel_number": ch,
+                        },
+                    ),
+                )
+            else:
+                channel_name = channel_names_by_channel[channel]
+            # Define a temporary target for provisional use
             if channel_name not in defined_channel:
+                target_name = channel_name
                 sysdb._relation_channel_target.append((target_name, channel_name))
                 sysdb._target_settings[target_name] = dict(frequency=0)
             # sysdb._relation_channel_target.append((target_name, channel_name))
