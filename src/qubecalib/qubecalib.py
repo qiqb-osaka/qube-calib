@@ -1453,11 +1453,16 @@ class Sequencer(Command):
                 cprms[(box, runit_id.port, runit_id.runit)] = cprm
         rstatus, rresults = {}, {}
         for (box, port, runit), target in bpc2target.items():
-            s, r = self.parse_capture_result(
-                status[(box, port)],
-                data[(box, port, runit)],
-                cprms[(box, port, runit)],
-            )
+            try:
+                s, r = self.parse_capture_result(
+                    status[(box, port)],
+                    data[(box, port, runit)],
+                    cprms[(box, port, runit)],
+                )
+            except KeyError:
+                raise KeyError(
+                    f"capture result not found: {target}:{(box, port, runit)} in {data.keys()}"
+                )
             target = bpc2target[(box, port, runit)]
             rstatus[target] = s
             rresults[target] = r
