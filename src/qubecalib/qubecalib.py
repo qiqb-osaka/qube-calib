@@ -1461,7 +1461,7 @@ class Sequencer(Command):
                 )
             except KeyError:
                 raise KeyError(
-                    f"capture result not found: {target}:{(box, port, runit)} in {data.keys()}"
+                    f"capture result not found: {target}:{(box, port, runit)} in {data.keys()}, raw_status:{status}, raw_results:{results}"
                 )
             target = bpc2target[(box, port, runit)]
             rstatus[target] = s
