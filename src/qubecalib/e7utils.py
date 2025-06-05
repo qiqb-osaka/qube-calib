@@ -343,6 +343,40 @@ class CaptureParamTools:
         result = coefs.round().tolist()
         return result
 
+    @classmethod
+    def enable_classification(
+        cls,
+        capprm: CaptureParam,
+        *,
+        func_sel: Any,
+        coef_a: Any,
+        coef_b: Any,
+        const_c: Any,
+    ) -> CaptureParam:
+        """
+        Enable classification in the capture parameters.
+
+        Parameters
+        ----------
+        capprm : CaptureParam
+            Capture parameters.
+
+        Returns
+        -------
+        CaptureParam
+            CaptureParam object with classification enabled.
+        """
+        dspunits = capprm.dsp_units_enabled
+        dspunits.append(DspUnit.CLASSIFICATION)
+        capprm.sel_dsp_units_to_enable(*dspunits)
+        capprm.set_decision_func_params(
+            func_sel=func_sel,
+            coef_a=coef_a,
+            coef_b=coef_b,
+            const_c=const_c,
+        )
+        return capprm
+
 
 def _convert_gen_sampled_sequence_to_blanks_and_waves_chain(
     sequence: GenSampledSequence,
