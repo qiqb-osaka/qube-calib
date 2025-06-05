@@ -239,6 +239,16 @@ class CaptureParamTools:
         return capprm
 
     @classmethod
+    def enable_sum(
+        cls,
+        capprm: CaptureParam,
+    ) -> CaptureParam:
+        dsp = capprm.dsp_units_enabled
+        dsp.append(DspUnit.SUM)
+        capprm.sel_dsp_units_to_enable(*dsp)
+        return capprm
+
+    @classmethod
     def enable_demodulation(
         cls,
         capprm: CaptureParam,
