@@ -517,6 +517,7 @@ class Converter:
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
+        enable_sum: bool,
     ) -> dict[tuple[str, Quel1PortType, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
@@ -538,6 +539,7 @@ class Converter:
             integral_mode=integral_mode,
             dsp_demodulation=dsp_demodulation,
             software_demodulation=software_demodulation,
+            enable_sum=enable_sum,
         )
         genseq = cls.convert_to_gen_device_specific_sequence(
             gen_sampled_sequence=gen_sampled_sequence,
@@ -569,6 +571,7 @@ class Converter:
         integral_mode: str,
         dsp_demodulation: bool,
         software_demodulation: bool,
+        enable_sum: bool,
     ) -> dict[tuple[str, int, int], CaptureParam]:
         # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
@@ -641,6 +644,10 @@ class Converter:
                     f_GHz=targets_freqs[ids_targets[id]],
                 )
                 for id, e7 in ids_e7.items()
+            }
+        if enable_sum:
+            ids_e7 = {
+                id: CaptureParamTools.enable_sum(capprm=e7) for id, e7 in ids_e7.items()
             }
         return ids_e7
 
@@ -1219,6 +1226,8 @@ class Sequencer(Command):
         dsp_demodulation: bool = True,
         software_demodulation: bool = False,
         phase_compensation: bool = True,  # TODO not work
+        *,
+        enable_sum: bool = False,
     ) -> None:
         self.repeats = repeats
         self.interval = interval
@@ -1226,6 +1235,7 @@ class Sequencer(Command):
         self.dsp_demodulation = dsp_demodulation
         self.software_demodulation = software_demodulation
         self.phase_compensation = phase_compensation
+        self.enable_sum = enable_sum
 
     def generate_cap_resource_map(self, boxpool: BoxPool) -> dict[str, Any]:
         _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
@@ -1351,6 +1361,7 @@ class Sequencer(Command):
                 integral_mode=self.integral_mode,
                 dsp_demodulation=self.dsp_demodulation,
                 software_demodulation=self.software_demodulation,
+                enable_sum=self.enable_sum,
             )
         )
         # phase_offset_list_by_target = {
@@ -1461,7 +1472,7 @@ class Sequencer(Command):
                 )
             except KeyError:
                 raise KeyError(
-                    f"capture result not found: {target}:{(box, port, runit)} in {data.keys()}"
+                    f"capture result not found: {target}:{(box, port, runit)} in {data.keys()}, raw_status:{status}, raw_results:{results}"
                 )
             target = bpc2target[(box, port, runit)]
             rstatus[target] = s
