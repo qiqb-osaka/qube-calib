@@ -152,17 +152,17 @@ class RawTaskSettingBuilder(RawBuilder):
         trigger_channel: int | None = None,
     ) -> None:
         """
-        Add a capture unit (CAPU) configuration with optional trigger source.
+        Add a capture unit (CAPU (runit)) configuration with optional trigger source.
 
         Args:
-            port (int): CAPU device port number.
-            runit (int): CAPU unit index on the specified port.
+            port (int): CAPU (runit) device port number.
+            runit (int): CAPU (runit) unit index on the specified port.
             cprm (CaptureParam): Capture configuration parameters.
-            triggr_port (int, optional): Port number of the triggering AWG.
-            triggr_channel (int, optional): Channel of the triggering AWG.
+            trigger_port (int, optional): Port number of the triggering AWG.
+            trigger_channel (int, optional): Channel of the triggering AWG.
 
         Raises:
-            ValueError: If only one of `triggr_port` or `triggr_channel` is specified.
+            ValueError: If only one of `trigger_port` or `trigger_channel` is specified.
 
         Returns:
             None
@@ -299,54 +299,84 @@ class TaskSettingBuilder:
         """
         if not indexed_waveforms:
             raise ValueError("indexed_waveforms must not be empty")
-
         if wait_words > 2**32 - 1:
             raise ValueError(
                 f"wait_words must be less than 4294967296, but got {wait_words}"
             )
 
+        for chunk_index, chunk in enumerate(indexed_waveforms):
+            self._validate_waveform_chunk(chunk_index, chunk)
+
+        wseq = self._construct_wave_sequence(
+            indexed_waveforms=indexed_waveforms,
+            wait_words=wait_words,
+            repetition_count=self._repetition_count,
+            coherent_integration_period=self._coherent_integration_period,
+        )
+        self._builder.add_awg_setting(port=port, channel=channel, wseq=wseq)
+
+    @classmethod
+    def _validate_waveform_array(cls, array: npt.NDArray[np.complex64]) -> None:
+        if not isinstance(array, np.ndarray):
+            raise TypeError(
+                f"waveform must be a numpy array, but got {type(array).__name__}"
+            )
+        if array.dtype != np.complex64:
+            raise ValueError(
+                f"waveform must be of type np.complex64, but got {array.dtype}"
+            )
+
+    @classmethod
+    def _validate_waveform_chunk(
+        cls, chunk_index: int, chunk: list[tuple[int, npt.NDArray[np.complex64]]]
+    ) -> None:
+        if not chunk:
+            raise ValueError(f"indexed_waveforms[{chunk_index}] is empty")
+        head = chunk[0]
+        if not (isinstance(head, tuple) and len(head) == 2):
+            raise TypeError(
+                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
+                f"but got {type(head).__name__}"
+            )
+        head_index = head[0]
+        if not isinstance(head_index, int):
+            raise TypeError(
+                f"index must be an int, but got {type(head_index).__name__}"
+            )
+        tail = chunk[-1]
+        if not (isinstance(tail, tuple) and len(tail) == 2):
+            raise TypeError(
+                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
+                f"but got {type(tail).__name__}"
+            )
+        tail_index = tail[0]
+        if not isinstance(tail_index, int):
+            raise TypeError(
+                f"index must be an int, but got {type(tail_index).__name__}"
+            )
+        cls._validate_waveform_array(tail[1])
+
+    @classmethod
+    def _construct_wave_sequence(
+        cls,
+        *,
+        indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
+        wait_words: int,
+        repetition_count: int,
+        coherent_integration_period: int,
+    ) -> WaveSequence:
         first_wait_words = wait_words
         last_tail_words = 0
         buffer: list[int | npt.NDArray[np.complex64]] = []
-        for chunk_index, chunk in enumerate(indexed_waveforms):
-            if not chunk:
-                raise ValueError(f"indexed_waveforms[{chunk_index}] is empty")
-            head = chunk[0]
-            if not isinstance(head, tuple) and len(head) != 2:
-                raise TypeError(
-                    f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
-                    f"but got {type(head).__name__}"
-                )
-            head_index = head[0]
-            if not isinstance(head_index, int):
-                raise TypeError(
-                    f"index must be an int, but got {type(head_index).__name__}"
-                )
+        for chunk in indexed_waveforms:
+            head_index = chunk[0][0]
             head_words = head_index // 4  # Convert to words
-            tail = chunk[-1]
-            if not isinstance(tail, tuple) and len(tail) != 2:
-                raise TypeError(
-                    f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
-                    f"but got {type(tail).__name__}"
-                )
-            tail_index = tail[0]
-            if not isinstance(tail_index, int):
-                raise TypeError(
-                    f"index must be an int, but got {type(tail_index).__name__}"
-                )
-            tail_waveform = tail[1]
-            if not isinstance(tail_waveform, np.ndarray):
-                raise TypeError(
-                    f"waveform must be a numpy array, but got {type(tail_waveform).__name__}"
-                )
-            if tail_waveform.dtype != np.complex64:
-                raise ValueError(
-                    f"waveform must be of type np.complex64, but got {tail_waveform.dtype}"
-                )
+            tail_index = chunk[-1][0]
+            tail_waveform = chunk[-1][1]
             wait_words = head_words - last_tail_words
             if wait_words < 0:
                 raise ValueError(
-                    f"Too close chunk: the chunk starting at sample index {head_index} "
+                    f"Overlap detected between chunks: the chunk starting at sample index {head_index} "
                     f"must be placed at or after {last_tail_words * 4} to avoid overlap."
                 )
             wave = np.zeros(
@@ -361,64 +391,16 @@ class TaskSettingBuilder:
                     raise TypeError(
                         f"index must be an int, but got {type(begin_index).__name__}"
                     )
-                if not isinstance(waveform, np.ndarray):
-                    raise TypeError(
-                        f"waveform must be a numpy array, but got {type(waveform).__name__}"
-                    )
-                if waveform.dtype != np.complex64:
-                    raise ValueError(
-                        "waveform must be of type np.complex64, "
-                        f"but got {waveform.dtype}"
-                    )
+                cls._validate_waveform_array(waveform)
                 index = begin_index - head_words * 4
                 wave[index : index + len(waveform)] = FULL_SCALE * waveform
 
-            # w = indexed_waveforms
-            # head_index = (w[0][0][0] // 64) * 64  # Align to 64-samples boundary
-            # head_words = head_index // 4  # Convert to words
-            # wseq = WaveSequence(
-            #     num_wait_words=wait_words + head_words,
-            #     num_repeats=self._repetition_count,
-            #     enable_lib_log=False,
-            # )
-            # tail_index = (
-            #     (w[-1][-1][0] + len(w[-1][-1][1]) + 63) // 64
-            # ) * 64  # Align to 64-samples boundary
-            # iq = np.zeros(tail_index - head_index, dtype=np.complex64)
-            # tail_words = tail_index // 4  # Convert to words
-            # for chunk_idx, chunk in enumerate(indexed_waveforms):
-            #     # Write the waveform data into the iq array
-            #     for index, waveform in chunk:
-            #         begin_index = index - head_index
-            #         end_index = begin_index + len(waveform)
-            #         iq[begin_index:end_index] = waveform
-            #     chunk_tail_idx = (
-            #         (chunk[-1][0] + len(chunk[-1][1]) + 63) // 64 * 64
-            #     )  # Align to 64-samples boundary
-            #     if chunk_idx < len(indexed_waveforms) - 1:
-            #         next_head_idx = (
-            #             indexed_waveforms[chunk_idx + 1][0][0] // 64
-            #         ) * 64  # Align to 64-samples boundary
-            #         num_blank_words = (
-            #             next_head_idx - chunk_tail_idx
-            #         ) // 4  # Convert to words
-            #     else:
-            #         num_blank_words = self._coherent_integration_period - tail_words
-
         wseq = WaveSequence(
             num_wait_words=first_wait_words + buffer[0],
-            num_repeats=self._repetition_count,
+            num_repeats=repetition_count,
             enable_lib_log=False,
         )
 
-        # assert buffer[0] == 0
-        # wave = cast(npt.NDArray[np.complex64], buffer[1])
-        # assert len(wave) == 64
-        # assert (
-        #     np.real(wave).tolist()
-        #     == [FULL_SCALE] * 10 + [0] * 10 + [FULL_SCALE] * 10 + [0] * 34
-        # )
-        # assert np.imag(wave).tolist() == [0] * 64
         for iq, num_blank_words in zip(buffer[1:-1:2], buffer[2::2]):
             iq = cast(npt.NDArray[np.complex64], iq)
             wseq.add_chunk(
@@ -443,10 +425,10 @@ class TaskSettingBuilder:
                 np.imag(iq).astype(int).tolist(),
                 WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK,
             ),
-            num_blank_words=self._coherent_integration_period - total_length_words,
+            num_blank_words=coherent_integration_period // 4 - total_length_words,
             num_repeats=1,
         )
-        self._builder.add_awg_setting(port=port, channel=channel, wseq=wseq)
+        return wseq
 
     def add_capture_windows(
         self,
@@ -459,15 +441,15 @@ class TaskSettingBuilder:
         capture_delay_blocks: int = 0,
     ) -> None:
         """
-        Add a CAPU (capture unit) setting using abstract parameters.
+        Add a CAPU (runit) setting using abstract parameters.
 
         Args:
-            port (int): CAPU device port number.
-            runit (int): CAPU unit index on the specified port.
+            port (int): CAPU (runit) device port number.
+            runit (int): CAPU (runit) unit index on the specified port.
             capture_windows (list[CaptureWindow]): List of capture windows as sample index pairs.
             sample_rate (float, optional): Override sampling rate [Hz].
-            triggr_port (int, optional): Port number of the triggering AWG.
-            triggr_channel (int, optional): Channel of the triggering AWG.
+            trigger_port (int, optional): Port number of the triggering AWG.
+            trigger_channel (int, optional): Channel of the triggering AWG.
             capture_delay_blocks (int, optional): Delay before capture in units of 16 ADC words (default 0).
         """
         if not capture_windows:
@@ -475,58 +457,55 @@ class TaskSettingBuilder:
 
         # Align start and duration to word alignment requirements
         capture_windows = sorted(capture_windows, key=lambda w: w.start)
-        aligned_windows: list[CaptureWindow] = []
-        for idx, win in enumerate(capture_windows):
-            start = win.start
-            end = win.start + win.duration
-            if idx == 0:
-                # First capture window: align start to 16-word boundary if needed
-                if start % 16 != 0:
-                    start_aligned = (start // 16) * 16 * 4
-                else:
-                    start_aligned = start
-            else:
-                # Subsequent windows: align start to 4-word boundary
-                start_aligned = (start // 4) * 4
-
-            end_aligned = (
-                (end + 3) // 4
-            ) * 4  # always round up to next 4-word boundary
-
-            aligned_windows.append(
-                CaptureWindow(
-                    start=start_aligned,
-                    duration=end_aligned - start_aligned,
-                )
-            )
 
         # Use the first window as the base
         cprm = CaptureParam()
-        first = aligned_windows[0]
+        # first = aligned_windows[0]
+        first = capture_windows[0]
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        capture_delay_words = (
-            (16 * capture_delay_blocks + (first.start // unit * unit)) // 16 * 16
-        )
+        aligned_start_first = self._align_capture_first_window_start(first.start)
+        capture_delay_words = 16 * capture_delay_blocks + aligned_start_first // unit
         cprm.capture_delay = capture_delay_words
         cprm.num_integ_sections = self._repetition_count
 
         # Add remaining windows if any
-        durations = [win.duration for win in aligned_windows]
-        last = aligned_windows[-1]
-        if last.start + last.duration > self._coherent_integration_period:
+        last = capture_windows[-1]
+        aligned_end_last = self._align_capture_window_end(last.start + last.duration)
+        if aligned_end_last > self._coherent_integration_period:
             raise ValueError(
                 "Capture windows exceed coherent integration period: "
-                f"{last.start + last.duration} > {self._coherent_integration_period}"
+                f"{aligned_end_last} > {self._coherent_integration_period}"
             )
 
-        next_starts = [win.start for win in aligned_windows[1:]] + [
-            self._coherent_integration_period // 4
+        next_starts = [win.start for win in capture_windows[1:]] + [
+            self._coherent_integration_period
         ]
-        loc = 0
-        for duration, next_start in zip(durations, next_starts):
-            loc += duration
-            blank = next_start - loc
-            cprm.add_sum_section(num_words=duration // 4, num_post_blank_words=blank)
+        loc = aligned_start_first
+        for win, next_start in zip(capture_windows, next_starts):
+            aligned_start = self._align_capture_window_start(win.start)
+            aligned_end = self._align_capture_window_end(win.start + win.duration)
+            aligned_next_start = self._align_capture_window_start(next_start)
+
+            aligned_duration = aligned_end - aligned_start
+            loc += aligned_duration
+            blank = aligned_next_start - loc
+            loc += blank
+            if blank < 0:
+                raise ValueError(
+                    f"Each capture window must be separated by at least 1 word (4 samples) of blank space. "
+                    f"Overlap detected between windows: from {loc} to {aligned_next_start} "
+                    f"(original next start index: {next_start})."
+                )
+            elif blank < 4:
+                raise ValueError(
+                    f"Each capture window must be separated by at least 1 word (4 samples) of blank space. "
+                    f"Only {blank // 4} words found between windows: from {loc} to {aligned_next_start} "
+                    f"(corresponding to original start index {next_start})."
+                )
+            cprm.add_sum_section(
+                num_words=aligned_duration // 4,
+                num_post_blank_words=blank // 4,
+            )
 
         self._builder.add_runit_setting(
             port=port,
@@ -536,14 +515,27 @@ class TaskSettingBuilder:
             trigger_channel=trigger_channel,
         )
 
-        # if (trigger_port is not None) and (trigger_channel is not None):
-        #     self._trigger_settings.append(
-        #         TriggerSetting(
-        #             trigger_awg=AwgId(trigger_port, trigger_channel),
-        #             triggered_port=port,
-        #         )
-        #     )
-        # elif (trigger_port is not None) or (trigger_channel is not None):
-        #     raise ValueError(
-        #         "Both trigger_port and trigger_channel must be provided or neither."
-        #     )
+    @classmethod
+    def _align_capture_first_window_start(cls, start: int) -> int:
+        """
+        Align the start of the first capture window to the hardware-specific requirement.
+        For Quel1 CAPU, must be 16-word (64-sample) aligned.
+        """
+        if start % 64 != 0:
+            return (start // 64) * 64
+        else:
+            return start
+
+    @classmethod
+    def _align_capture_window_start(cls, start: int) -> int:
+        """
+        Align the start of subsequent capture windows to 1-word (4-sample) boundary.
+        """
+        return (start // 4) * 4
+
+    @classmethod
+    def _align_capture_window_end(cls, end: int) -> int:
+        """
+        Align the end of a capture window upward to the nearest 1-word (4-sample) boundary.
+        """
+        return ((end + 3) // 4) * 4
