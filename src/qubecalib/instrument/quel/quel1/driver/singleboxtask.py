@@ -16,7 +16,7 @@ from e7awgsw import CaptureParam, DspUnit, WaveSequence
 from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss, Quel1WaveSubsystem
 
 from .boxtask import BoxTask
-from .tasksetting import RawTaskSettingBuilder, RunitId, TaskSetting
+from .tasksetting import RawBuilder, RawTaskSettingBuilder, RunitId, TaskSetting
 
 Quel1PortType = Union[int, tuple[int, int]]
 
@@ -47,7 +47,7 @@ class SingleBoxTask(BoxTask):
 
     def __repr__(self) -> str:
         return (
-            f"<DeviceTask("
+            f"<SingleBoxTask("
             f"wseqs={len(self._setting.wseqs)}, "
             f"cprms={len(self._setting.cprms)}, "
             f"triggers={len(self._setting.triggers)}, "
@@ -318,7 +318,7 @@ class SingleBoxTask(BoxTask):
         return data
 
 
-class RawSingleBoxTaskBuilder:
+class RawSingleBoxTaskBuilder(RawBuilder):
     """
     High-level builder for SingleBoxTask from abstract user inputs.
     This class converts user-friendly readout/capture configurations
@@ -331,9 +331,9 @@ class RawSingleBoxTaskBuilder:
     def add_awg_setting(
         self,
         *,
+        wseq: WaveSequence,
         port: int,
         channel: int,
-        wseq: WaveSequence,
     ) -> None:
         self._builder.add_awg_setting(
             port=port,
@@ -344,16 +344,16 @@ class RawSingleBoxTaskBuilder:
     def add_runit_setting(
         self,
         *,
+        cprm: CaptureParam,
         port: int,
         runit: int,
-        cprm: CaptureParam,
         trigger_port: int | None = None,
         trigger_channel: int | None = None,
     ) -> None:
         self._builder.add_runit_setting(
+            cprm=cprm,
             port=port,
             runit=runit,
-            cprm=cprm,
             trigger_port=trigger_port,
             trigger_channel=trigger_channel,
         )
