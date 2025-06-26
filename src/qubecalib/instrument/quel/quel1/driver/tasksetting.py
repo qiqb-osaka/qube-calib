@@ -108,6 +108,18 @@ class TaskSetting:
             raise KeyError(f"CaptureParam for {runit_id} not found")
         return self.cprms[runit_id]
 
+    def update_repetition_count(self, count: int) -> None:
+        """
+        Update the repetition count for all WaveSequences in the task setting.
+
+        Args:
+            count (int): New repetition count to set for all WaveSequences.
+        """
+        for wseq in self.wseqs.values():
+            wseq.num_repeats = count
+        for cprm in self.cprms.values():
+            cprm.num_integ_sections = count
+
     # @contextmanager
     # def dsp_config(
     #     self, *, port: int, runit: int
