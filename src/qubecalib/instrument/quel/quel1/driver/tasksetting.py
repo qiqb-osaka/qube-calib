@@ -1,15 +1,36 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Final, NamedTuple, cast
+from typing import Any, Final, Generator, NamedTuple, cast
 
 import numpy as np
 import numpy.typing as npt
-from e7awgsw import CaptureParam, IqWave, WaveSequence
+from e7awgsw import CaptureParam, DecisionFunc, DspUnit, IqWave, WaveSequence
 from quel_ic_config import Quel1PortType
 
 FULL_SCALE = 2**15 - 1  # Full scale for complex64 in Quel1 AWG
+
+
+def copy_capture_param(param: CaptureParam) -> CaptureParam:
+    """CaptureParam の内容をすべて複製した新しいインスタンスを返す"""
+    new_param = CaptureParam()
+    new_param.num_integ_sections = param.num_integ_sections
+    new_param.capture_delay = param.capture_delay
+    new_param.sel_dsp_units_to_enable(*param.dsp_units_enabled)
+    for length, blank in param.sum_section_list:
+        new_param.add_sum_section(length, blank)
+    new_param.sum_start_word_no = param.sum_start_word_no
+    new_param.num_words_to_sum = param.num_words_to_sum
+    new_param.complex_fir_coefs = param.complex_fir_coefs
+    new_param.real_fir_i_coefs = param.real_fir_i_coefs
+    new_param.real_fir_q_coefs = param.real_fir_q_coefs
+    new_param.complex_window_coefs = param.complex_window_coefs
+    for func in (0, 1):
+        a, b, c = param.get_decision_func_params(func)
+        new_param.set_decision_func_params(func, a, b, c)
+    return new_param
 
 
 class AwgId(NamedTuple):
@@ -86,6 +107,19 @@ class TaskSetting:
         if runit_id not in self.cprms:
             raise KeyError(f"CaptureParam for {runit_id} not found")
         return self.cprms[runit_id]
+
+    # @contextmanager
+    # def dsp_config(
+    #     self, *, port: int, runit: int
+    # ) -> Generator[DspConfigHelper, Any, None]:
+    #     """
+    #     Context manager interface:
+    #     with DspConfigHelper.modify(capture_param) as dsp:
+    #         dsp.enable_integration(...)
+    #         ...
+    #     """
+    #     cprm = self.get_capture_param(port=port, runit=runit)
+    #     yield DspConfigHelper.modify(cprm)
 
 
 class RawBuilder(ABC):
@@ -265,7 +299,7 @@ class TaskSettingBuilder:
         self._builder = RawTaskSettingBuilder()
         # self._context = context
         self._coherent_integration_period: Final[int] = coherent_integration_period
-        self._repetition_count: Final[int] = repetition_count
+        self._repetition_count: int = repetition_count
         self._awg_settings: list[AwgSetting] = []
         self._capu_settings: list[RunitSetting] = []
         self._trigger_settings: list[TriggerSetting] = []
@@ -275,6 +309,16 @@ class TaskSettingBuilder:
                 f"coherent_integration_period must be a multiple of 16 words, "
                 f"but got {self._coherent_integration_period}"
             )
+
+    @property
+    def coherent_integration_period(self) -> int:
+        """
+        Get the coherent integration period in words.
+
+        Returns:
+            int: Coherent integration period in words.
+        """
+        return self._coherent_integration_period
 
     def build(self) -> TaskSetting:
         return self._builder.build()
@@ -539,3 +583,147 @@ class TaskSettingBuilder:
         Align the end of a capture window upward to the nearest 1-word (4-sample) boundary.
         """
         return ((end + 3) // 4) * 4
+
+
+# --- DspConfigHelper helper ---
+class DspConfigHelper:
+    """
+    A helper class to configure DSP-related settings on a CaptureParam instance.
+    Intended for use with `with` block to modify the target instance in place.
+    """
+
+    def __init__(self, target: CaptureParam) -> None:
+        self._target = target
+
+    @staticmethod
+    @contextmanager
+    def modify(cprm: CaptureParam) -> Generator["DspConfigHelper", Any, None]:
+        """
+        Context manager interface:
+        with DspConfigHelper.modify(capture_param) as dsp:
+            dsp.enable_integration(...)
+            ...
+        """
+        yield DspConfigHelper(cprm)
+
+    def set_capture_delay(self, delay: int) -> None:
+        self._target.capture_delay = delay
+
+    def set_num_integ_sections(self, count: int) -> None:
+        self._target.num_integ_sections = count
+
+    def enable_integration(self) -> None:
+        self._enable_dsp_option(DspUnit.INTEGRATION)
+
+    def disable_integration(self) -> None:
+        self._disable_dsp_option(DspUnit.INTEGRATION)
+
+    def enable_sum(self) -> None:
+        self._enable_dsp_option(DspUnit.SUM)
+
+    def disable_sum(self) -> None:
+        self._disable_dsp_option(DspUnit.SUM)
+
+    # def enable_demodulation(self) -> None:
+    #     self._enable_dsp_option(DspUnit.COMPLEX_FIR)
+    #     self._enable_dsp_option(DspUnit.DECIMATION)
+    #     self._enable_dsp_option(DspUnit.COMPLEX_WINDOW)
+
+    def enable_classification(
+        self,
+        *,
+        func_sel: DecisionFunc,
+        coef_a: np.float32,
+        coef_b: np.float32,
+        const_c: np.float32,
+    ) -> None:
+        self._enable_dsp_option(DspUnit.CLASSIFICATION)
+        self._target.set_decision_func_params(
+            func_sel=func_sel,
+            coef_a=coef_a,
+            coef_b=coef_b,
+            const_c=const_c,
+        )
+
+    def disable_classification(self) -> None:
+        self._disable_dsp_option(DspUnit.CLASSIFICATION)
+        self._target.set_decision_func_params(
+            func_sel=DecisionFunc.U0,
+            coef_a=0.0,
+            coef_b=0.0,
+            const_c=0.0,
+        )
+
+    def _enable_dsp_option(self, option: DspUnit) -> None:
+        dspunits = self._target.dsp_units_enabled
+        if option not in dspunits:
+            dspunits.append(option)
+            self._target.sel_dsp_units_to_enable(*dspunits)
+
+    def _disable_dsp_option(self, option: DspUnit) -> None:
+        dspunits = self._target.dsp_units_enabled
+        if option in dspunits:
+            dspunits.remove(option)
+            self._target.sel_dsp_units_to_enable(*dspunits)
+
+
+# class FirCoefficients:
+#     """
+#     Helper class to generate FIR coefficients for various filter types.
+#     """
+
+#     @staticmethod
+#     def gaussian(period_in_samples: int) -> list[complex]:
+#         """
+#         Generate band-pass filter coefficients.
+
+#         Args:
+#             period_in_samples (int): Period of the filter in samples.
+
+#         Returns:
+#             list[complex]: List of complex coefficients for the band-pass filter.
+#         """
+
+#         return [
+#             complex(np.sin(2 * np.pi * i / period_in_samples), 0)
+#             for i in range(period_in_samples)
+#         ]
+
+
+# class WindowCoefficients:
+#     """
+#     Helper class to generate window coefficients for various window types.
+#     """
+
+#     @staticmethod
+#     def gaussian(length: int, mu: float, sigma: float) -> list[complex]:
+#         """
+#         Generate Gaussian window coefficients.
+
+#         Args:
+#             length (int): Length of the window in samples.
+#             mu (float): Mean of the Gaussian distribution.
+#             sigma (float): Standard deviation of the Gaussian distribution.
+
+#         Returns:
+#             list[complex]: List of complex coefficients for the Gaussian window.
+#         """
+#         return [
+#             complex(np.exp(-((i - mu) ** 2) / (2 * sigma**2)), 0) for i in range(length)
+#         ]
+
+#     @staticmethod
+#     def hamming(length: int) -> list[complex]:
+#         """
+#         Generate Hamming window coefficients.
+
+#         Args:
+#             length (int): Length of the window in samples.
+
+#         Returns:
+#             list[complex]: List of complex coefficients for the Hamming window.
+#         """
+#         return [
+#             complex(0.54 - 0.46 * np.cos(2 * np.pi * i / (length - 1)), 0)
+#             for i in range(length)
+#         ]
