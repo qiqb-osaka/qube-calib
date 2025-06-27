@@ -1491,7 +1491,7 @@ class Sequencer(Command):
         else:
             data = data.reshape(cprm.num_integ_sections, -1)
         if DspUnit.SUM in cprm.dsp_units_enabled:
-            width = list(range(len(cprm.sum_section_list) + 1)[1:])
+            width = len(cprm.sum_section_list)
             result = np.hsplit(data, width)
         else:
             b = DspUnit.DECIMATION not in cprm.dsp_units_enabled
