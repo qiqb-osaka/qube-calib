@@ -316,7 +316,7 @@ class SingleBoxTask(BoxTask):
         else:
             result = result.reshape(cprm.num_integ_sections, -1)
         if DspUnit.SUM in cprm.dsp_units_enabled:
-            width = list(range(len(cprm.sum_section_list))[1:])
+            width = len(cprm.sum_section_list)
             data = np.hsplit(result, width)
         else:
             b = DspUnit.DECIMATION not in cprm.dsp_units_enabled
@@ -324,8 +324,7 @@ class SingleBoxTask(BoxTask):
             ws = [w if b else int(w // 4) for w, _ in ssl[:-1]]
             word = cprm.NUM_SAMPLES_IN_ADC_WORD
             width = np.cumsum(np.array(ws))
-            c = np.hsplit(result, width * word)
-            data = [di.transpose() for di in c]
+            data = np.hsplit(result, width * word)
         return data
 
 
