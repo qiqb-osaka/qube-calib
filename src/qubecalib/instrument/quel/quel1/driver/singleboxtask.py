@@ -66,6 +66,16 @@ class SingleBoxTask(BoxTask):
             raise RuntimeError("DeviceTask is not loaded with a box")
         return self._box
 
+    @property
+    def setting(self) -> TaskSetting:
+        """
+        Access the task settings.
+
+        Returns:
+            TaskSetting: The current task settings.
+        """
+        return self._setting
+
     # @classmethod
     # def build(
     #     cls,

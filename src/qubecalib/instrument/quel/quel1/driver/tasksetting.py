@@ -131,18 +131,15 @@ class TaskSetting:
         for cprm in self.cprms.values():
             cprm.num_integ_sections = count
 
-    # @contextmanager
-    # def dsp_config(
-    #     self, *, port: int, runit: int
-    # ) -> Generator[DspConfigHelper, Any, None]:
-    #     """
-    #     Context manager interface:
-    #     with DspConfigHelper.modify(capture_param) as dsp:
-    #         dsp.enable_integration(...)
-    #         ...
-    #     """
-    #     cprm = self.get_capture_param(port=port, runit=runit)
-    #     yield DspConfigHelper.modify(cprm)
+    def dsp_config(self, *, port: int, runit: int) -> Any:
+        """
+        Context manager interface:
+        with DspConfigHelper.modify(capture_param) as dsp:
+            dsp.enable_integration(...)
+            ...
+        """
+        cprm = self.get_capture_param(port=port, runit=runit)
+        return DspConfigHelper.modify(cprm)
 
     def ensure_wave_sequences_if_deferred(self) -> None:
         """
