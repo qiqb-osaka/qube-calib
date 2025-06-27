@@ -119,6 +119,7 @@ class SingleBoxTask(BoxTask):
         # Ensure the box is assigned before attempting to configure the device.
         if self._box is None:
             raise RuntimeError("DeviceTask must be provided with a box before use.")
+        # self._setting.ensure_wave_sequences_if_defferred()
         for awg, wseq in self._setting.wseqs.items():
             self.box.config_channel(
                 port=awg.port,

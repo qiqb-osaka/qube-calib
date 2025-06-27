@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Generator, NamedTuple, cast
 
 import numpy as np
@@ -69,12 +69,23 @@ class TriggerSetting(NamedTuple):
 
 
 @dataclass(frozen=True)
+class RawWaveformSet:
+    port: int
+    channel: int
+    indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]]
+
+
+@dataclass(frozen=True)
 class TaskSetting:
     """Grouped configuration of waveform generators (AWG), capture units (CAPU), and their trigger relationships."""
 
     wseqs: dict[AwgId, WaveSequence]
     cprms: dict[RunitId, CaptureParam]
     triggers: dict[int, AwgId]
+    #
+    raw_waveforms: dict[AwgId, RawWaveformSet] = field(default_factory=dict)
+    repetition_count: int | None = None
+    coherent_integration_period: int | None = None
 
     def get_wave_sequence(self, *, port: int, channel: int) -> WaveSequence:
         """
@@ -133,6 +144,36 @@ class TaskSetting:
     #     cprm = self.get_capture_param(port=port, runit=runit)
     #     yield DspConfigHelper.modify(cprm)
 
+    def ensure_wave_sequences_if_deferred(self) -> None:
+        """
+        Conditionally build WaveSequences from raw_waveforms only if wseqs are empty and raw_waveforms are present.
+        This allows deferred construction of WaveSequences for modulation flexibility.
+        """
+        if self.raw_waveforms:
+            self.ensure_wave_sequences(
+                repetition_count=self.repetition_count or 1,
+                integration_period=self.coherent_integration_period or 10240,
+            )
+
+    def ensure_wave_sequences(
+        self, *, repetition_count: int, integration_period: int
+    ) -> None:
+        self.wseqs.clear() if self.wseqs else None
+        from .tasksetting import TaskSettingBuilder
+
+        builder = TaskSettingBuilder(
+            coherent_integration_period=integration_period,
+            repetition_count=repetition_count,
+        )
+        for awg, raw in self.raw_waveforms.items():
+            builder.add_waveforms(
+                indexed_waveforms=raw.indexed_waveforms,
+                port=raw.port,
+                channel=raw.channel,
+            )
+        # Since wseqs is frozen, but we want to update it, use object.__setattr__.
+        object.__setattr__(self, "wseqs", builder.build().wseqs)
+
 
 class RawBuilder(ABC):
     @abstractmethod
@@ -165,8 +206,29 @@ class RawTaskSettingBuilder(RawBuilder):
     def __init__(self) -> None:
         self._settings: list[RunitSetting | AwgSetting | TriggerSetting] = []
 
-    def build(self) -> TaskSetting:
-        return self._parse_settings(self._settings)
+    def build(
+        self,
+        *,
+        raw_waveforms: dict[AwgId, RawWaveformSet] = {},
+        repetition_count: int | None = None,
+        coherent_integration_period: int | None = None,
+    ) -> TaskSetting:
+        wseqs, cprms, triggers = self._parse_settings(self._settings)
+        if wseqs:
+            return TaskSetting(
+                wseqs=wseqs,
+                cprms=cprms,
+                triggers=triggers,
+            )
+        else:
+            return TaskSetting(
+                wseqs=wseqs,
+                cprms=cprms,
+                triggers=triggers,
+                raw_waveforms=raw_waveforms,
+                repetition_count=repetition_count,
+                coherent_integration_period=coherent_integration_period,
+            )
 
     def add_awg_setting(
         self,
@@ -230,7 +292,11 @@ class RawTaskSettingBuilder(RawBuilder):
     @staticmethod
     def _parse_settings(
         settings: list[RunitSetting | AwgSetting | TriggerSetting],
-    ) -> TaskSetting:
+    ) -> tuple[
+        dict[AwgId, WaveSequence],
+        dict[RunitId, CaptureParam],
+        dict[int, AwgId],
+    ]:
         """
         Parse a list of settings into grouped AWG, CAPU, and trigger dictionaries.
 
@@ -280,7 +346,7 @@ class RawTaskSettingBuilder(RawBuilder):
                     raise ValueError(
                         f"trigger {awg} for triggered port {port} is not provided"
                     )
-        return TaskSetting(wseqs, cprms, triggers)
+        return wseqs, cprms, triggers
 
 
 @dataclass(frozen=True)
@@ -295,64 +361,20 @@ class CaptureWindow:
     duration: int
 
 
-class TaskSettingBuilder:
+class WaveSequenceBuilder:
     """
-    High-level builder for TaskSetting from abstract user inputs.
-    This class converts user-friendly readout/capture configurations
-    into AWG/CAPU settings and trigger mappings.
+    Helper class to construct WaveSequence objects from raw waveform definitions.
     """
 
-    def __init__(
-        self,
-        # context: DeviceContext,
-        coherent_integration_period: int = 10240,  # word count
-        repetition_count: int = 1,
-    ) -> None:
-        self._builder = RawTaskSettingBuilder()
-        # self._context = context
-        self._coherent_integration_period: Final[int] = coherent_integration_period
-        self._repetition_count: int = repetition_count
-        self._awg_settings: list[AwgSetting] = []
-        self._capu_settings: list[RunitSetting] = []
-        self._trigger_settings: list[TriggerSetting] = []
-        # Validation: coherent_integration_period must be a multiple of 16 words
-        if self._coherent_integration_period % 16 != 0:
-            raise ValueError(
-                f"coherent_integration_period must be a multiple of 16 words, "
-                f"but got {self._coherent_integration_period}"
-            )
-
-    @property
-    def coherent_integration_period(self) -> int:
-        """
-        Get the coherent integration period in words.
-
-        Returns:
-            int: Coherent integration period in words.
-        """
-        return self._coherent_integration_period
-
-    def build(self) -> TaskSetting:
-        return self._builder.build()
-
-    def add_waveforms(
-        self,
+    @staticmethod
+    def construct_from_indexed_waveforms(
         *,
         indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
-        port: int,
-        channel: int,
-        wait_words: int = 0,  # in words, default 0
-    ) -> None:
-        """
-        Add an AWG (arbitrary waveform generator) setting using abstract parameters.
-
-        Args:
-            port (int): AWG device port number.
-            channel (int): Channel number within the AWG port.
-            indexed_waveforms (list[list[tuple[int, npt.NDArray[np.complex64]]]]): A list of up to 16 waveform chunks,
-                each chunk being a list of tuples containing start index in samples and complex waveform data.
-            wait_words (int, optional): Number of words to wait before starting the waveform (default 0).
-        """
+        wait_words: int,
+        repetition_count: int,
+        coherent_integration_period: int,
+        modulation_frequency: float = 0.0,
+    ) -> WaveSequence:
         if not indexed_waveforms:
             raise ValueError("indexed_waveforms must not be empty")
         if wait_words > 2**32 - 1:
@@ -361,69 +383,12 @@ class TaskSettingBuilder:
             )
 
         for chunk_index, chunk in enumerate(indexed_waveforms):
-            self._validate_waveform_chunk(chunk_index, chunk)
+            WaveSequenceBuilder.validate_waveform_chunk(chunk_index, chunk)
 
-        wseq = self._construct_wave_sequence(
-            indexed_waveforms=indexed_waveforms,
-            wait_words=wait_words,
-            repetition_count=self._repetition_count,
-            coherent_integration_period=self._coherent_integration_period,
-        )
-        self._builder.add_awg_setting(port=port, channel=channel, wseq=wseq)
-
-    @classmethod
-    def _validate_waveform_array(cls, array: npt.NDArray[np.complex64]) -> None:
-        if not isinstance(array, np.ndarray):
-            raise TypeError(
-                f"waveform must be a numpy array, but got {type(array).__name__}"
-            )
-        if array.dtype != np.complex64:
-            raise ValueError(
-                f"waveform must be of type np.complex64, but got {array.dtype}"
-            )
-
-    @classmethod
-    def _validate_waveform_chunk(
-        cls, chunk_index: int, chunk: list[tuple[int, npt.NDArray[np.complex64]]]
-    ) -> None:
-        if not chunk:
-            raise ValueError(f"indexed_waveforms[{chunk_index}] is empty")
-        head = chunk[0]
-        if not (isinstance(head, tuple) and len(head) == 2):
-            raise TypeError(
-                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
-                f"but got {type(head).__name__}"
-            )
-        head_index = head[0]
-        if not isinstance(head_index, int):
-            raise TypeError(
-                f"index must be an int, but got {type(head_index).__name__}"
-            )
-        tail = chunk[-1]
-        if not (isinstance(tail, tuple) and len(tail) == 2):
-            raise TypeError(
-                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
-                f"but got {type(tail).__name__}"
-            )
-        tail_index = tail[0]
-        if not isinstance(tail_index, int):
-            raise TypeError(
-                f"index must be an int, but got {type(tail_index).__name__}"
-            )
-        cls._validate_waveform_array(tail[1])
-
-    @classmethod
-    def _construct_wave_sequence(
-        cls,
-        *,
-        indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
-        wait_words: int,
-        repetition_count: int,
-        coherent_integration_period: int,
-    ) -> WaveSequence:
         first_wait_words = wait_words
         last_tail_words = 0
         buffer: list[int | npt.NDArray[np.complex64]] = []
+
         for chunk in indexed_waveforms:
             head_index = chunk[0][0]
             head_words = head_index // 4  # Convert to words
@@ -447,9 +412,24 @@ class TaskSettingBuilder:
                     raise TypeError(
                         f"index must be an int, but got {type(begin_index).__name__}"
                     )
-                cls._validate_waveform_array(waveform)
+                # Validation: waveform must be np.ndarray of dtype np.complex64
+                if not isinstance(waveform, np.ndarray):
+                    raise TypeError(
+                        f"waveform must be a numpy array, but got {type(waveform).__name__}"
+                    )
+                if waveform.dtype != np.complex64:
+                    raise ValueError(
+                        f"waveform must be of type np.complex64, but got {waveform.dtype}"
+                    )
+                sample_indices = np.arange(
+                    begin_index, begin_index + len(waveform), dtype=np.float32
+                )
                 index = begin_index - head_words * 4
-                wave[index : index + len(waveform)] = FULL_SCALE * waveform
+                wave[index : index + len(waveform)] = (
+                    FULL_SCALE
+                    * waveform
+                    * np.exp(2j * np.pi * modulation_frequency * sample_indices)
+                )
 
         wseq = WaveSequence(
             num_wait_words=first_wait_words + buffer[0],
@@ -486,61 +466,106 @@ class TaskSettingBuilder:
         )
         return wseq
 
-    def add_capture_windows(
-        self,
+    @staticmethod
+    def validate_waveform_array(array: npt.NDArray[np.complex64]) -> None:
+        if not isinstance(array, np.ndarray):
+            raise TypeError(
+                f"waveform must be a numpy array, but got {type(array).__name__}"
+            )
+        if array.dtype != np.complex64:
+            raise ValueError(
+                f"waveform must be of type np.complex64, but got {array.dtype}"
+            )
+
+    @classmethod
+    def validate_waveform_chunk(
+        cls, chunk_index: int, chunk: list[tuple[int, npt.NDArray[np.complex64]]]
+    ) -> None:
+        if not chunk:
+            raise ValueError(f"indexed_waveforms[{chunk_index}] is empty")
+        head = chunk[0]
+        if not (isinstance(head, tuple) and len(head) == 2):
+            raise TypeError(
+                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
+                f"but got {type(head).__name__}"
+            )
+        head_index = head[0]
+        if not isinstance(head_index, int):
+            raise TypeError(
+                f"index must be an int, but got {type(head_index).__name__}"
+            )
+        tail = chunk[-1]
+        if not (isinstance(tail, tuple) and len(tail) == 2):
+            raise TypeError(
+                f"indexed_waveforms[{chunk_index}] must be a list of tuples, "
+                f"but got {type(tail).__name__}"
+            )
+        tail_index = tail[0]
+        if not isinstance(tail_index, int):
+            raise TypeError(
+                f"index must be an int, but got {type(tail_index).__name__}"
+            )
+        cls.validate_waveform_array(tail[1])
+
+
+class CaptureParamBuilder:
+    """
+    Helper class to construct CaptureParam objects from abstract user inputs.
+    This class provides methods to set up capture parameters for a CAPU (runit).
+    """
+
+    @classmethod
+    def construct_from_capture_windows(
+        cls,
         *,
         capture_windows: list[CaptureWindow],
-        port: int,
-        runit: int,
-        trigger_port: int | None = None,
-        trigger_channel: int | None = None,
+        repetition_count: int,
+        coherent_integration_period: int,
         capture_delay_blocks: int = 0,
-    ) -> None:
+    ) -> CaptureParam:
         """
-        Add a CAPU (runit) setting using abstract parameters.
+        Construct a CaptureParam from a list of CaptureWindow objects.
 
         Args:
-            port (int): CAPU (runit) device port number.
-            runit (int): CAPU (runit) unit index on the specified port.
             capture_windows (list[CaptureWindow]): List of capture windows as sample index pairs.
-            sample_rate (float, optional): Override sampling rate [Hz].
-            trigger_port (int, optional): Port number of the triggering AWG.
-            trigger_channel (int, optional): Channel of the triggering AWG.
+            repetition_count (int): Number of integration sections.
+            coherent_integration_period (int): Coherent integration period in words.
             capture_delay_blocks (int, optional): Delay before capture in units of 16 ADC words (default 0).
+
+        Returns:
+            CaptureParam: Configured CaptureParam object.
         """
         if not capture_windows:
             raise ValueError("capture_windows must not be empty")
 
-        # Align start and duration to word alignment requirements
         capture_windows = sorted(capture_windows, key=lambda w: w.start)
 
         # Use the first window as the base
         cprm = CaptureParam()
-        # first = aligned_windows[0]
         first = capture_windows[0]
         unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
-        aligned_start_first = self._align_capture_first_window_start(first.start)
+        aligned_start_first = cls._align_capture_first_window_start(first.start)
         capture_delay_words = 16 * capture_delay_blocks + aligned_start_first // unit
         cprm.capture_delay = capture_delay_words
-        cprm.num_integ_sections = self._repetition_count
+        cprm.num_integ_sections = repetition_count
 
         # Add remaining windows if any
         last = capture_windows[-1]
-        aligned_end_last = self._align_capture_window_end(last.start + last.duration)
-        if aligned_end_last > self._coherent_integration_period:
+        aligned_end_last = cls._align_capture_window_end(last.start + last.duration)
+        if aligned_end_last > coherent_integration_period:
             raise ValueError(
                 "Capture windows exceed coherent integration period: "
-                f"{aligned_end_last} > {self._coherent_integration_period}"
+                f"{aligned_end_last} > {coherent_integration_period}"
             )
 
         next_starts = [win.start for win in capture_windows[1:]] + [
-            self._coherent_integration_period
+            coherent_integration_period
         ]
         loc = aligned_start_first
         for win, next_start in zip(capture_windows, next_starts):
-            aligned_start = self._align_capture_window_start(win.start)
-            aligned_end = self._align_capture_window_end(win.start + win.duration)
-            aligned_next_start = self._align_capture_window_start(next_start)
+            aligned_start = cls._align_capture_window_start(win.start)
+            aligned_end = cls._align_capture_window_end(win.start + win.duration)
+            aligned_next_start = cls._align_capture_window_start(next_start)
 
             aligned_duration = aligned_end - aligned_start
             loc += aligned_duration
@@ -563,16 +588,10 @@ class TaskSettingBuilder:
                 num_post_blank_words=blank // 4,
             )
 
-        self._builder.add_runit_setting(
-            port=port,
-            runit=runit,
-            cprm=cprm,
-            trigger_port=trigger_port,
-            trigger_channel=trigger_channel,
-        )
+        return cprm
 
-    @classmethod
-    def _align_capture_first_window_start(cls, start: int) -> int:
+    @staticmethod
+    def _align_capture_first_window_start(start: int) -> int:
         """
         Align the start of the first capture window to the hardware-specific requirement.
         For Quel1 CAPU, must be 16-word (64-sample) aligned.
@@ -582,19 +601,129 @@ class TaskSettingBuilder:
         else:
             return start
 
-    @classmethod
-    def _align_capture_window_start(cls, start: int) -> int:
+    @staticmethod
+    def _align_capture_window_start(start: int) -> int:
         """
         Align the start of subsequent capture windows to 1-word (4-sample) boundary.
         """
         return (start // 4) * 4
 
-    @classmethod
-    def _align_capture_window_end(cls, end: int) -> int:
+    @staticmethod
+    def _align_capture_window_end(end: int) -> int:
         """
         Align the end of a capture window upward to the nearest 1-word (4-sample) boundary.
         """
         return ((end + 3) // 4) * 4
+
+
+class TaskSettingBuilder:
+    """
+    High-level builder for TaskSetting from abstract user inputs.
+    This class converts user-friendly readout/capture configurations
+    into AWG/CAPU settings and trigger mappings.
+    """
+
+    def __init__(
+        self,
+        # context: DeviceContext,
+        coherent_integration_period: int = 10240,  # word count
+        repetition_count: int = 1,
+    ) -> None:
+        # Validation: coherent_integration_period must be a multiple of 16 words
+        if coherent_integration_period % 16 != 0:
+            raise ValueError(
+                f"coherent_integration_period must be a multiple of 16 words, "
+                f"but got {coherent_integration_period}"
+            )
+        self._builder = RawTaskSettingBuilder()
+        self._coherent_integration_period: Final[int] = coherent_integration_period
+        self._repetition_count: int = repetition_count
+        self._awg_settings: list[AwgSetting] = []
+        self._capu_settings: list[RunitSetting] = []
+        self._trigger_settings: list[TriggerSetting] = []
+        self._raw_waveforms: dict[AwgId, RawWaveformSet] = {}
+
+    @property
+    def coherent_integration_period(self) -> int:
+        """
+        Get the coherent integration period in words.
+
+        Returns:
+            int: Coherent integration period in words.
+        """
+        return self._coherent_integration_period
+
+    def build(self) -> TaskSetting:
+        return self._builder.build()
+
+    def add_waveforms(
+        self,
+        *,
+        indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
+        port: int,
+        channel: int,
+        wait_words: int = 0,  # in words, default 0
+        modulation_frequency: float = 0.0,
+    ) -> None:
+        """
+        Add an AWG (arbitrary waveform generator) setting using abstract parameters.
+
+        Args:
+            port (int): AWG device port number.
+            channel (int): Channel number within the AWG port.
+            indexed_waveforms (list[list[tuple[int, npt.NDArray[np.complex64]]]]): A list of up to 16 waveform chunks,
+                each chunk being a list of tuples containing start index in samples and complex waveform data.
+            wait_words (int, optional): Number of words to wait before starting the waveform (default 0).
+        """
+        wseq = WaveSequenceBuilder.construct_from_indexed_waveforms(
+            indexed_waveforms=indexed_waveforms,
+            wait_words=wait_words,
+            repetition_count=self._repetition_count,
+            coherent_integration_period=self._coherent_integration_period,
+            modulation_frequency=modulation_frequency,
+        )
+        self._builder.add_awg_setting(
+            port=port,
+            channel=channel,
+            wseq=wseq,
+        )
+
+    def add_capture_windows(
+        self,
+        *,
+        capture_windows: list[CaptureWindow],
+        port: int,
+        runit: int,
+        trigger_port: int | None = None,
+        trigger_channel: int | None = None,
+        capture_delay_blocks: int = 0,
+    ) -> None:
+        """
+        Add a CAPU (runit) setting using abstract parameters.
+
+        Args:
+            port (int): CAPU (runit) device port number.
+            runit (int): CAPU (runit) unit index on the specified port.
+            capture_windows (list[CaptureWindow]): List of capture windows as sample index pairs.
+            sample_rate (float, optional): Override sampling rate [Hz].
+            trigger_port (int, optional): Port number of the triggering AWG.
+            trigger_channel (int, optional): Channel of the triggering AWG.
+            capture_delay_blocks (int, optional): Delay before capture in units of 16 ADC words (default 0).
+        """
+
+        cprm = CaptureParamBuilder.construct_from_capture_windows(
+            capture_windows=capture_windows,
+            repetition_count=self._repetition_count,
+            coherent_integration_period=self._coherent_integration_period,
+            capture_delay_blocks=capture_delay_blocks,
+        )
+        self._builder.add_runit_setting(
+            port=port,
+            runit=runit,
+            cprm=cprm,
+            trigger_port=trigger_port,
+            trigger_channel=trigger_channel,
+        )
 
 
 # --- DspConfigHelper helper ---
@@ -636,10 +765,35 @@ class DspConfigHelper:
     def disable_sum(self) -> None:
         self._disable_dsp_option(DspUnit.SUM)
 
-    # def enable_demodulation(self) -> None:
-    #     self._enable_dsp_option(DspUnit.COMPLEX_FIR)
-    #     self._enable_dsp_option(DspUnit.DECIMATION)
-    #     self._enable_dsp_option(DspUnit.COMPLEX_WINDOW)
+    def enable_demodulation(self, frequency: float) -> None:
+        self.enable_band_pass_fir(center_frequency=frequency)
+        factor = self.enable_decimation()
+        self.enable_software_downconverter(
+            frequency=frequency,
+            decimation_factor=factor,
+        )
+
+    def disable_demodulation(self) -> None:
+        """
+        Disable demodulation DSP units.
+        This will disable band-pass FIR, decimation, and software downconverter.
+        """
+        self.disable_band_pass_fir()
+        self.disable_decimation()
+        self.disable_software_downconverter()
+
+    def enable_decimation(self) -> int:
+        """
+        Enable decimation DSP unit.
+        """
+        self._enable_dsp_option(DspUnit.DECIMATION)
+        return 4
+
+    def disable_decimation(self) -> None:
+        """
+        Disable decimation DSP unit.
+        """
+        self._disable_dsp_option(DspUnit.DECIMATION)
 
     def enable_classification(
         self,
@@ -666,6 +820,80 @@ class DspConfigHelper:
             const_c=0.0,
         )
 
+    def enable_band_pass_fir(self, center_frequency: float) -> None:
+        """
+        Enable band-pass FIR filter with given center frequency.
+
+        Args:
+            center_frequency (float): Center frequency of the band-pass filter.
+        """
+        coefs = FirCoefficients.band_pass(
+            center_frequency=center_frequency,
+            num_fir_taps=CaptureParam.NUM_COMPLEX_FIR_COEFS,
+        )
+        self.enable_complex_fir(coefs)
+
+    def disable_band_pass_fir(self) -> None:
+        """
+        Disable band-pass FIR filter.
+        """
+        self.disable_complex_fir()
+
+    def enable_complex_fir(self, coefs: npt.NDArray[np.complex64]) -> None:
+        """
+        Enable complex FIR filter with given coefficients.
+
+        Args:
+            coefs (npt.NDArray[np.complex64]): Coefficients for the complex FIR filter.
+        """
+        self._enable_dsp_option(DspUnit.COMPLEX_FIR)
+        self._target.complex_fir_coefs = (FULL_SCALE * coefs).round().tolist()
+
+    def disable_complex_fir(self) -> None:
+        """
+        Disable complex FIR filter.
+        """
+        self._disable_dsp_option(DspUnit.COMPLEX_FIR)
+        zeros = np.zeros(
+            CaptureParam.NUM_COMPLEX_FIR_COEFS,
+            dtype=np.complex64,
+        )
+        self._target.complex_fir_coefs = zeros.round().tolist()
+
+    def enable_complex_window(self, coefs: npt.NDArray[np.complex64]) -> None:
+        self._enable_dsp_option(DspUnit.COMPLEX_WINDOW)
+        self._target.complex_window_coefs = (FULL_SCALE * coefs).round().tolist()
+
+    def disable_complex_window(self) -> None:
+        self._disable_dsp_option(DspUnit.COMPLEX_WINDOW)
+        zeros = np.zeros(
+            CaptureParam.NUM_COMPLEXW_WINDOW_COEFS,
+            dtype=np.complex64,
+        )
+        self._target.complex_window_coefs = zeros.round().tolist()
+
+    def enable_software_downconverter(
+        self, *, frequency: float, decimation_factor: int
+    ) -> None:
+        self._enable_dsp_option(DspUnit.COMPLEX_WINDOW)
+        N_COEFS = CaptureParam.NUM_COMPLEXW_WINDOW_COEFS
+        MAX_VAL = CaptureParam.MAX_WINDOW_COEF_VAL
+        indices = decimation_factor * np.arange(N_COEFS)
+        coefs = MAX_VAL * np.exp(-2j * np.pi * frequency * indices)
+        self._target.complex_window_coefs = coefs.round().tolist()
+
+    def disable_software_downconverter(self) -> None:
+        """
+        Disable software downconverter.
+        This will disable the complex window DSP unit.
+        """
+        self._disable_dsp_option(DspUnit.COMPLEX_WINDOW)
+        zeros = np.zeros(
+            CaptureParam.NUM_COMPLEXW_WINDOW_COEFS,
+            dtype=np.complex64,
+        )
+        self._target.complex_window_coefs = zeros.round().tolist()
+
     def _enable_dsp_option(self, option: DspUnit) -> None:
         dspunits = self._target.dsp_units_enabled
         if option not in dspunits:
@@ -677,6 +905,39 @@ class DspConfigHelper:
         if option in dspunits:
             dspunits.remove(option)
             self._target.sel_dsp_units_to_enable(*dspunits)
+
+
+class FirCoefficients:
+    """
+    Helper class to generate FIR coefficients for various filter types.
+    """
+
+    @staticmethod
+    def band_pass(
+        *,
+        center_frequency: float,
+        # bandwidth: float,
+        num_fir_taps: int,
+    ) -> npt.NDArray[np.complex64]:
+        """
+        Generate band-pass filter coefficients.
+
+        Args:
+            center_frequency (float) : Center frequency, defined as the inverse of the period (period is measured in sample_indices units).
+            period_in_samples (int): Period of the filter in samples.
+            center_frequency (float): Center frequency of the band-pass filter.
+            bandwidth (float): Bandwidth of the band-pass filter.
+
+        Returns:
+            list[complex]: List of complex coefficients for the band-pass filter.
+        """
+
+        indices = np.arange(num_fir_taps)
+        mu = (indices[-1] + indices[0]) / 2
+        sigma = (indices[-1] - indices[0]) / 6
+        gaussian_window = np.exp(-0.5 * (indices - mu) ** 2 / sigma**2)
+        coefs = gaussian_window * np.exp(2j * np.pi * center_frequency * indices)
+        return coefs
 
 
 # class FirCoefficients:
@@ -702,27 +963,28 @@ class DspConfigHelper:
 #         ]
 
 
-# class WindowCoefficients:
-#     """
-#     Helper class to generate window coefficients for various window types.
-#     """
+class WindowCoefficients:
+    """
+    Helper class to generate window coefficients for various window types.
+    """
 
-#     @staticmethod
-#     def gaussian(length: int, mu: float, sigma: float) -> list[complex]:
-#         """
-#         Generate Gaussian window coefficients.
+    @staticmethod
+    def gaussian(length: int, mu: float, sigma: float) -> list[complex]:
+        """
+        Generate Gaussian window coefficients.
 
-#         Args:
-#             length (int): Length of the window in samples.
-#             mu (float): Mean of the Gaussian distribution.
-#             sigma (float): Standard deviation of the Gaussian distribution.
+        Args:
+            length (int): Length of the window in samples.
+            mu (float): Mean of the Gaussian distribution.
+            sigma (float): Standard deviation of the Gaussian distribution.
 
-#         Returns:
-#             list[complex]: List of complex coefficients for the Gaussian window.
-#         """
-#         return [
-#             complex(np.exp(-((i - mu) ** 2) / (2 * sigma**2)), 0) for i in range(length)
-#         ]
+        Returns:
+            list[complex]: List of complex coefficients for the Gaussian window.
+        """
+        return [
+            complex(np.exp(-((i - mu) ** 2) / (2 * sigma**2)), 0) for i in range(length)
+        ]
+
 
 #     @staticmethod
 #     def hamming(length: int) -> list[complex]:
