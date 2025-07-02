@@ -367,11 +367,14 @@ class WaveSequenceBuilder:
     def construct_from_indexed_waveforms(
         *,
         indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
-        wait_words: int,
+        wait_samples: int,
         repetition_count: int,
         coherent_integration_period: int,
         modulation_frequency: float = 0.0,
     ) -> WaveSequence:
+        wait_words = wait_samples // 4  # Convert samples to words
+        wait_sample_offset_in_word = wait_samples % 4
+
         if not indexed_waveforms:
             raise ValueError("indexed_waveforms must not be empty")
         if wait_words > 2**32 - 1:
@@ -386,7 +389,13 @@ class WaveSequenceBuilder:
         last_tail_words = 0
         buffer: list[int | npt.NDArray[np.complex64]] = []
 
-        for chunk in indexed_waveforms:
+        offset = wait_sample_offset_in_word
+        indexed_waveforms_with_skew = [
+            [(begin_index + offset, waveform) for begin_index, waveform in chunk]
+            for chunk in indexed_waveforms
+        ]
+
+        for chunk in indexed_waveforms_with_skew:
             head_index = chunk[0][0]
             head_words = head_index // 4  # Convert to words
             tail_index = chunk[-1][0]
@@ -661,7 +670,7 @@ class TaskSettingBuilder:
         indexed_waveforms: list[list[tuple[int, npt.NDArray[np.complex64]]]],
         port: int,
         channel: int,
-        wait_words: int = 0,  # in words, default 0
+        wait_samples: int = 0,  # in samples, default 0
         modulation_frequency: float = 0.0,
     ) -> None:
         """
@@ -676,7 +685,7 @@ class TaskSettingBuilder:
         """
         wseq = WaveSequenceBuilder.construct_from_indexed_waveforms(
             indexed_waveforms=indexed_waveforms,
-            wait_words=wait_words,
+            wait_samples=wait_samples,
             repetition_count=self._repetition_count,
             coherent_integration_period=self._coherent_integration_period,
             modulation_frequency=modulation_frequency,
