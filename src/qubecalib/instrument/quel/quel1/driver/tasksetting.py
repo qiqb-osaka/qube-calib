@@ -458,7 +458,9 @@ class WaveSequenceBuilder:
                 np.imag(iq).astype(int).tolist(),
                 WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK,
             ),
-            num_blank_words=coherent_integration_period // 4 - total_length_words,
+            num_blank_words=coherent_integration_period // 4
+            - total_length_words
+            + buffer[0],
             num_repeats=1,
         )
         return wseq
