@@ -238,6 +238,7 @@ class SingleBoxTask(BoxTask):
     ) -> tuple[
         dict[int, CaptureReturnCode],
         dict[tuple[int, int], list[npt.NDArray[np.complex64]]],
+        dict[tuple[int, int], list[npt.NDArray[np.int32]]],
     ]:
         """
         Execute the configured task: start capture and/or emission depending on configuration.
@@ -267,13 +268,24 @@ class SingleBoxTask(BoxTask):
         ):
             futures = self.capture_start()
             self.start_emission()
-            status, results = self.capture_stop(futures)
-            return status, {
+            status, raw_results = self.capture_stop(futures)
+            results = {
                 (port, runit): self.parse_capture_result(
                     result, self._setting.cprms[RunitId(port, runit)]
                 )
+                for (port, runit), result in raw_results.items()
+            }
+            indices = {
+                (port, runit): [
+                    np.arange(len(captured_data)) for captured_data in result
+                ]
                 for (port, runit), result in results.items()
             }
+            return (
+                status,
+                results,
+                indices,
+            )
         # Awg only
         elif all(
             [
@@ -283,7 +295,7 @@ class SingleBoxTask(BoxTask):
             ]
         ):
             self.start_emission()
-            return {}, {}
+            return {}, {}, {}
         # Capture only
         elif all(
             [
@@ -293,13 +305,24 @@ class SingleBoxTask(BoxTask):
             ]
         ):
             futures = self.capture_start()
-            status, results = self.capture_stop(futures)
-            return status, {
+            status, raw_results = self.capture_stop(futures)
+            results = {
                 (port, runit): self.parse_capture_result(
                     result, self._setting.cprms[RunitId(port, runit)]
                 )
+                for (port, runit), result in raw_results.items()
+            }
+            indices = {
+                (port, runit): [
+                    np.arange(len(captured_data)) for captured_data in result
+                ]
                 for (port, runit), result in results.items()
             }
+            return (
+                status,
+                results,
+                indices,
+            )
         else:
             # Any other combination is considered invalid.
             raise ValueError(

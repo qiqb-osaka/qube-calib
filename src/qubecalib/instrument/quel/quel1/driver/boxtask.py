@@ -17,4 +17,5 @@ class BoxTask(ABC):
     ) -> tuple[
         dict[int, CaptureReturnCode],
         dict[tuple[int, int], list[npt.NDArray[np.complex64]]],
+        dict[tuple[int, int], list[npt.NDArray[np.int32]]],
     ]: ...
