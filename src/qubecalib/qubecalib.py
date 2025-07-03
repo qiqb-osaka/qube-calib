@@ -1491,7 +1491,7 @@ class Sequencer(Command):
         else:
             data = data.reshape(cprm.num_integ_sections, -1)
         if DspUnit.SUM in cprm.dsp_units_enabled:
-            width = list(range(len(cprm.sum_section_list))[1:])
+            width = len(cprm.sum_section_list)
             result = np.hsplit(data, width)
         else:
             b = DspUnit.DECIMATION not in cprm.dsp_units_enabled
@@ -1499,8 +1499,7 @@ class Sequencer(Command):
             ws = [w if b else int(w // 4) for w, _ in ssl[:-1]]
             word = cprm.NUM_SAMPLES_IN_ADC_WORD
             width = np.cumsum(np.array(ws))
-            c = np.hsplit(data, width * word)
-            result = [di.transpose() for di in c]
+            result = np.hsplit(data, width * word)
         return status, result
 
     def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
