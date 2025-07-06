@@ -276,10 +276,8 @@ class SingleBoxTask(BoxTask):
                 for (port, runit), result in raw_results.items()
             }
             indices = {
-                (port, runit): [
-                    np.arange(len(captured_data)) for captured_data in result
-                ]
-                for (port, runit), result in results.items()
+                (runit_id.port, runit_id.runit): indices
+                for runit_id, indices in self._setting.runit_sample_indices.items()
             }
             return (
                 status,
@@ -313,10 +311,8 @@ class SingleBoxTask(BoxTask):
                 for (port, runit), result in raw_results.items()
             }
             indices = {
-                (port, runit): [
-                    np.arange(len(captured_data)) for captured_data in result
-                ]
-                for (port, runit), result in results.items()
+                (runit_id.port, runit_id.runit): indices
+                for runit_id, indices in self._setting.runit_sample_indices.items()
             }
             return (
                 status,

@@ -86,6 +86,10 @@ class TaskSetting:
     raw_waveforms: dict[AwgId, RawWaveformSet] = field(default_factory=dict)
     repetition_count: int | None = None
     coherent_integration_period: int | None = None
+    runit_sample_indices: dict[RunitId, list[npt.NDArray[np.int32]]] = field(
+        default_factory=dict
+    )
+    device_index_at_user_zero: dict[AwgId, int] = field(default_factory=dict)
 
     def get_wave_sequence(self, *, port: int, channel: int) -> WaveSequence:
         """
@@ -202,6 +206,8 @@ class RawTaskSettingBuilder(RawBuilder):
 
     def __init__(self) -> None:
         self._settings: list[RunitSetting | AwgSetting | TriggerSetting] = []
+        self._runit_sample_indices: dict[RunitId, list[npt.NDArray[np.int32]]] = {}
+        self._device_index_at_user_zero: dict[AwgId, int] = {}
 
     def build(
         self,
@@ -216,6 +222,8 @@ class RawTaskSettingBuilder(RawBuilder):
                 wseqs=wseqs,
                 cprms=cprms,
                 triggers=triggers,
+                runit_sample_indices=self._runit_sample_indices,
+                device_index_at_user_zero=self._device_index_at_user_zero,
             )
         else:
             return TaskSetting(
@@ -225,6 +233,8 @@ class RawTaskSettingBuilder(RawBuilder):
                 raw_waveforms=raw_waveforms,
                 repetition_count=repetition_count,
                 coherent_integration_period=coherent_integration_period,
+                runit_sample_indices=self._runit_sample_indices,
+                device_index_at_user_zero=self._device_index_at_user_zero,
             )
 
     def add_awg_setting(
@@ -371,10 +381,9 @@ class WaveSequenceBuilder:
         repetition_count: int,
         coherent_integration_period: int,
         modulation_frequency: float = 0.0,
-    ) -> WaveSequence:
+    ) -> tuple[WaveSequence, int]:
         wait_words = wait_samples // 4  # Convert samples to words
-        wait_sample_offset_in_word = wait_samples % 4
-
+        wait_sample_offset = wait_samples % 4
         if not indexed_waveforms:
             raise ValueError("indexed_waveforms must not be empty")
         if wait_words > 2**32 - 1:
@@ -389,7 +398,7 @@ class WaveSequenceBuilder:
         last_tail_words = 0
         buffer: list[int | npt.NDArray[np.complex64]] = []
 
-        offset = wait_sample_offset_in_word
+        offset = wait_sample_offset
         indexed_waveforms_with_skew = [
             [(begin_index + offset, waveform) for begin_index, waveform in chunk]
             for chunk in indexed_waveforms
@@ -403,11 +412,12 @@ class WaveSequenceBuilder:
             wait_words = head_words - last_tail_words
             if wait_words < 0:
                 raise ValueError(
-                    f"Overlap detected between chunks: the chunk starting at sample index {head_index} "
-                    f"must be placed at or after {last_tail_words * 4} to avoid overlap."
+                    f"Overlap detected between chunks: the chunk starting at sample index {head_index - offset} "
+                    f"must be placed at or after {last_tail_words * 4 - offset} to avoid overlap."
                 )
             wave = np.zeros(
-                ((tail_index + len(tail_waveform) - (head_words * 4) + 63) // 64) * 64,
+                ((tail_index + len(tail_waveform) - (last_tail_words * 4) + 63) // 64)
+                * 64,
                 dtype=np.complex64,
             )
             buffer.append(wait_words)
@@ -442,6 +452,7 @@ class WaveSequenceBuilder:
             num_repeats=repetition_count,
             enable_lib_log=False,
         )
+        device_index_at_user_zero = wait_sample_offset - cast(int, buffer[0]) * 4
 
         for iq, num_blank_words in zip(buffer[1:-1:2], buffer[2::2]):
             iq = cast(npt.NDArray[np.complex64], iq)
@@ -472,7 +483,7 @@ class WaveSequenceBuilder:
             + buffer[0],
             num_repeats=1,
         )
-        return wseq
+        return wseq, device_index_at_user_zero
 
     @staticmethod
     def validate_waveform_array(array: npt.NDArray[np.complex64]) -> None:
@@ -530,7 +541,7 @@ class CaptureParamBuilder:
         repetition_count: int,
         coherent_integration_period: int,
         capture_delay_blocks: int = 0,
-    ) -> CaptureParam:
+    ) -> tuple[CaptureParam, list[npt.NDArray[np.int32]]]:
         """
         Construct a CaptureParam from a list of CaptureWindow objects.
 
@@ -546,6 +557,10 @@ class CaptureParamBuilder:
         if not capture_windows:
             raise ValueError("capture_windows must not be empty")
 
+        capture_windows = [
+            CaptureWindow(start=win.start, duration=win.duration)
+            for win in capture_windows
+        ]
         capture_windows = sorted(capture_windows, key=lambda w: w.start)
 
         # Use the first window as the base
@@ -566,37 +581,41 @@ class CaptureParamBuilder:
                 f"{aligned_end_last} > {coherent_integration_period}"
             )
 
+        sample_indices = []
         next_starts = [win.start for win in capture_windows[1:]] + [
-            coherent_integration_period
+            coherent_integration_period + aligned_start_first
         ]
-        loc = aligned_start_first
         for win, next_start in zip(capture_windows, next_starts):
-            aligned_start = cls._align_capture_window_start(win.start)
+            aligned_start = (
+                cls._align_capture_window_start(win.start)
+                if first.start != win.start
+                else cls._align_capture_first_window_start(win.start)
+            )
+            print(aligned_start, win.start, next_start)
             aligned_end = cls._align_capture_window_end(win.start + win.duration)
             aligned_next_start = cls._align_capture_window_start(next_start)
-
             aligned_duration = aligned_end - aligned_start
-            loc += aligned_duration
-            blank = aligned_next_start - loc
-            loc += blank
+
+            blank = aligned_next_start - aligned_end
             if blank < 0:
                 raise ValueError(
                     f"Each capture window must be separated by at least 1 word (4 samples) of blank space. "
-                    f"Overlap detected between windows: from {loc} to {aligned_next_start} "
+                    f"Overlap detected between windows: from {aligned_end} to {aligned_next_start} "
                     f"(original next start index: {next_start})."
                 )
             elif blank < 4:
                 raise ValueError(
                     f"Each capture window must be separated by at least 1 word (4 samples) of blank space. "
-                    f"Only {blank // 4} words found between windows: from {loc} to {aligned_next_start} "
+                    f"Only {blank // 4} words found between windows: from {aligned_end} to {aligned_next_start} "
                     f"(corresponding to original start index {next_start})."
                 )
             cprm.add_sum_section(
                 num_words=aligned_duration // 4,
                 num_post_blank_words=blank // 4,
             )
+            sample_indices.append(np.arange(aligned_duration) + aligned_start)
 
-        return cprm
+        return cprm, sample_indices
 
     @staticmethod
     def _align_capture_first_window_start(start: int) -> int:
@@ -650,6 +669,7 @@ class TaskSettingBuilder:
         self._capu_settings: list[RunitSetting] = []
         self._trigger_settings: list[TriggerSetting] = []
         self._raw_waveforms: dict[AwgId, RawWaveformSet] = {}
+        self._awg_wait_samples: dict[AwgId, int] = {}
 
     @property
     def coherent_integration_period(self) -> int:
@@ -683,12 +703,18 @@ class TaskSettingBuilder:
                 each chunk being a list of tuples containing start index in samples and complex waveform data.
             wait_words (int, optional): Number of words to wait before starting the waveform (default 0).
         """
-        wseq = WaveSequenceBuilder.construct_from_indexed_waveforms(
-            indexed_waveforms=indexed_waveforms,
-            wait_samples=wait_samples,
-            repetition_count=self._repetition_count,
-            coherent_integration_period=self._coherent_integration_period,
-            modulation_frequency=modulation_frequency,
+        self._awg_wait_samples[AwgId(port, channel)] = wait_samples
+        wseq, device_index_at_user_zero = (
+            WaveSequenceBuilder.construct_from_indexed_waveforms(
+                indexed_waveforms=indexed_waveforms,
+                wait_samples=wait_samples,
+                repetition_count=self._repetition_count,
+                coherent_integration_period=self._coherent_integration_period,
+                modulation_frequency=modulation_frequency,
+            )
+        )
+        self._builder._device_index_at_user_zero[AwgId(port, channel)] = (
+            device_index_at_user_zero
         )
         self._builder.add_awg_setting(
             port=port,
@@ -719,12 +745,14 @@ class TaskSettingBuilder:
             capture_delay_blocks (int, optional): Delay before capture in units of 16 ADC words (default 0).
         """
 
-        cprm = CaptureParamBuilder.construct_from_capture_windows(
+        cprm, sample_indices = CaptureParamBuilder.construct_from_capture_windows(
             capture_windows=capture_windows,
             repetition_count=self._repetition_count,
             coherent_integration_period=self._coherent_integration_period,
             capture_delay_blocks=capture_delay_blocks,
         )
+        self._builder._runit_sample_indices[RunitId(port, runit)] = sample_indices
+
         self._builder.add_runit_setting(
             port=port,
             runit=runit,
