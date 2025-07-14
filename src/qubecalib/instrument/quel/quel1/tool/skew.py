@@ -818,8 +818,7 @@ class Skew:
             software_demodulation=True,
         ):
             for _, iqs in data.items():
-                iqs = iqs[0].sum(axis=1).squeeze()
-
+                iqs = iqs[0].sum(axis=0).squeeze() # iqs format changed shape: (512, 100)　→ (100, 512)
         return iqs
 
     def _store(self, target_port: PORT, iqs: npt.NDArray) -> None:
