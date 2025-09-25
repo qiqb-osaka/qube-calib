@@ -71,12 +71,12 @@ class Quel1System:
 
     def resync(
         self, *box_names: str
-    ) -> MutableSequence[tuple[bool, int, int] | tuple[bool, int]]:
+    ) -> list[tuple[bool, int] | tuple[str, MutableSequence[tuple[bool, int, int]]]]:
         if len(box_names) == 0:
             box_names = tuple(self.boxes.keys())
         master = self._clockmaster
         master.kick_clock_synch([str(self.box[b].sss.ipaddress) for b in box_names])
-        return [self.read_clock(b) for b in box_names] + [master.read_clock()]
+        return [(b, self.read_clock(b)) for b in box_names] + [master.read_clock()]
 
     def initialize(self, *boxes: str) -> None:
         if not boxes:
