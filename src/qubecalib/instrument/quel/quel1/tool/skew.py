@@ -453,23 +453,30 @@ class Skew:
             if "channels" in freqs
             else cast(dict[int, dict[str, float]], freqs["runits"])
         )
+
         lo_freq, cnco_freq = (
-            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["lo_freq"]) if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]),
         )
+        # USB/LSB の target_freq を計算する
         kw = "fnco_freq"
         usb_freqs = {i: lo_freq + (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
         lsb_freqs = {i: lo_freq - (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
+        # sideband　が設定されているならそれを使う
+        if lo_freq == 0:
+            freqs["sideband"] = ""
         if "sideband" in freqs:
             sideband = freqs["sideband"]
         else:
+            # 9.5GHz を境に USB/LSB を決定する
             sideband = "L" if lo_freq + cnco_freq < 9500e6 else "U"
+            # lo_freq == 0 の場合は sideband を空にする
             freqs["sideband"] = sideband
-        if sideband == "U":
-            for i, v in usb_freqs.items():
+        if sideband == "L":
+            for i, v in lsb_freqs.items():
                 ch_freqs[i]["target_freq"] = v
         else:
-            for i, v in lsb_freqs.items():
+            for i, v in usb_freqs.items():
                 ch_freqs[i]["target_freq"] = v
         return freqs, ch_freqs
 
@@ -492,18 +499,27 @@ class Skew:
         )
 
         logger.debug(
-            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq']}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
+            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
 
         boxname, nport = dest_port
         box = system.box[boxname]
         lo_freq, cnco_freq = (
-            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["lo_freq"]) if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]) + ch_freqs[0]["fnco_freq"],
         )
         for v in ch_freqs.values():
             v["fnco_freq"] = 0
         dump_port = box.dump_port(nport)
+        print(
+            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
+        )
+        if lo_freq == 0:
+            # Direct synthesys ポートは cnco_freq は 2000MHz - 6000MHz 程度まで OK だが
+            # Monitor ポートは 3000MHz まで
+            target_freq = cnco_freq
+            lo_freq = (target_freq + 2000e6) // 500e6 * 500e6
+            cnco_freq = lo_freq - target_freq
         if "channels" in dump_port:
             ch = dump_port["channels"]
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
@@ -523,7 +539,9 @@ class Skew:
             n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
             # ADC の cnco 周波数は 3000MHz 未満である必要がある
             # cnco_freq を 500MHz 減らし， lo_freq で補う
-            if cnco_freq >= DEFAULT_FNCO_LIMIT:
+            if lo_freq == 0:
+                pass
+            elif cnco_freq >= DEFAULT_FNCO_LIMIT:
                 target_freq = ch_freqs[0]["target_freq"]
                 if lo_freq < target_freq:  # USB
                     lo_freq += 500e6
@@ -632,7 +650,7 @@ class Skew:
         ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
         DEFAULT_CHANNEL = 0
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
-            cast(float, freqs["lo_freq"]) * 1e-9,
+            cast(float, freqs["lo_freq"]) * 1e-9 if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]) * 1e-9,
             ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
             ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
@@ -818,7 +836,9 @@ class Skew:
             software_demodulation=True,
         ):
             for _, iqs in data.items():
-                iqs = iqs[0].sum(axis=0).squeeze() # iqs format changed shape: (512, 100)　→ (100, 512)
+                iqs = (
+                    iqs[0].sum(axis=0).squeeze()
+                )  # iqs format changed shape: (512, 100)　→ (100, 512)
         return iqs
 
     def _store(self, target_port: PORT, iqs: npt.NDArray) -> None:
