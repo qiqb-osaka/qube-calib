@@ -511,9 +511,9 @@ class Skew:
         for v in ch_freqs.values():
             v["fnco_freq"] = 0
         dump_port = box.dump_port(nport)
-        print(
-            f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
-        )
+        # print(
+        #     f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
+        # )
         if lo_freq == 0:
             # Direct synthesys ポートは cnco_freq は 2000MHz - 6000MHz 程度まで OK だが
             # Monitor ポートは 3000MHz まで
