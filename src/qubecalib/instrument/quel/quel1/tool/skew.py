@@ -53,7 +53,7 @@ def port2str(v: PORT) -> str:
 class BoxSkewData:
     target_port: PORT
     slot: int
-    wati: int
+    wait: int
 
 
 @dataclass
@@ -692,7 +692,7 @@ class Skew:
             dump_port=dump_port, system=system
         )
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
-            cast(float, freqs["lo_freq"]),
+            cast(float, freqs["lo_freq"] if "lo_freq" in freqs else 0),
             cast(float, freqs["cnco_freq"]),
             ch_freqs[cls.DEFAULT_CHANNEL]["fnco_freq"],
             ch_freqs[cls.DEFAULT_CHANNEL]["target_freq"] * 1e-9,

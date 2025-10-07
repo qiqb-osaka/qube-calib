@@ -38,7 +38,7 @@ class SystemConfigDatabase:
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
         self.timing_shift: Final[dict[str, int]] = {}
-        self.skew: Final[dict[str, int]] = {}
+        self.skew: Final[dict[str | tuple[str, int], int]] = {}
         self.trigger: dict[tuple[str, int], tuple[str, Quel1PortType, int]] = {}
         self.time_to_start: int = 0
 
@@ -142,6 +142,11 @@ class SystemConfigDatabase:
         for name, setting in yaml_dict["box_setting"].items():
             self.timing_shift[name] = setting["slot"] * 16
             self.skew[name] = setting["wait"]
+            # TODO : もうちょっとスマートに書けるはず
+            for port in range(20):
+                key = f"wait{port}"
+                if key in setting:
+                    self.skew[(name, port)] = setting[key]
         self.time_to_start = yaml_dict["time_to_start"]
 
     def add_box_setting(

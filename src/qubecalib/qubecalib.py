@@ -19,6 +19,7 @@ from typing import (
     MutableSequence,
     Optional,
     TypedDict,
+    cast,
 )
 
 import numpy as np
@@ -84,6 +85,10 @@ class QubeCalib:
     def new_session(self) -> Executor:
         """Create a new session."""
         return Executor(self.system_config_database.copy())
+
+    @property
+    def version(self) -> str:
+        return __version__
 
     @property
     def system_config_database(self) -> SystemConfigDatabase:
@@ -155,20 +160,6 @@ class QubeCalib:
         gen_sampled_sequence, cap_sampled_sequence = (
             sequence.convert_to_sampled_sequence()
         )
-        # settings = self.system_config_database._target_settings
-        # for target_name, gss in gen_sampled_sequence.items():
-        #     if target_name not in settings:
-        #         raise ValueError(f"target({target_name}) is not defined")
-        #     box_names = self.system_config_database.get_boxes_by_target(target_name)
-        #     if not box_names:
-        #         raise ValueError(f"target({target_name}) is not assigned to any box")
-        #     if len(box_names) > 1:
-        #         raise ValueError(f"target({target_name}) is assigned to multiple boxes")
-        #     # tgtset = settings[target_name]
-        #     # skew = tgtset["skew"] if "skew" in tgtset else 0
-        #     box_name = list(box_names)[0]
-        #     skew = self.sysdb.skew[box_name] if box_name in self.sysdb.skew else 0
-        #     gss.padding += skew
 
         items_by_target = sequence._get_group_items_by_target()
 
@@ -510,7 +501,9 @@ class Converter:
         cls,
         gen_sampled_sequence: dict[str, GenSampledSequence],
         cap_sampled_sequence: dict[str, CapSampledSequence],
-        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        resource_map: dict[
+            str, dict[str, BoxSetting | PortSetting | int | dict[str, float]]
+        ],
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
@@ -564,7 +557,9 @@ class Converter:
         cls,
         gen_sampled_sequence: dict[str, GenSampledSequence],
         cap_sampled_sequence: dict[str, CapSampledSequence],
-        resource_map: dict[str, dict[str, BoxSetting | PortSetting | int]],
+        resource_map: dict[
+            str, dict[str, BoxSetting | PortSetting | int | dict[str, float]]
+        ],
         port_config: dict[str, PortConfigAcquirer],
         repeats: int,
         interval: float,
@@ -621,7 +616,6 @@ class Converter:
         # lbs = len(sseqs[:-1]) * [0] + [padding]
         # padding は WaveSequence の長さと合わせるために設けた
         # 原則 WaveSequence は wait = 0 とする
-        # TODO Skew の調整はこれから実装する。　wait の単位を確認すること。1Saで調整できるように。
         ids_e7 = {
             targets_ids[sseq.target_name]: CaptureParamTools.create(
                 sequence=sseq,
@@ -1130,11 +1124,24 @@ class Sequencer(Command):
                 raise ValueError(f"target({target_name}) is not assigned to any box")
             if len(box_names) > 1:
                 raise ValueError(f"target({target_name}) is assigned to multiple boxes")
-            # tgtset = settings[target_name]
-            # skew = tgtset["skew"] if "skew" in tgtset else 0
             box_name = list(box_names)[0]
-            skew = sysdb.skew[box_name] if box_name in sysdb.skew else 0
-            gss.padding += skew
+            port_numbers = sysdb.get_port_numbers_by_target(target_name)
+            if not port_numbers:
+                raise ValueError(f"target({target_name}) is not assigned to any port")
+            if len(port_numbers) > 1:
+                raise ValueError(f"target({target_name}) is assigned to multiple ports")
+            port_number = list(port_numbers)[0]
+            if not isinstance(port_number, int):
+                raise ValueError(
+                    f"port_number({port_number}) is not integer, fogi is not supported yet"
+                )
+            box_skew = sysdb.skew[box_name] if box_name in sysdb.skew else 0
+            port_skew = (
+                sysdb.skew[(box_name, cast(int, port_number))]
+                if (box_name, cast(int, port_number)) in sysdb.skew
+                else 0
+            )
+            gss.padding += box_skew + port_skew
 
         # resource_map は以下の形式
         # {
