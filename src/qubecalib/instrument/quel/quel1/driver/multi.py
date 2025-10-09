@@ -4,7 +4,7 @@ import datetime
 from concurrent.futures import Future
 from logging import getLogger
 from types import MappingProxyType
-from typing import Any, Final, MutableSequence, NamedTuple, Optional
+from typing import Any, Final, MutableSequence, NamedTuple, Optional, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -112,19 +112,26 @@ class Quel1System:
             raise ValueError(f"box {box_name} not found in system")
         return self.config_cache[box_name]
 
-    def dump_port(self, box_name: str, port: int) -> dict[str, Any]:
+    def dump_port(self, box_name: str, port: Quel1PortType) -> dict[str, Any]:
         if self.config_fetched_at is None:
             raise ValueError("config cache is empty")
         if box_name not in self.boxes:
             raise ValueError(f"box {box_name} not found in system")
         return self.config_cache[box_name]["ports"][port]
 
-    def is_output_port(self, box_name: str, port: int) -> bool:
+    def is_output_port(self, box_name: str, port: Quel1PortType) -> bool:
         if self.config_fetched_at is None:
             raise ValueError("config cache is empty")
         if box_name not in self.boxes:
             raise ValueError(f"box {box_name} not found in system")
         return self.config_cache[box_name]["ports"][port]["direction"] == "out"
+
+    def is_input_port(self, box_name: str, port: Quel1PortType) -> bool:
+        if self.config_fetched_at is None:
+            raise ValueError("config cache is empty")
+        if box_name not in self.boxes:
+            raise ValueError(f"box {box_name} not found in system")
+        return self.config_cache[box_name]["ports"][port]["direction"] == "in"
 
     def get_monitor_input_ports(self, box_name: str) -> set[int | tuple[int, int]]:
         if self.config_fetched_at is None:
@@ -132,6 +139,35 @@ class Quel1System:
         if box_name not in self.boxes:
             raise ValueError(f"box {box_name} not found in system")
         return self.monitor_input_ports[box_name]
+
+    def get_lo_freq(self, box_name: str, port: Quel1PortType) -> float | None:
+        port_cfg = self.dump_port(box_name, port)
+        return cast(float, port_cfg["lo_freq"]) if "lo_freq" in port_cfg else None
+
+    def get_cnco_freq(self, box_name: str, port: Quel1PortType) -> float:
+        port_cfg = self.dump_port(box_name, port)
+        return cast(float, port_cfg["cnco_freq"])
+
+    def get_fnco_freq(self, box_name: str, port: Quel1PortType, channel: int) -> float:
+        port_cfg = self.dump_port(box_name, port)
+        if "channels" in port_cfg:
+            key = "channels"
+        elif "runits" in port_cfg:
+            key = "runits"
+        else:
+            raise ValueError(
+                f"no channel information found in port-{port} of {box_name}"
+            )
+        ch_cfgs = cast(dict[int, dict[str, float]], port_cfg[key])
+        return ch_cfgs[channel]["fnco_freq"]
+
+    def get_sideband(self, box_name: str, port: Quel1PortType) -> str | None:
+        port_cfg = self.dump_port(box_name, port)
+        return cast(str, port_cfg["sideband"]) if "sideband" in port_cfg else None
+
+
+class Quel1SystemCache:
+    pass
 
 
 class Action:

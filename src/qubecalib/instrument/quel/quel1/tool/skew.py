@@ -264,7 +264,7 @@ class Skew:
             raise ValueError("sysdb and executor must be provided")
         self._system: Final[Quel1System] = system
         self._sysdb: Final[SystemConfigDatabase] = sysdb
-        self._executor: Final[Executor] = Executor(self.sysdb)
+        self._executor: Final[Executor] = Executor(self.sysdb, quel1system=system)
         self._monitor_port: PORT = monitor_port
         self._trigger_nport: int = trigger_nport
         self._reference_port: PORT = reference_port
@@ -845,7 +845,7 @@ class Skew:
 
     def _execute(self, sequence: Sequence) -> npt.NDArray:
         """Executes the measurement, assuming that the sequence contains only a single capture."""
-        self._executor.add_sequence(sequence)
+        self._executor.add_sequence(sequence, driver=self._system)
         rst = None
         for _, data, _ in self._executor.step_execute(
             repeats=self._repeats,
