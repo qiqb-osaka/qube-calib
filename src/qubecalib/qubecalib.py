@@ -19,7 +19,6 @@ from typing import (
     MutableSequence,
     Optional,
     TypedDict,
-    cast,
 )
 
 import numpy as np
@@ -112,7 +111,7 @@ class QubeCalib:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
         system = direct.Quel1System.create(
-            clockmaster=QuBEMasterClient(self.sysdb._clockmaster_setting.ipaddr),
+            clockmaster=QuBEMasterClient(str(self.sysdb._clockmaster_setting.ipaddr)),
             boxes=[self.sysdb.create_named_box(b) for b in box_names],
         )
         return system
@@ -196,10 +195,10 @@ class QubeCalib:
         fullscale_current: Optional[int] = None,
         rfswitch: Optional[str] = None,
     ) -> None:
-        p = {
-            _.port: _
-            for _ in self.system_config_database._port_settings.values()
-            if _.box_name == box_name
+        p: dict[int | tuple[int, int] | str, PortSetting | float | int | str | None] = {
+            pset.port: pset
+            for pset in self.system_config_database._port_settings.values()
+            if pset.box_name == box_name
         }
         p["lo_freq"] = lo_freq
         p["cnco_freq"] = cnco_freq
@@ -396,7 +395,7 @@ class QubeCalib:
 
     def resync(
         self, *box_names: str
-    ) -> MutableSequence[tuple[bool, int, int] | tuple[bool, int]]:
+    ) -> list[tuple[bool, int] | MutableSequence[tuple[bool, int, int]]]:
         db = self.system_config_database
         if db._clockmaster_setting is None:
             raise ValueError("clock master is not found")
@@ -567,30 +566,40 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
         enable_sum: bool,
-    ) -> dict[tuple[str, int, int], CaptureParam]:
+    ) -> dict[tuple[str, Quel1PortType, int], CaptureParam]:
         # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
-            target_name: _["port"].ndelay_or_nwait[_["channel_number"]]
-            if _["port"].ndelay_or_nwait is not None
+            target_name: rmap["port"].ndelay_or_nwait[rmap["channel_number"]]
+            if rmap["port"].ndelay_or_nwait is not None
             else 0
-            for target_name, _ in resource_map.items()
+            for target_name, rmap in resource_map.items()
+            if isinstance(rmap["port"], PortSetting)
+            and isinstance(rmap["channel_number"], int)
         }
         # CaptureParam の生成
         # target 毎の変調周波数の計算
         targets_freqs: MutableMapping[str, float] = {
             target_name: cls.calc_modulation_frequency(
-                f_target=_["target"]["frequency"],
+                f_target=rmap["target"]["frequency"],
                 port_config=port_config[target_name],
             )
-            for target_name, _ in resource_map.items()
+            for target_name, rmap in resource_map.items()
+            if isinstance(rmap["target"], dict)
         }
         for target_name, freq in targets_freqs.items():
             cap_sampled_sequence[target_name].modulation_frequency = freq
         # target_name と (box_name, port_number, channel_number) のマップを作成する
         # 1:1 の対応を仮定
         targets_ids = {
-            target_name: (_["box"].box_name, _["port"].port, _["channel_number"])
-            for target_name, _ in resource_map.items()
+            target_name: (
+                rmap["box"].box_name,
+                rmap["port"].port,
+                rmap["channel_number"],
+            )
+            for target_name, rmap in resource_map.items()
+            if isinstance(rmap["box"], BoxSetting)
+            and isinstance(rmap["port"], PortSetting)
+            and isinstance(rmap["channel_number"], int)
         }
         ids_targets = {id: target_name for target_name, id in targets_ids.items()}
         if len(targets_ids) != len(ids_targets):
@@ -736,11 +745,14 @@ class Converter:
             id: next(
                 iter(
                     {
-                        _["port"].ndelay_or_nwait[_["channel_number"]]
-                        for _ in resource_map.values()
-                        if _["box"].box_name == id[0]
-                        and _["port"].port == id[1]
-                        and _["channel_number"] == id[2]
+                        rmap["port"].ndelay_or_nwait[rmap["channel_number"]]
+                        for rmap in resource_map.values()
+                        if isinstance(rmap["box"], BoxSetting)
+                        and isinstance(rmap["port"], PortSetting)
+                        and isinstance(rmap["channel_number"], int)
+                        if rmap["box"].box_name == id[0]
+                        and rmap["port"].port == id[1]
+                        and rmap["channel_number"] == id[2]
                     }
                 )
             )
@@ -1136,11 +1148,14 @@ class Sequencer(Command):
                     f"port_number({port_number}) is not integer, fogi is not supported yet"
                 )
             box_skew = sysdb.skew[box_name] if box_name in sysdb.skew else 0
-            port_skew = (
-                sysdb.skew[(box_name, cast(int, port_number))]
-                if (box_name, cast(int, port_number)) in sysdb.skew
-                else 0
-            )
+            if box_name in sysdb.port_skew:
+                port_skew = (
+                    sysdb.port_skew[box_name][port_number]
+                    if port_number in sysdb.port_skew[box_name]
+                    else 0
+                )
+            else:
+                port_skew = 0
             gss.padding += box_skew + port_skew
 
         # resource_map は以下の形式
@@ -1281,7 +1296,7 @@ class Sequencer(Command):
         self,
         boxpool: BoxPool,
     ) -> tuple[
-        dict[tuple[str, int, int], CaptureParam],
+        dict[tuple[str, Quel1PortType, int], CaptureParam],
         dict[tuple[str, Quel1PortType, int], WaveSequence],
         dict[str, Any],
     ]:
@@ -1356,7 +1371,7 @@ class Sequencer(Command):
             gseq.padding += first_padding
 
         interval = self.interval if self.interval is not None else 10240
-        cap_e7_settings: dict[tuple[str, int, int], CaptureParam] = (
+        cap_e7_settings: dict[tuple[str, Quel1PortType, int], CaptureParam] = (
             Converter.convert_to_cap_device_specific_sequence(
                 gen_sampled_sequence=self.gen_sampled_sequence,
                 cap_sampled_sequence=self.cap_sampled_sequence,
@@ -1445,8 +1460,8 @@ class Sequencer(Command):
 
     def parse_capture_results(
         self,
-        status: dict[tuple[str, int], CaptureReturnCode],
-        results: dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+        status: dict[tuple[str, Quel1PortType], CaptureReturnCode],
+        results: dict[tuple[str, Quel1PortType, int], npt.NDArray[np.complex64]],
         action: direct.Action,
         crmap: dict[str, Any],
     ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
@@ -1510,14 +1525,12 @@ class Sequencer(Command):
         return status, result
 
     def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
+        if boxpool._clock_master is None:
+            raise ValueError("clock master is not set")
         quel1system = direct.Quel1System.create(
             clockmaster=boxpool._clock_master,
             boxes=[
-                direct.NamedBox(
-                    name,
-                    box,
-                )
-                for name, (box, _) in boxpool._boxes.items()
+                direct.NamedBox(name, box) for name, (box, _) in boxpool._boxes.items()
             ],
         )
         quel1system.trigger = self.sysdb.trigger
@@ -1745,9 +1758,10 @@ class Executor:
             sum(
                 [
                     [
-                        __["box"].box_name
-                        for _ in command.resource_map.values()
-                        for __ in _
+                        rmap["box"].box_name
+                        for rmaps in command.resource_map.values()
+                        for rmap in rmaps
+                        if isinstance(rmap["box"], BoxSetting)
                     ]
                     for command in self._work_queue
                     if isinstance(command, Sequencer)
@@ -2036,7 +2050,7 @@ class BoxPool:
         }
         refname = list(self._boxes.keys())[0]
         adj = avg[refname]
-        self._estimated_timediff = {name: cntr - adj for ipaddr, cntr in avg.items()}
+        self._estimated_timediff = {name: cntr - adj for name, cntr in avg.items()}
         self._cap_sysref_time_offset = avg[refname]
         return refname, avg[refname]
 

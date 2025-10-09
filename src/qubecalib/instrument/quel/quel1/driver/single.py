@@ -24,7 +24,7 @@ class AwgSetting(NamedTuple):
 
 
 class RunitId(NamedTuple):
-    port: int
+    port: Quel1PortType
     runit: int
 
 
@@ -35,7 +35,7 @@ class RunitSetting(NamedTuple):
 
 class TriggerSetting(NamedTuple):
     trigger_awg: AwgId  # port, channel
-    triggerd_port: int
+    triggerd_port: Quel1PortType
 
 
 class Action:
@@ -44,12 +44,12 @@ class Action:
         box: Quel1BoxWithRawWss,
         wseqs: MappingProxyType[AwgId, WaveSequence],
         cprms: MappingProxyType[RunitId, CaptureParam],
-        triggers: MappingProxyType[int, AwgId],
+        triggers: MappingProxyType[Quel1PortType, AwgId],
     ) -> None:
         self._box: Final[Quel1BoxWithRawWss] = box
         self._wseqs: Final[MappingProxyType[AwgId, WaveSequence]] = wseqs
         self._cprms: Final[MappingProxyType[RunitId, CaptureParam]] = cprms
-        self._triggers: Final[MappingProxyType[int, AwgId]] = triggers
+        self._triggers: Final[MappingProxyType[Quel1PortType, AwgId]] = triggers
 
     @classmethod
     def build(
@@ -71,7 +71,7 @@ class Action:
     ) -> tuple[
         MappingProxyType[AwgId, WaveSequence],
         MappingProxyType[RunitId, CaptureParam],
-        MappingProxyType[int, AwgId],
+        MappingProxyType[Quel1PortType, AwgId],
     ]:
         # ValueError 1
         if not settings:
@@ -138,7 +138,8 @@ class Action:
         *,
         timeout: Optional[float] = None,
     ) -> dict[
-        int, Future[tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]]
+        Quel1PortType,
+        Future[tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]],
     ]:
         # _trigger が _channels に含まれていなければ capm が tigger を待ち続けてしまうのでこれを防ぐ
         channels = {awg for awg in self._wseqs}
@@ -180,9 +181,10 @@ class Action:
             self._box.start_emission(awg_specs)
 
     def capture_stop(
-        self, futures: dict[int, Future]
+        self, futures: dict[Quel1PortType, Future]
     ) -> tuple[
-        dict[int, CaptureReturnCode], dict[tuple[int, int], npt.NDArray[np.complex64]]
+        dict[Quel1PortType, CaptureReturnCode],
+        dict[tuple[Quel1PortType, int], npt.NDArray[np.complex64]],
     ]:
         status, data = {}, {}
         for port, future in futures.items():
@@ -195,7 +197,8 @@ class Action:
     def action(
         self,
     ) -> tuple[
-        dict[int, CaptureReturnCode], dict[tuple[int, int], npt.NDArray[np.complex64]]
+        dict[Quel1PortType, CaptureReturnCode],
+        dict[tuple[Quel1PortType, int], npt.NDArray[np.complex64]],
     ]:
         # wseqs, cprms, triggers
         # True,  False, False -> AWG only

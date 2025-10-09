@@ -38,8 +38,11 @@ class SystemConfigDatabase:
             MutableSequence[tuple[str, dict[str, str | int]]]
         ] = []
         self.timing_shift: Final[dict[str, int]] = {}
-        self.skew: Final[dict[str | tuple[str, int], int]] = {}
-        self.trigger: dict[tuple[str, int], tuple[str, Quel1PortType, int]] = {}
+        self.skew: Final[dict[str, int]] = {}
+        self.port_skew: Final[dict[str, dict[int, int]]] = {}
+        self.trigger: dict[
+            tuple[str, Quel1PortType], tuple[str, Quel1PortType, int]
+        ] = {}
         self.time_to_start: int = 0
 
     @property
@@ -65,10 +68,12 @@ class SystemConfigDatabase:
         clockmaster_setting: Optional[dict] = None,
         box_settings: Optional[dict] = None,
         box_aliases: Optional[dict[str, str]] = None,
-        port_settings: Optional[dict[str, dict[str, object]]] = None,
+        port_settings: Optional[dict[str, dict[str, Any]]] = None,
         relation_channel_target: Optional[MutableSequence[tuple[str, str]]] = None,
         target_settings: Optional[dict[str, dict[str, object]]] = None,
-        relation_channel_port: Optional[MutableSequence[tuple[str, str]]] = None,
+        relation_channel_port: Optional[
+            MutableSequence[tuple[str, dict[str, str | int]]]
+        ] = None,
     ) -> None:
         if clockmaster_setting is not None:
             self._clockmaster_setting = ClockmasterSetting(
@@ -84,8 +89,12 @@ class SystemConfigDatabase:
         if port_settings is not None:
             for port_name, setting in port_settings.items():
                 if setting["box_name"] in self._box_aliases:
+                    if not isinstance(setting["box_name"], str):
+                        raise ValueError("box_name must be a string")
                     setting["box_name"] = self._box_aliases[setting["box_name"]]
-                self.add_port_setting(**{"port_name": port_name} | setting)
+                if not isinstance(port_name, str):
+                    raise ValueError("port_name must be a string")
+                self.add_port_setting(port_name=port_name, **setting)
         if relation_channel_target is not None:
             for _ in relation_channel_target:
                 self._relation_channel_target.append(_)
@@ -93,8 +102,8 @@ class SystemConfigDatabase:
             for target_name, setting in target_settings.items():
                 self._target_settings[target_name] = setting
         if relation_channel_port is not None:
-            for _ in relation_channel_port:
-                self._relation_channel_port.append(_)
+            for rcp in relation_channel_port:
+                self._relation_channel_port.append(rcp)
 
     def load(self, path_to_database_file: str | os.PathLike) -> None:
         with open(Path(os.getcwd()) / Path(path_to_database_file), "r") as file:
@@ -143,10 +152,12 @@ class SystemConfigDatabase:
             self.timing_shift[name] = setting["slot"] * 16
             self.skew[name] = setting["wait"]
             # TODO : もうちょっとスマートに書けるはず
-            for port in range(20):
-                key = f"wait{port}"
-                if key in setting:
-                    self.skew[(name, port)] = setting[key]
+            if "port_wait" in setting:
+                self.port_skew[name] = {}
+                for port, wait in setting["port_wait"].items():
+                    if wait < 0:
+                        raise ValueError("wait must be non-negative")
+                    self.port_skew[name][port] = wait
         self.time_to_start = yaml_dict["time_to_start"]
 
     def add_box_setting(
@@ -410,7 +421,7 @@ class SystemConfigDatabase:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける?
         system = direct.Quel1System.create(
-            clockmaster=QuBEMasterClient(self._clockmaster_setting.ipaddr),
+            clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
             boxes=[self.create_named_box(b) for b in box_names],
         )
         return system

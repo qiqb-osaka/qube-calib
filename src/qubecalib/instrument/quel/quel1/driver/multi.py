@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import datetime
 from concurrent.futures import Future
 from logging import getLogger
 from types import MappingProxyType
-from typing import Final, MutableSequence, NamedTuple, Optional
+from typing import Any, Final, MutableSequence, NamedTuple, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -38,7 +39,12 @@ class Quel1System:
         self.timing_shift: Final[dict[str, int]] = {
             b: 0 for b in boxes
         }  # this parameter must be a multiple of 16
-        self.trigger: dict[tuple[str, int], tuple[str, Quel1PortType, int]] = {}
+        self.config_cache: Final[dict[str, dict[str, Any]]] = {}
+        self.monitor_input_ports: Final[dict[str, set[int | tuple[int, int]]]] = {}
+        self.config_fetched_at: Optional[datetime.datetime] = None
+        self.trigger: dict[
+            tuple[str, Quel1PortType], tuple[str, Quel1PortType, int]
+        ] = {}
 
     @classmethod
     def create(
@@ -46,6 +52,7 @@ class Quel1System:
         *,
         clockmaster: QuBEMasterClient,
         boxes: list[Quel1BoxWithRawWss | NamedBox],
+        update_copnfig_cache: bool = True,
     ) -> Quel1System:
         boxes_dict = {}
         for box in boxes:
@@ -53,7 +60,10 @@ class Quel1System:
                 boxes_dict[box.name] = box.box
             else:
                 boxes_dict[box._dev.wss._wss_addr] = box
-        return cls(clockmaster, MappingProxyType(boxes_dict))
+        self = cls(clockmaster, MappingProxyType(boxes_dict))
+        if update_copnfig_cache:
+            self.update_config_cache()
+        return self
 
     @property
     def boxes(self) -> MappingProxyType[str, Quel1BoxWithRawWss]:
@@ -78,12 +88,50 @@ class Quel1System:
         master.kick_clock_synch([str(self.box[b].sss.ipaddress) for b in box_names])
         return [(b, self.read_clock(b)) for b in box_names] + [master.read_clock()]
 
-    def initialize(self, *boxes: str) -> None:
-        if not boxes:
-            boxes = tuple(self.boxes.keys())
-        for box_name in boxes:
-            self.box[box_name].initialize_all_awgs()
-            self.box[box_name].initialize_all_capunits()
+    def initialize(self, *box_names: str) -> None:
+        if not box_names:
+            box_names = tuple(self.boxes.keys())
+        for b in box_names:
+            self.box[b].initialize_all_awgs()
+            self.box[b].initialize_all_capunits()
+
+    def update_config_cache(self, *box_names: str) -> None:
+        if not box_names:
+            box_names = tuple(self.boxes.keys())
+        self.config_cache.clear()
+        self.monitor_input_ports.clear()
+        for b in box_names:
+            self.config_cache[b] = self.box[b].dump_box()
+            self.monitor_input_ports[b] = self.box[b].get_monitor_input_ports()
+        self.config_fetched_at = datetime.datetime.now()
+
+    def dump_box(self, box_name: str) -> dict[str, Any]:
+        if self.config_fetched_at is None:
+            raise ValueError("config cache is empty")
+        if box_name not in self.boxes:
+            raise ValueError(f"box {box_name} not found in system")
+        return self.config_cache[box_name]
+
+    def dump_port(self, box_name: str, port: int) -> dict[str, Any]:
+        if self.config_fetched_at is None:
+            raise ValueError("config cache is empty")
+        if box_name not in self.boxes:
+            raise ValueError(f"box {box_name} not found in system")
+        return self.config_cache[box_name]["ports"][port]
+
+    def is_output_port(self, box_name: str, port: int) -> bool:
+        if self.config_fetched_at is None:
+            raise ValueError("config cache is empty")
+        if box_name not in self.boxes:
+            raise ValueError(f"box {box_name} not found in system")
+        return self.config_cache[box_name]["ports"][port]["direction"] == "out"
+
+    def get_monitor_input_ports(self, box_name: str) -> set[int | tuple[int, int]]:
+        if self.config_fetched_at is None:
+            raise ValueError("config cache is empty")
+        if box_name not in self.boxes:
+            raise ValueError(f"box {box_name} not found in system")
+        return self.monitor_input_ports[box_name]
 
 
 class Action:
@@ -189,7 +237,7 @@ class Action:
     ) -> dict[
         str,
         dict[
-            int,
+            Quel1PortType,
             Future[tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]],
         ],
     ]:
@@ -205,13 +253,13 @@ class Action:
         futures: dict[
             str,
             dict[
-                int,
+                Quel1PortType,
                 Future[tuple[CaptureReturnCode, dict[int, npt.NDArray[np.complex64]]]],
             ],
         ],
     ) -> tuple[
-        dict[tuple[str, int], CaptureReturnCode],
-        dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+        dict[tuple[str, Quel1PortType], CaptureReturnCode],
+        dict[tuple[str, Quel1PortType, int], npt.NDArray[np.complex64]],
     ]:
         box_results = {}
         for name, future in futures.items():
@@ -227,8 +275,8 @@ class Action:
     def action(
         self,
     ) -> tuple[
-        dict[tuple[str, int], CaptureReturnCode],
-        dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+        dict[tuple[str, Quel1PortType], CaptureReturnCode],
+        dict[tuple[str, Quel1PortType, int], npt.NDArray[np.complex64]],
     ]:
         futures = self.capture_start()
         self.emit_at(displacement=self._quel1system.displacement)
