@@ -92,9 +92,14 @@ class SystemConfigDatabase:
                     if not isinstance(setting["box_name"], str):
                         raise ValueError("box_name must be a string")
                     setting["box_name"] = self._box_aliases[setting["box_name"]]
+                if "port_name" not in setting:
+                    setting["port_name"] = port_name
                 if not isinstance(port_name, str):
                     raise ValueError("port_name must be a string")
-                self.add_port_setting(port_name=port_name, **setting)
+                # if "port_name" in setting:
+                #     raise ValueError(f"port_name must not be in setting '{port_name}'")
+                # self.add_port_setting(port_name=port_name, **setting)
+                self.add_port_setting(**setting)
         if relation_channel_target is not None:
             for _ in relation_channel_target:
                 self._relation_channel_target.append(_)

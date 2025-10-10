@@ -13,7 +13,9 @@ def test_create_database() -> None:
 
 def test_load_skew_setting() -> None:
     """load_skew_setting should load the skew setting."""
-    with open("./tests/unit/offline/instrument/quel/quel1/tool/skew.yaml", "r") as f:
+    with open(
+        "./qube-calib/tests/unit/offline/instrument/quel/quel1/tool/skew.yaml", "r"
+    ) as f:
         config = yaml.safe_load(f)
     skew_setting = SkewSetting.load(config)
     assert isinstance(skew_setting, SkewSetting)
