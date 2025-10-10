@@ -1,5 +1,5 @@
 import os
-from typing import Generator
+from typing import Generator, MutableSequence
 
 import pytest
 from qubecalib.qubecalib import QubeCalib
@@ -46,11 +46,17 @@ def test_init_with_config(qc: QubeCalib) -> None:
     config = qc.system_config_database.asdict()
     assert config.keys() == CONFIG_KEYS
     assert config["clockmaster_setting"] is None
+    assert isinstance(config["box_settings"], dict)
     assert config["box_settings"]["riken_1-08"]["ipaddr_wss"] == "10.1.0.26"
+    assert isinstance(config["box_aliases"], dict)
     assert config["box_aliases"]["A1"] == "riken_1-08"
+    assert isinstance(config["port_settings"], dict)
     assert config["port_settings"]["Q00"]["port"] == 5
+    assert isinstance(config["target_settings"], dict)
     assert config["target_settings"]["CQ00_0"]["frequency"] == 10000000000.0
+    assert isinstance(config["relation_channel_target"], MutableSequence)
     assert ["MUX00GENCH0", "RQ00"] in config["relation_channel_target"]
+    assert isinstance(config["relation_channel_port"], MutableSequence)
     assert [
         "MUX00GENCH0",
         {"port_name": "MUX00GEN", "channel_number": 0},
@@ -69,6 +75,7 @@ def test_define_clockmaster() -> None:
     ipaddr = "10.3.0.255"
     qc.define_clockmaster(ipaddr=ipaddr, reset=True)
     clockmaster_setting = qc.system_config_database.asdict()["clockmaster_setting"]
+    assert isinstance(clockmaster_setting, dict)
     assert clockmaster_setting["ipaddr"] == ipaddr
 
 
@@ -84,7 +91,10 @@ def test_define_box() -> None:
     qc.define_box(box_name=box_name1, ipaddr_wss=ipaddr1, boxtype=boxtype1)
     qc.define_box(box_name=box_name2, ipaddr_wss=ipaddr2, boxtype=boxtype2)
     box_settings = qc.system_config_database.asdict()["box_settings"]
+    assert isinstance(box_settings, dict)
+    assert isinstance(box_settings[box_name1], dict)
     assert box_settings[box_name1]["ipaddr_wss"] == ipaddr1
+    assert isinstance(box_settings[box_name2], dict)
     assert box_settings[box_name2]["ipaddr_wss"] == ipaddr2
 
 
@@ -100,7 +110,10 @@ def test_define_port() -> None:
     qc.define_port(port_name=port_name1, box_name=box_name_1, port_number=port_number1)
     qc.define_port(port_name=port_name2, box_name=box_name_2, port_number=port_number2)
     port_settings = qc.system_config_database.asdict()["port_settings"]
+    assert isinstance(port_settings, dict)
+    assert isinstance(port_settings[port_name1], dict)
     assert port_settings[port_name1]["port"] == port_number1
+    assert isinstance(port_settings[port_name2], dict)
     assert port_settings[port_name2]["port"] == port_number2
 
 
@@ -110,6 +123,7 @@ def test_define_channel() -> None:
     qc.define_port(port_name="PORT", box_name="BOX", port_number=5)
     qc.define_channel(channel_name="CHANNEL", port_name="PORT", channel_number=1)
     relation_channel_port = qc.system_config_database.asdict()["relation_channel_port"]
+    assert isinstance(relation_channel_port, MutableSequence)
     assert (
         "CHANNEL",
         {"port_name": "PORT", "channel_number": 1},
@@ -125,4 +139,5 @@ def test_define_target() -> None:
         channel_name="CHANNEL",
     )
     target_settings = qc.system_config_database.asdict()["target_settings"]
+    assert isinstance(target_settings, dict)
     assert target_settings["TARGET"]["frequency"] == 10000000000.0
