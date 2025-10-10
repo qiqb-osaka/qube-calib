@@ -13,10 +13,13 @@ def test_create_database() -> None:
 
 def test_load_skew_setting() -> None:
     """load_skew_setting should load the skew setting."""
-    with open(
-        "./qube-calib/tests/unit/offline/instrument/quel/quel1/tool/skew.yaml", "r"
-    ) as f:
-        config = yaml.safe_load(f)
+    filename = "tests/unit/offline/instrument/quel/quel1/tool/skew.yaml"
+    try:
+        with open(filename, "r") as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        with open(f"qube-calib/{filename}", "r") as f:
+            config = yaml.safe_load(f)
     skew_setting = SkewSetting.load(config)
     assert isinstance(skew_setting, SkewSetting)
     assert skew_setting.monitor_port == ("Q73A", 12)
