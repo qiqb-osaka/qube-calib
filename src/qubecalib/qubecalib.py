@@ -510,9 +510,9 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
         enable_sum: bool,
-        enable_classification: bool,
-        line_param0: tuple[float, float, float],
-        line_param1: tuple[float, float, float],
+        enable_classification: bool = False,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> dict[tuple[str, Quel1PortType, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
@@ -572,9 +572,9 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
         enable_sum: bool,
-        enable_classification: bool,
-        line_param0: tuple[float, float, float],
-        line_param1: tuple[float, float, float],
+        enable_classification: bool = False,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> dict[tuple[str, Quel1PortType, int], CaptureParam]:
         # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
@@ -663,7 +663,9 @@ class Converter:
             }
         if enable_classification:
             ids_e7 = {
-                id: CaptureParamTools.enable_classification(capprm=e7, line_param0=line_param0, line_param1=line_param1)
+                id: CaptureParamTools.enable_classification(
+                    capprm=e7, line_param0=line_param0, line_param1=line_param1
+                )
                 for id, e7 in ids_e7.items()
             }
         return ids_e7
@@ -1277,8 +1279,8 @@ class Sequencer(Command):
         *,
         enable_sum: bool = False,
         enable_classification: bool = False,
-        line_param0: tuple[float, float, float] = None,
-        line_param1: tuple[float, float, float] = None,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> None:
         self.repeats = repeats
         self.interval = interval
