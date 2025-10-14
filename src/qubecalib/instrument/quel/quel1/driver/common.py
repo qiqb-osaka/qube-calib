@@ -20,7 +20,7 @@ class AwgId(NamedTuple):
 
 class RunitId(NamedTuple):
     box: str
-    port: int
+    port: Quel1PortType
     runit: int
 
 
@@ -36,7 +36,7 @@ class RunitSetting(NamedTuple):
 
 class TriggerSetting(NamedTuple):
     trigger_awg: AwgId  # box, port, channel
-    triggerd_port: int  # port
+    triggerd_port: Quel1PortType  # port
 
 
 def _convert_to_box_setting_dict(
@@ -121,8 +121,8 @@ class Action:
     def action(
         self,
     ) -> tuple[
-        dict[tuple[str, int], CaptureReturnCode],
-        dict[tuple[str, int, int], npt.NDArray[np.complex64]],
+        dict[tuple[str, Quel1PortType], CaptureReturnCode],
+        dict[tuple[str, Quel1PortType, int], npt.NDArray[np.complex64]],
     ]:
         if isinstance(self._action, tuple):
             name = self._action[0]
@@ -132,3 +132,5 @@ class Action:
             }
         elif isinstance(self._action, multi.Action):
             return self._action.action()
+        else:
+            raise ValueError("invalid action state")
