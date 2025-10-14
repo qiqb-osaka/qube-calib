@@ -38,4 +38,4 @@ def test_acquire_freq_setting() -> None:
 
 def test_create_target_setting() -> None:
     """create_target_setting should create a target setting."""
-    sysdb = SystemConfigDatabase()
+    SystemConfigDatabase()
