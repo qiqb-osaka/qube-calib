@@ -348,10 +348,8 @@ class CaptureParamTools:
         cls,
         capprm: CaptureParam,
         *,
-        func_sel: Any,
-        coef_a: Any,
-        coef_b: Any,
-        const_c: Any,
+        line_param0: tuple[float, float, float],
+        line_param1: tuple[float, float, float],
     ) -> CaptureParam:
         """
         Enable classification in the capture parameters.
@@ -370,11 +368,18 @@ class CaptureParamTools:
         dspunits.append(DspUnit.CLASSIFICATION)
         capprm.sel_dsp_units_to_enable(*dspunits)
         capprm.set_decision_func_params(
-            func_sel=func_sel,
-            coef_a=coef_a,
-            coef_b=coef_b,
-            const_c=const_c,
+            func_sel=0,
+            coef_a=np.float32(line_param0[0]),
+            coef_b=np.float32(line_param0[1]),
+            const_c=np.float32(line_param0[2]),
         )
+        capprm.set_decision_func_params(
+            func_sel=1,
+            coef_a=np.float32(line_param1[0]),
+            coef_b=np.float32(line_param1[1]),
+            const_c=np.float32(line_param1[2]),
+        )
+
         return capprm
 
 

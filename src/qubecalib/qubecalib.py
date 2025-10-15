@@ -510,6 +510,9 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
         enable_sum: bool,
+        enable_classification: bool = False,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> dict[tuple[str, Quel1PortType, int], WaveSequence | CaptureParam]:
         # sampled_sequence と resource_map から e7 データを生成する
         # gen と cap を分離する
@@ -532,6 +535,9 @@ class Converter:
             dsp_demodulation=dsp_demodulation,
             software_demodulation=software_demodulation,
             enable_sum=enable_sum,
+            enable_classification=enable_classification,
+            line_param0=line_param0,
+            line_param1=line_param1,
         )
         genseq = cls.convert_to_gen_device_specific_sequence(
             gen_sampled_sequence=gen_sampled_sequence,
@@ -566,6 +572,9 @@ class Converter:
         dsp_demodulation: bool,
         software_demodulation: bool,
         enable_sum: bool,
+        enable_classification: bool = False,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> dict[tuple[str, Quel1PortType, int], CaptureParam]:
         # 線路に起因する遅延
         ndelay_or_nwait_by_target = {
@@ -651,6 +660,13 @@ class Converter:
         if enable_sum:
             ids_e7 = {
                 id: CaptureParamTools.enable_sum(capprm=e7) for id, e7 in ids_e7.items()
+            }
+        if enable_classification:
+            ids_e7 = {
+                id: CaptureParamTools.enable_classification(
+                    capprm=e7, line_param0=line_param0, line_param1=line_param1
+                )
+                for id, e7 in ids_e7.items()
             }
         return ids_e7
 
@@ -1262,6 +1278,9 @@ class Sequencer(Command):
         phase_compensation: bool = True,  # TODO not work
         *,
         enable_sum: bool = False,
+        enable_classification: bool = False,
+        line_param0: tuple[float, float, float] = (1, 0, 0),
+        line_param1: tuple[float, float, float] = (0, 1, 0),
     ) -> None:
         self.repeats = repeats
         self.interval = interval
@@ -1270,6 +1289,9 @@ class Sequencer(Command):
         self.software_demodulation = software_demodulation
         self.phase_compensation = phase_compensation
         self.enable_sum = enable_sum
+        self.enable_classification = enable_classification
+        self.line_param0 = line_param0
+        self.line_param1 = line_param1
 
     def generate_cap_resource_map(self, boxpool: BoxPool) -> dict[str, Any]:
         _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
@@ -1400,6 +1422,9 @@ class Sequencer(Command):
                 dsp_demodulation=self.dsp_demodulation,
                 software_demodulation=self.software_demodulation,
                 enable_sum=self.enable_sum,
+                enable_classification=self.enable_classification,
+                line_param0=self.line_param0,
+                line_param1=self.line_param1,
             )
         )
         # phase_offset_list_by_target = {
