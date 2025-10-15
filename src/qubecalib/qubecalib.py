@@ -135,6 +135,22 @@ class QubeCalib:
             software_demodulation=software_demodulation,
         )
 
+    def show_log(
+        self,
+        name: str = "qubecalib",
+        *,
+        level: int = logging.DEBUG,
+        handler: logging.Handler = logging.StreamHandler(),
+        formatter: logging.Formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        ),
+    ) -> logging.Logger:
+        handler.setFormatter(formatter)
+        logger = logging.getLogger(name)
+        logger.addHandler(handler)
+        logger.setLevel(level)
+        return logger
+
     def modify_target_frequency(self, target_name: str, frequency: float) -> None:
         self.system_config_database._target_settings[target_name]["frequency"] = (
             frequency
@@ -148,6 +164,7 @@ class QubeCalib:
         self,
         sequence: neopulse.Sequence,
         *,
+        driver: direct.Quel1System | None = None,
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
@@ -178,6 +195,7 @@ class QubeCalib:
                 time_to_start=time_to_start,
                 interval=interval,
                 sysdb=self.system_config_database,
+                driver=driver,
             )
         )
 
@@ -1165,7 +1183,11 @@ class Sequencer(Command):
             if len(box_names) > 1:
                 raise ValueError(f"target({target_name}) is assigned to multiple boxes")
             box_name = list(box_names)[0]
-            port_numbers = sysdb.get_port_numbers_by_target(target_name)
+            port_numbers = {
+                p
+                for p in sysdb.get_port_numbers_by_target(target_name)
+                if self.is_output_port(box_name, p)
+            }
             if not port_numbers:
                 raise ValueError(f"target({target_name}) is not assigned to any port")
             if len(port_numbers) > 1:
@@ -1185,6 +1207,9 @@ class Sequencer(Command):
             else:
                 port_skew = 0
             gss.padding += box_skew + port_skew
+            logger.debug(
+                f"Padding of target({target_name}): box({box_name}), port({port_number}), padding({gss.padding})"
+            )
 
         # resource_map は以下の形式
         # {
@@ -1267,6 +1292,15 @@ class Sequencer(Command):
         if readin_offsets:
             for target_name, cseq in cap_sampled_sequence.items():
                 cseq.readin_offsets = readin_offsets[target_name]
+
+    def is_output_port(self, box_name: str, port: Quel1PortType) -> bool:
+        if self.driver is None:
+            if box_name in self.sysdb._box_settings:
+                raise ValueError(f"box({box_name}) is not defined")
+            box = self.sysdb.create_box(box_name, reconnect=True)
+            return port in box.get_output_ports()
+        else:
+            return self.driver.is_output_port(box_name, port)
 
     def set_measurement_option(
         self,
