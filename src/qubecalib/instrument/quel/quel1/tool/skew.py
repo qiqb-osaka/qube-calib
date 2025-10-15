@@ -343,41 +343,56 @@ class Skew:
         self._scale[port] = scale
 
     @classmethod
-    def acquire_freq_setting(cls, target_freq: float) -> dict[str, float | str]:
+    def acquire_freq_setting(
+        cls,
+        target_freq: float,  # Hz
+        *,
+        minimum_lo_freq: float = 2e9,  # Hz
+        minimum_cnco_freq: float = 2e9,  # Hz
+        maximum_cnco_freq: float = 3.5e9,  # Hz
+        lo_step_size: float = 500e6,  # Hz
+        cnco_step_size: float = 125e6,  # Hz
+    ) -> dict[str, float | str]:
         # !!! CAUTION !!! Frequency is in HMz, not in GHz
-        target_freq = target_freq * 1e3
-        MINIMUM_LO_FREQ = 7500
-        MINIMUM_CNCO_FREQ = 2000
-        LO_STEP_SIZE = 500
-        CNCO_STEP_SIZE = 125
-        if MINIMUM_LO_FREQ + MINIMUM_CNCO_FREQ < target_freq:
-            sideband = "U"
-            lo_freq = (
-                MINIMUM_LO_FREQ
-                + (target_freq - (MINIMUM_LO_FREQ + MINIMUM_CNCO_FREQ))
-                // LO_STEP_SIZE
-                * LO_STEP_SIZE
-            )
-            cnco_freq = (target_freq - lo_freq) // CNCO_STEP_SIZE * CNCO_STEP_SIZE
-            fnco_freq = 0
-        else:
-            sideband = "L"
-            lo_freq = (
-                MINIMUM_LO_FREQ
-                + (
-                    (target_freq - (MINIMUM_LO_FREQ - MINIMUM_CNCO_FREQ))
-                    // LO_STEP_SIZE
-                    + 1
-                )
-                * LO_STEP_SIZE
-            )
-            cnco_freq = (lo_freq - target_freq) // CNCO_STEP_SIZE * CNCO_STEP_SIZE
-            fnco_freq = 0
-
+        # target_freq = target_freq * 1e3
+        # MINIMUM_LO_FREQ = 2000  # 2000 まで可能 x 80 / 4 * 100 MHz
+        # MINIMUM_CNCO_FREQ = 2000
+        # LO_STEP_SIZE = 500
+        # CNCO_STEP_SIZE = 125
+        # if minimum_lo_freq + minimum_cnco_freq < target_freq:
+        #     sideband = "U"
+        #     lo_freq = (
+        #         minimum_lo_freq
+        #         + (target_freq - (minimum_lo_freq + minimum_cnco_freq))
+        #         // lo_step_size
+        #         * lo_step_size
+        #     )
+        #     cnco_freq = (target_freq - lo_freq) // cnco_step_size * cnco_step_size
+        #     fnco_freq = 0
+        # else:
+        #     sideband = "L"
+        #     lo_freq = (
+        #         minimum_lo_freq
+        #         + (
+        #             (target_freq - (minimum_lo_freq - minimum_cnco_freq))
+        #             // lo_step_size
+        #             + 1
+        #         )
+        #         * lo_step_size
+        #     )
+        #     cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
+        #     fnco_freq = 0
+        sideband = "L"
+        lo_freq = (target_freq + minimum_cnco_freq) // lo_step_size * lo_step_size
+        cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
+        fnco_freq = 0
+        logger.debug(
+            f"acquire_freq_setting(): target_freq={target_freq}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, sideband={sideband}"
+        )
         return {
-            "lo_freq": lo_freq * 1e-3,
-            "cnco_freq": cnco_freq * 1e-3,
-            "fnco_freq": fnco_freq * 1e-3,
+            "lo_freq": lo_freq,
+            "cnco_freq": cnco_freq,
+            "fnco_freq": fnco_freq,
             "sideband": sideband,
         }
 
@@ -517,13 +532,14 @@ class Skew:
         #     f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         # )
         if lo_freq == 0:
+            # Case of Destination port is Direct synthesys port
             # Direct synthesys ポートは cnco_freq は 2000MHz - 6000MHz 程度まで OK だが
             # Monitor ポートは 3000MHz まで
             target_freq = cnco_freq
             lo_freq = (target_freq + 2000e6) // 500e6 * 500e6
             cnco_freq = lo_freq - target_freq
         if "channels" in dump_port:
-            ch = dump_port["channels"]
+            # ch = dump_port["channels"]
             # n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
             dump_port["lo_freq"] = lo_freq
             dump_port["cnco_freq"] = cnco_freq
@@ -550,19 +566,31 @@ class Skew:
             # cnco_freq を 500MHz 減らし， lo_freq で補う
             if lo_freq == 0:
                 pass
-            elif cnco_freq >= DEFAULT_FNCO_LIMIT:
-                target_freq = ch_freqs[0]["target_freq"]
-                if lo_freq < target_freq:  # USB
-                    lo_freq += 500e6
-                    cnco_freq -= 500e6
-                else:  # LSB
-                    lo_freq -= 500e6
-                    cnco_freq -= 500e6
+
+            # elif cnco_freq >= DEFAULT_FNCO_LIMIT:
+            #     target_freq = ch_freqs[0]["target_freq"]
+            #     if lo_freq < target_freq:  # USB
+            #         lo_freq += 500e6
+            #         cnco_freq -= 500e6
+            #     else:  # LSB
+            #         lo_freq -= 500e6
+            #         cnco_freq -= 500e6
+            target_freq = ch_freqs[0]["target_freq"]
+            freq_setting = cls.acquire_freq_setting(target_freq)
+            lo_freq = float(freq_setting["lo_freq"])
             dump_port["lo_freq"] = lo_freq
+            system.config_cache[boxname]["ports"][nport]["lo_freq"] = lo_freq
+            cnco_freq = float(freq_setting["cnco_freq"])
             dump_port["cnco_freq"] = cnco_freq
+            system.config_cache[boxname]["ports"][nport]["cnco_freq"] = cnco_freq
+            fnco_freq = float(freq_setting["fnco_freq"])
             for k, v in dump_port["runits"].items():
-                v["fnco_freq"] = ch_freqs[k]["fnco_freq"]
+                v["fnco_freq"] = fnco_freq
+                system.config_cache[boxname]["ports"][nport]["runits"][k][
+                    "fnco_freq"
+                ] = fnco_freq
             config_box = {nport: dump_port}
+
             box.config_box(config_box)
             # box.config_port(
             #     port=nport,
@@ -665,17 +693,22 @@ class Skew:
         )
         ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
         DEFAULT_CHANNEL = 0
-        lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
-            cast(float, freqs["lo_freq"]) * 1e-9 if "lo_freq" in freqs else 0,
-            cast(float, freqs["cnco_freq"]) * 1e-9,
-            ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
-            ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
-            cast(str, freqs["sideband"]),
-        )
+        # lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
+        #     cast(float, freqs["lo_freq"]) * 1e-9 if "lo_freq" in freqs else 0,
+        #     cast(float, freqs["cnco_freq"]) * 1e-9,
+        #     ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
+        #     ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
+        #     cast(str, freqs["sideband"]),
+        # )
+        target_freq = ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9
         target = cls.acquire_target(sysdb, target_port)
         sysdb._target_settings[target] = dict(frequency=target_freq)
         monitor = cls.acquire_target(sysdb, monitor_port)
         sysdb._target_settings[monitor] = dict(frequency=target_freq)
+        lo_freq = system.get_lo_freq(*monitor_port)
+        cnco_freq = system.get_cnco_freq(*monitor_port)
+        sideband = system.get_sideband(*monitor_port)
+        fnco_freq = system.get_fnco_freq(*monitor_port, channel=DEFAULT_CHANNEL)
         logger.debug(
             f"_setup_monitor_port(): Target {target}:{target_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )

@@ -364,4 +364,6 @@ class Action:
         for name, action in self._actions.items():
             t = base_time + timediff[name] + timing_shift[name]
             action.box.reserve_emission(awgs[name], t)
-            logger.info(f"reserving emission of {name} at {t}")
+            logger.info(
+                f"reserving emission of {name} at {t} : base_time={base_time}, timediff={timediff[name]}, timing_shift={timing_shift[name]}"
+            )

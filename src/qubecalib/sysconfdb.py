@@ -429,6 +429,10 @@ class SystemConfigDatabase:
             clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
             boxes=[self.create_named_box(b) for b in box_names],
         )
+        system.trigger = self.trigger
+        for box_name, timing_shift in self.timing_shift.items():
+            system.timing_shift[box_name] = timing_shift
+        system.displacement = self.time_to_start
         return system
 
     def asdict(self) -> dict[str, object]:
