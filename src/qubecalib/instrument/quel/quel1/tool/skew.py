@@ -245,6 +245,7 @@ class SkewAdjustResetter:
 
 class Skew:
     DEFAULT_CHANNEL = 0
+    DEFAULT_REPEATS = 100
 
     def __init__(
         self,
@@ -776,6 +777,7 @@ class Skew:
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
         reset_skew_parameter: bool = False,
+        repeats: int = DEFAULT_REPEATS,
     ) -> None:
         target_ports = (
             self.target_from_box(list(self._system.boxes))
@@ -789,12 +791,14 @@ class Skew:
                     target_ports,
                     show_reference=show_reference,
                     extra_capture_range=extra_capture_range,
+                    repeats=repeats,
                 )
         else:
             self._measure_targets(
                 target_ports,
                 show_reference=show_reference,
                 extra_capture_range=extra_capture_range,
+                repeats=repeats,
             )
 
     def _measure_targets(
@@ -803,9 +807,11 @@ class Skew:
         *,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,
+        repeats: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
         self._open_rfswitches(target_ports)
+        repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         with tqdm(target_ports) as t:
             for target_port in t:
                 t.postfix = f"Target: {target_port}"
@@ -814,6 +820,7 @@ class Skew:
                     target_port,
                     show_reference=show_reference,
                     extra_capture_range=extra_capture_range,
+                    repeats=repeats,
                 )
                 logger.debug(
                     f"-------- _measure_targets(): Target{target_port} finished --------"
@@ -826,6 +833,7 @@ class Skew:
         reference_port: PORT | None = None,
         monitor_port: PORT | None = None,
         trigger_nport: int | None = None,
+        repeats: int | None = None,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
     ) -> None:
@@ -845,7 +853,8 @@ class Skew:
         seq = self._create_check_sequence(
             target_port, capture_range=extra_capture_range
         )
-        iqs = self._execute(seq)
+        repeats = self.DEFAULT_REPEATS if repeats is None else repeats
+        iqs = self._execute(seq, repeats=repeats)
         self._store(target_port, iqs)
 
     def _create_check_sequence(
@@ -882,12 +891,15 @@ class Skew:
                 )
         return seq
 
-    def _execute(self, sequence: Sequence) -> npt.NDArray:
+    def _execute(
+        self, sequence: Sequence, *, repeats: int | None = None
+    ) -> npt.NDArray:
         """Executes the measurement, assuming that the sequence contains only a single capture."""
         self._executor.add_sequence(sequence, driver=self._system)
         rst = None
+        repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         for _, data, _ in self._executor.step_execute(
-            repeats=self._repeats,
+            repeats=repeats,
             interval=REPETITION_PERIOD,
             integral_mode="single",
             dsp_demodulation=False,
