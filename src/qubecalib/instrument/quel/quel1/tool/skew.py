@@ -896,7 +896,7 @@ class Skew:
     ) -> npt.NDArray:
         """Executes the measurement, assuming that the sequence contains only a single capture."""
         self._executor.add_sequence(sequence, driver=self._system)
-        rst = None
+        rst: npt.NDArray | None = None
         repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         for _, data, _ in self._executor.step_execute(
             repeats=repeats,
