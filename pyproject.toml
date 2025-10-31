@@ -25,10 +25,11 @@ dependencies = [
     "pytest",
     "pytest-mock",
     "PyGObject == 3.50.0",
-    "aiocoap >= 0.4.7, < 0.4.16",
+    "aiocoap >= 0.4.7, < 0.4.16;python_version>='3.10'",
+    "aiocoap == 0.4.7, ;python_version<'3.9'",
     "e7awgsw @ git+https://github.com/e-trees/e7awg_sw.git@7dccc53c",
-    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@0.8.13#subdirectory=quel_clock_master",
-    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@0.8.13#subdirectory=quel_ic_config",
+    "quel_clock_master @ git+https://github.com/quel-inc/quelware.git@v0.8.14#subdirectory=quel_clock_master",
+    "quel_ic_config @ git+https://github.com/quel-inc/quelware.git@v0.8.14#subdirectory=quel_ic_config",
 ]
 
 [tool.setuptools.dynamic]
