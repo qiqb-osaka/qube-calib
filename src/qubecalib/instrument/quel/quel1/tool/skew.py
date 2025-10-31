@@ -254,9 +254,6 @@ class Skew:
         # executor: Executor | None = None,
         qubecalib: QubeCalib
         | None = None,  # TODO: qubex の experiment.py:138 を修正してもらう
-        monitor_port: PORT = ("", 0),
-        trigger_nport: int = 0,
-        reference_port: PORT = ("", 0),
     ) -> None:  # TODO ここは多分変わります
         if qubecalib is not None:
             sysdb = qubecalib.sysdb
@@ -265,9 +262,9 @@ class Skew:
         self._system: Final[Quel1System] = system
         self._sysdb: Final[SystemConfigDatabase] = sysdb
         self._executor: Final[Executor] = Executor(self.sysdb, quel1system=system)
-        self._monitor_port: PORT = monitor_port
-        self._trigger_nport: int = trigger_nport
-        self._reference_port: PORT = reference_port
+        self._monitor_port: PORT = ("", 0)
+        self._trigger_nport: int = 0
+        self._reference_port: PORT = ("", 0)
         self._scale: dict[PORT, float] = {}
         self._measured_waveform: dict[PORT, npt.NDArray] = {}
         # self._estimated_waveform: dict[PORT, npt.NDArray] = {}
@@ -293,9 +290,18 @@ class Skew:
         setting: SkewSetting,
         system: Quel1System,
         sysdb: SystemConfigDatabase,
+        monitor_port: PORT | None = None,
+        trigger_nport: int | None = None,
+        reference_port: PORT | None = None,
     ) -> Skew:
         skew = Skew(system=system, sysdb=sysdb)
         skew.setting = setting
+        if monitor_port is not None:
+            skew._monitor_port = monitor_port
+        if trigger_nport is not None:
+            skew._trigger_nport = trigger_nport
+        if reference_port is not None:
+            skew._reference_port = reference_port
         return skew
 
     @property
