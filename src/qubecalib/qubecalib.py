@@ -1992,14 +1992,14 @@ class Executor:
         software_demodulation: bool = False,
     ) -> Executor:
         """queue に登録されている command を実行する iterator を返す"""
+        # work queue を舐めて必要な box を生成する
+        boxes = self.collect_boxes()
+        # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
+        if len(boxes) > 1 and self.sysdb._clockmaster_setting is not None:
+            self._boxpool.create_clock_master(
+                ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
+            )
         if self.quel1system is None:
-            # work queue を舐めて必要な box を生成する
-            boxes = self.collect_boxes()
-            # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
-            if len(boxes) > 1 and self.sysdb._clockmaster_setting is not None:
-                self._boxpool.create_clock_master(
-                    ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
-                )
             # boxpool を生成する
             for box_name in boxes:
                 setting = self.sysdb._box_settings[box_name]
@@ -2021,13 +2021,6 @@ class Executor:
                             f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
                         )
         else:
-            # work queue を舐めて必要な box を生成する
-            boxes = self.collect_boxes()
-            # もし box が複数で clockmaster_setting が設定されていれば QuBEMasterClient を生成する
-            if len(boxes) > 1 and self.sysdb._clockmaster_setting is not None:
-                self._boxpool.create_clock_master(
-                    ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
-                )
             for box_name in self.quel1system.boxes:
                 box = self.quel1system.boxes[box_name]
                 sqc = SequencerClient(box.wss._wss_addr)

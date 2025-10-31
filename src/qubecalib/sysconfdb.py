@@ -429,6 +429,15 @@ class SystemConfigDatabase:
             clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
             boxes=[self.create_named_box(b) for b in box_names],
         )
+        # system.trigger = self.trigger
+        # for box_name, timing_shift in self.timing_shift.items():
+        #     system.timing_shift[box_name] = timing_shift
+        # system.displacement = self.time_to_start
+        # return system
+        return self.refresh_quel1system(system)
+
+    def refresh_quel1system(self, system: direct.Quel1System) -> direct.Quel1System:
+        # clockmaster と boxes は再利用する
         system.trigger = self.trigger
         for box_name, timing_shift in self.timing_shift.items():
             system.timing_shift[box_name] = timing_shift

@@ -461,12 +461,11 @@ class Skew:
         cls,
         *,
         dump_port: dict[str, dict[str, float]],
-        system: Quel1System,
     ) -> tuple[
         dict[str, str | float | dict[str, float] | dict[int, dict[str, float]]],
         dict[int, dict[str, float]],
     ]:
-        # dump_port = box.dump_port(nport)
+        # target_freq 計算して ch_freqs に追加する
         kws = ["lo_freq", "cnco_freq", "runits", "channels", "sideband"]
         freqs: dict[
             str, str | float | dict[str, float] | dict[int, dict[str, float]]
@@ -487,13 +486,13 @@ class Skew:
         lsb_freqs = {i: lo_freq - (cnco_freq + v[kw]) for i, v in ch_freqs.items()}
         # sideband　が設定されているならそれを使う
         if lo_freq == 0:
+            # lo_freq == 0 の場合は sideband を空にする
             freqs["sideband"] = ""
         if "sideband" in freqs:
             sideband = freqs["sideband"]
         else:
             # 9.5GHz を境に USB/LSB を決定する
             sideband = "L" if lo_freq + cnco_freq < 9500e6 else "U"
-            # lo_freq == 0 の場合は sideband を空にする
             freqs["sideband"] = sideband
         if sideband == "L":
             for i, v in lsb_freqs.items():
@@ -511,105 +510,61 @@ class Skew:
         dest_port: PORT,
         system: Quel1System,
     ) -> dict[str, str | float | dict[str, float] | dict[int, dict[str, float]]]:
-        # src_port: (box_name, port_number)
-        # dest_port: (box_name, port_number)
-        boxname, nport = src_port
-        # box = system.box[boxname]
-        # dump_port = box.dump_port(nport)
-        dump_port = system.dump_port(boxname, nport)
+        dump_port = deepcopy(system.dump_port(*src_port))
         freqs, ch_freqs = cls._parse_freqs_from_dump_port(
             dump_port=dump_port,
-            system=system,
         )
 
         logger.debug(
             f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
 
-        boxname, nport = dest_port
-        box = system.box[boxname]
         lo_freq, cnco_freq = (
             cast(float, freqs["lo_freq"]) if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]) + ch_freqs[0]["fnco_freq"],
         )
-        for v in ch_freqs.values():
-            v["fnco_freq"] = 0
-        dump_port = deepcopy(system.dump_port(boxname, nport))
-        # print(
-        #     f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
-        # )
         if lo_freq == 0:
             # Case of Destination port is Direct synthesys port
             # Direct synthesys ポートは cnco_freq は 2000MHz - 6000MHz 程度まで OK だが
             # Monitor ポートは 3000MHz まで
             target_freq = cnco_freq
-            lo_freq = (target_freq + 2000e6) // 500e6 * 500e6
+            lo_freq = (target_freq + 1500e6) // 500e6 * 500e6
             cnco_freq = lo_freq - target_freq
+        else:
+            target_freq = ch_freqs[0]["target_freq"]
+
+        boxname, nport = dest_port
+        box = system.box[boxname]
+        dump_port = deepcopy(system.dump_port(*dest_port))
         if "channels" in dump_port:
-            # ch = dump_port["channels"]
-            # n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
             dump_port["lo_freq"] = lo_freq
             dump_port["cnco_freq"] = cnco_freq
             for k, v in dump_port["channels"].items():
-                v["fnco_freq"] = ch_freqs[k]["fnco_freq"]
-            # Dict[str, Dict[Quel1PortType, Dict[str, Any]]] | Dict[Quel1PortType, Dict[str, Any]]
+                v["fnco_freq"] = 0
             config_box: dict[int | tuple[int, int], dict[str, Any]] = {nport: dump_port}
             box.config_box(config_box)
-            # box.config_port(
-            #     port=nport,
-            #     lo_freq=lo_freq,
-            #     cnco_freq=cnco_freq,
-            # )
-            # for i in range(n):
-            #     box.config_channel(
-            #         port=nport,
-            #         channel=i,
-            #         fnco_freq=ch_freqs[i]["fnco_freq"],
-            #     )
         elif "runits" in dump_port:
-            # ch = dump_port["runits"]
-            # n = len(ch_freqs) if len(ch_freqs) < len(ch) else len(ch)
-            # ADC の cnco 周波数は 3000MHz 未満である必要がある
-            # cnco_freq を 500MHz 減らし， lo_freq で補う
             if lo_freq == 0:
-                pass
-
-            # elif cnco_freq >= DEFAULT_FNCO_LIMIT:
-            #     target_freq = ch_freqs[0]["target_freq"]
-            #     if lo_freq < target_freq:  # USB
-            #         lo_freq += 500e6
-            #         cnco_freq -= 500e6
-            #     else:  # LSB
-            #         lo_freq -= 500e6
-            #         cnco_freq -= 500e6
-            target_freq = ch_freqs[0]["target_freq"]
+                raise ValueError("LO frequency is required for receiver ports")
             freq_setting = cls.acquire_freq_setting(target_freq)
+
             lo_freq = float(freq_setting["lo_freq"])
             dump_port["lo_freq"] = lo_freq
             system.config_cache[boxname]["ports"][nport]["lo_freq"] = lo_freq
+
             cnco_freq = float(freq_setting["cnco_freq"])
             dump_port["cnco_freq"] = cnco_freq
             system.config_cache[boxname]["ports"][nport]["cnco_freq"] = cnco_freq
+
             fnco_freq = float(freq_setting["fnco_freq"])
             for k, v in dump_port["runits"].items():
                 v["fnco_freq"] = fnco_freq
                 system.config_cache[boxname]["ports"][nport]["runits"][k][
                     "fnco_freq"
                 ] = fnco_freq
-            config_box = {nport: dump_port}
 
+            config_box = {nport: dump_port}
             box.config_box(config_box)
-            # box.config_port(
-            #     port=nport,
-            #     lo_freq=lo_freq,
-            #     cnco_freq=cnco_freq,
-            # )
-            # for i in range(n):
-            #     box.config_runit(
-            #         port=nport,
-            #         runit=i,
-            #         fnco_freq=ch_freqs[i]["fnco_freq"],
-            #     )
 
         logger.debug(
             f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={freqs['sideband']}"
@@ -741,13 +696,8 @@ class Skew:
         sysdb: SystemConfigDatabase,
     ) -> None:
         # """nco 設定に合わせて target 周波数を設定する"""
-        boxname, nport = trigger_port
-        # box = system.box[boxname]
-        # dump_port = box.dump_port(nport)
-        dump_port = system.dump_port(boxname, nport)
-        freqs, ch_freqs = cls._parse_freqs_from_dump_port(
-            dump_port=dump_port, system=system
-        )
+        dump_port = system.dump_port(*trigger_port)
+        freqs, ch_freqs = cls._parse_freqs_from_dump_port(dump_port=dump_port)
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
             cast(float, freqs["lo_freq"] if "lo_freq" in freqs else 0),
             cast(float, freqs["cnco_freq"]),
@@ -991,14 +941,6 @@ class Skew:
             system=system,
             sysdb=sysdb,
         )
-        # target の ctrl の rfswitch を open にする？
-        # for ctrl_box, _ in [reference_port] + [p for p in target_ports]:
-        #     m = system.box[ctrl_box].get_monitor_input_ports()
-        #     if m:
-        #         for port in m:
-        #             if isinstance(port, tuple):
-        #                 raise ValueError("fogi port is not supported yet")
-        #             system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
 
     @classmethod
     def _define_targets(
