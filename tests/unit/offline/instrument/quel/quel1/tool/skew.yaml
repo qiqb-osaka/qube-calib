@@ -1,3 +1,4 @@
+clockmaster_ip: "10.3.0.68"
 box_setting:
   Q2A:
     slot: 3
@@ -37,10 +38,14 @@ box_setting:
     wait: 10
 monitor_port: Q73A-12
 reference_port: Q73A-1
+trigger_nport: 3
+time_to_start: 4
 scale:
   Q2A-4: 0.125
   Q73A-1: 1.0
   Q73A-3: 1.0
+repeats:
+  Q73A-1: 100
 target_port: !!set
   Q2A-4: null
   Q73A-1: null
@@ -55,5 +60,6 @@ target_port: !!set
   U13B-7: null
   U14A-6: null
   U15A-6: null
-time_to_start: 4
-trigger_nport: 3
+rf_switches:
+  Q2A:
+    0: "open"
