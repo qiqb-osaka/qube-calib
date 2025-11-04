@@ -16,6 +16,7 @@ import yaml
 from tqdm.auto import tqdm
 
 from .....instrument.quel.quel1.driver import Quel1System
+from .....instrument.quel.quel1.driver.single import Quel1PortType
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
 from .....qubecalib import Executor, PortSetting, QubeCalib, SystemConfigDatabase
 
@@ -151,6 +152,9 @@ class SkewSetting:
     trigger_nport: int
     target_port: set[PORT]
     scale: dict[PORT, float]
+    repeats: dict[PORT, int]
+    rf_switches: dict[str, dict[Quel1PortType, str]]
+    clockmaster_ip: str
 
     @staticmethod
     def load(
@@ -176,12 +180,29 @@ class SkewSetting:
             str2port(p): v
             for p, v in cast(dict[str, float], yaml_dict["scale"]).items()
         }
+        repeats = {
+            str2port(p): v
+            for p, v in cast(dict[str, int], yaml_dict["repeats"]).items()
+        }
+        rf_switches = {
+            box_name: {
+                nport: state
+                for nport, state in cast(dict[Quel1PortType, str], box_setting).items()
+            }
+            for box_name, box_setting in cast(
+                dict[str, dict[Quel1PortType, str]], yaml_dict["rf_switches"]
+            ).items()
+        }
+        clocckmaster_ip = cast(str, yaml_dict["clockmaster_ip"])
         return SkewSetting(
             reference_port=reference_port,
             monitor_port=monitor_port,
             trigger_nport=trigger_nport,
             target_port=target_port,
             scale=scale,
+            repeats=repeats,
+            rf_switches=rf_switches,
+            clockmaster_ip=clocckmaster_ip,
         )
 
     @property
@@ -284,6 +305,76 @@ class Skew:
                 )
         self._repeats = 100
 
+    # def show_log(
+    #     self,
+    #     name: str = __name__,
+    #     *,
+    #     level: int = logging.DEBUG,
+    #     handler: logging.Handler = logging.StreamHandler(),
+    #     formatter: logging.Formatter = logging.Formatter(
+    #         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    #     ),
+    # ) -> Logger:
+    #     handler.setFormatter(formatter)
+    #     logger = getLogger(__name__)
+    #     logger.addHandler(handler)
+    #     logger.setLevel(level)
+    #     return logger
+
+    @classmethod
+    def from_yaml(
+        cls,
+        skew_yaml: str,
+        *,
+        box_yaml: str | None = None,
+        sysdb: SystemConfigDatabase | None = None,
+        system: Quel1System | None = None,
+        boxes: list[str] = [],
+        ignore_boxes: list[str] = [],
+    ) -> Skew:
+        setting = SkewSetting.from_yaml(skew_yaml)
+
+        if sysdb is None and box_yaml is None:
+            raise ValueError("Either sysdb or box_yaml must be provided")
+        if sysdb is not None and box_yaml is not None:
+            raise ValueError("Only one of sysdb or box_yaml must be provided")
+        if sysdb is None:
+            sysdb = SystemConfigDatabase()
+            sysdb.define_clockmaster(setting.clockmaster_ip, reset=False)
+            sysdb.load_box_yaml(cast(str, box_yaml))
+            sysdb.load_skew_yaml(skew_yaml)
+        else:
+            sysdb.load_skew_yaml(skew_yaml)
+
+        # if boxes and ignore_boxes:
+        #     raise ValueError("Only one of boxes or ignore_boxes must be provided")
+
+        if system is not None and boxes != []:
+            raise ValueError("Only one of system or boxes must be provided")
+
+        available_boxes = set(
+            list(setting.target_box_names) + [setting.monitor_box_name]
+        )
+
+        if boxes:
+            if not all([box in available_boxes for box in boxes]):
+                raise ValueError("Some boxes in boxes are not available")
+        else:
+            boxes = list(available_boxes)
+        if not all([box in boxes for box in ignore_boxes]):
+            raise ValueError("Some boxes in ignore_boxes are not available")
+        boxes = [box for box in boxes if box not in ignore_boxes]
+
+        if system is None:
+            system = cast(Quel1System, system)
+            system = sysdb.create_quel1system(*boxes)
+        else:
+            system = sysdb.refresh_quel1system(system)
+
+        self = Skew(system=system, sysdb=sysdb)
+        self.setting = setting
+        return self
+
     @classmethod
     def create(
         cls,
@@ -308,6 +399,10 @@ class Skew:
     @property
     def sysdb(self) -> SystemConfigDatabase:
         return self._sysdb
+
+    @property
+    def system(self) -> Quel1System:
+        return self._system
 
     @property
     def setting(self) -> SkewSetting | None:
@@ -720,6 +815,10 @@ class Skew:
             target_ports=self._target_port,
         )
 
+    def config_rfswitches(self) -> None:
+        for box_name, box in self.system.boxes.items():
+            box.config_rfswitches(cast(SkewSetting, self.setting).rf_switches[box_name])
+
     def measure(
         self,
         *,
@@ -766,6 +865,9 @@ class Skew:
             for target_port in t:
                 t.postfix = f"Target: {target_port}"
                 t.update()
+                setting = cast(SkewSetting, self.setting)
+                if target_port in setting.repeats:
+                    repeats = setting.repeats[target_port]
                 self._measure(
                     target_port,
                     show_reference=show_reference,

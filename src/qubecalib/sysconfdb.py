@@ -421,20 +421,20 @@ class SystemConfigDatabase:
             ),
         )
 
-    def create_quel1system(self, *box_names: str) -> direct.Quel1System:
+    def create_quel1system(
+        self,
+        *box_names: str,
+    ) -> direct.Quel1System:
         if self._clockmaster_setting is None:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける?
         system = direct.Quel1System.create(
             clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
-            boxes=[self.create_named_box(b) for b in box_names],
+            boxes=[self.create_named_box(b, reconnect=True) for b in box_names],
         )
-        # system.trigger = self.trigger
-        # for box_name, timing_shift in self.timing_shift.items():
-        #     system.timing_shift[box_name] = timing_shift
-        # system.displacement = self.time_to_start
-        # return system
-        return self.refresh_quel1system(system)
+        system.initialize()
+        self.refresh_quel1system(system)
+        return system
 
     def refresh_quel1system(self, system: direct.Quel1System) -> direct.Quel1System:
         # clockmaster と boxes は再利用する

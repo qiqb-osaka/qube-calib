@@ -81,6 +81,23 @@ class QubeCalib:
         if path_to_database_file is not None:
             self.system_config_database.load(path_to_database_file)
 
+    @classmethod
+    def from_yaml(
+        cls,
+        *,
+        box_yaml: str = "",
+        skew_yaml: str = "",
+        clockmaster_ip: str = "",
+    ) -> "QubeCalib":
+        self = cls()
+        if box_yaml != "":
+            self.sysdb.load_box_yaml(box_yaml)
+        if skew_yaml != "":
+            self.sysdb.load_skew_yaml(skew_yaml)
+        if clockmaster_ip != "":
+            self.sysdb.define_clockmaster(clockmaster_ip, reset=False)
+        return self
+
     def new_session(self) -> Executor:
         """Create a new session."""
         return Executor(self.system_config_database.copy())
