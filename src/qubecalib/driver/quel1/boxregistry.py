@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import datetime
 import time
 from logging import getLogger
-from threading import Lock
-from typing import cast
+from threading import RLock
+from typing import Callable, cast
 
 from quel_ic_config import Quel1Box
 
@@ -29,7 +30,9 @@ class BoxHandle:
     def refresh(self, new_deadline: float) -> None:
         """Push the expiration deadline forward."""
         self.deadline = new_deadline
-        logger.debug(f"Box {self.name} refreshed (new deadline {new_deadline}).")
+        logger.debug(
+            f"Box {self.name} refreshed (new deadline {datetime.datetime.fromtimestamp(new_deadline)})."
+        )
 
     def release(self) -> None:
         """Drop the reference to allow GC to release the Box."""
@@ -41,27 +44,39 @@ class BoxHandle:
 class BoxRegistry:
     """Registry that holds strong references to Boxes and manages their lifetime."""
 
-    def __init__(self, default_deadline: float | None = 3600) -> None:
+    def __init__(
+        self,
+        default_deadline: float | None = 3600,
+        on_state_change: Callable[[int], None] | None = None,
+    ) -> None:
         self._handles: dict[str, BoxHandle] = {}
-        self._lock = Lock()
+        self._lock = RLock()
         self._default_deadline = default_deadline
+        self._on_state_change = on_state_change
 
     def register(
         self, name: str, box: Quel1Box, deadline: float | None = None
     ) -> BoxHandle:
         """Register a Box under lifetime management."""
+        resolved_deadline = self._resolve_deadline(deadline)
+        handle = BoxHandle(name, box, resolved_deadline)
         with self._lock:
-            resolved_deadline = self._resolve_deadline(deadline)
-            handle = BoxHandle(name, box, resolved_deadline)
             self._handles[name] = handle
-        logger.debug(f"Box {name} registered (deadline {resolved_deadline} sec).")
+            count = len(self._handles)
+        logger.debug(
+            f"Box {name} registered (deadline {datetime.datetime.fromtimestamp(resolved_deadline)} sec)."
+        )
+        if self._on_state_change:
+            # call outside lock to avoid potential deadlock
+            self._on_state_change(count)
         return handle
 
     def _resolve_deadline(self, deadline: float | None) -> float:
+        now = time.time()
         if deadline is not None:
-            return deadline
+            return now + deadline
         if self._default_deadline is not None:
-            return time.time() + self._default_deadline
+            return now + self._default_deadline
         return float("inf")
 
     def touch(self, name: str, deadline_extension: float | None = None) -> bool:
@@ -91,18 +106,27 @@ class BoxRegistry:
         """Release a specific Box by name."""
         with self._lock:
             handle = self._handles.pop(name, None)
+            count = len(self._handles)
         if handle:
             handle.release()
             logger.debug(f"Box {name} removed from registry.")
+        if self._on_state_change:
+            self._on_state_change(count)
 
     def cleanup_expired(self) -> None:
         """Release all Boxes whose lifetime has expired."""
         now = time.time()
+        expired: list[str]
         with self._lock:
             expired = [n for n, h in self._handles.items() if h.deadline < now]
         for name in expired:
             logger.debug(f"Releasing expired Box: {name}")
             self.release(name)
+
+    def has_active(self) -> bool:
+        """Return True if any Box is still alive."""
+        with self._lock:
+            return any(h.is_alive() for h in self._handles.values())
 
     def list_active(self) -> list[str]:
         """Return the list of all currently alive Box names."""
