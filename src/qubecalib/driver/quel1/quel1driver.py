@@ -6,6 +6,7 @@ from typing import Any
 
 from quel_ic_config import Quel1Box, Quel1PortType
 
+from ...driverbase import Driver
 from .boxregistry import BoxRegistry
 from .killtimer import KillTimer
 
@@ -28,7 +29,7 @@ def show_log(
     return logger
 
 
-class Quel1Driver:
+class Quel1Driver(Driver):
     def __init__(
         self,
         # clock_master_ip: str | None = None,
