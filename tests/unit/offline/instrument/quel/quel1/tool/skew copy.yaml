@@ -1,0 +1,227 @@
+clockmaster_ip: "10.3.0.68"
+box_setting:
+  S98R:
+    slot: 1
+    wait: 0
+    port_wait:
+      1: 93
+      2: 94
+      3: 94
+      6: 75
+      7: 75
+      8: 75
+      9: 75
+  S121R:
+    slot: 1
+    wait: 0
+    port_wait:
+      1: 82
+      2: 82
+      3: 82
+      6: 103
+      7: 103
+      8: 103
+      9: 103
+  S132R:
+    slot: 2
+    wait: 0
+    port_wait:
+      1: 27
+      2: 27
+      3: 27
+      6: 29
+      7: 29
+      8: 29
+      9: 29
+  S135R:
+    slot: 2
+    wait: 0
+    port_wait:
+      1: 0
+      2: 0
+      3: 0
+      6: 19
+      7: 20
+      8: 20
+      9: 20
+  S136R:
+    slot: 1
+    wait: 0
+    port_wait:
+      1: 36
+      2: 36
+      3: 36
+      6: 40
+      7: 40
+      8: 40
+      9: 40
+  S137R:
+    slot: 1
+    wait: 0
+    port_wait:
+      1: 87
+      2: 87
+      3: 87
+      6: 70
+      7: 70
+      8: 70
+      9: 70
+  S173R:
+    slot: 0
+    wait: 0
+    port_wait:
+      1: 0
+      2: 0
+      3: 0
+      6: 0
+      7: 0
+      8: 0
+      9: 0
+monitor_port: S135R-4
+reference_port: S135R-3
+trigger_nport: 3
+time_to_start: 0
+scale:
+  S135R-2: 1.0
+repeats:
+  S98R-1: 3333
+  S98R-2: 333
+  S121R-1: 3333
+  S135R-1: 3333
+target_port: !!set
+  S98R-1: null
+  S98R-2: null
+  S98R-3: null
+  S98R-6: null
+  S98R-7: null
+  S98R-8: null
+  S98R-9: null
+  S121R-1: null
+  S121R-2: null
+  S121R-3: null
+  S121R-6: null
+  S121R-7: null
+  S121R-8: null
+  S121R-9: null
+  S132R-1: null
+  S132R-2: null
+  S132R-3: null
+  S132R-6: null
+  S132R-7: null
+  S132R-8: null
+  S132R-9: null
+  S135R-1: null
+  S135R-2: null
+  S135R-3: null
+  S135R-6: null
+  S135R-7: null
+  S135R-8: null
+  S135R-9: null
+  S136R-1: null
+  S136R-2: null
+  S136R-3: null
+  S136R-6: null
+  S136R-7: null
+  S136R-8: null
+  S136R-9: null
+  S137R-1: null
+  S137R-2: null
+  S137R-3: null
+  S137R-6: null
+  S137R-7: null
+  S137R-8: null
+  S137R-9: null
+  S173R-3: null
+  S173R-6: null
+rf_switches:
+  S98R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S121R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S132R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S135R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S136R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S137R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11
+  S173R:
+    0: "open"
+    1: "pass"
+    2: "pass"
+    3: "pass"
+    4: "open"
+    # 5
+    6: "pass"
+    7: "pass"
+    8: "pass"
+    9: "pass"
+    10: "open"
+    # 11

@@ -1,6 +1,6 @@
 """Calibration package for QuBE"""
 
-__version__ = "3.1.14"
+__version__ = "3.1.15beta6"
 
 from . import neopulse
 from .qubecalib import QubeCalib, Sequencer
