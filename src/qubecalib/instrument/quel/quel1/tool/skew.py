@@ -163,14 +163,19 @@ class SkewSetting:
         return SkewSetting.from_yaml_dict(config)
 
     @staticmethod
-    def from_yaml(filename: str) -> "SkewSetting":
+    def from_yaml(filename: str, *, clockmaster_ip: str | None = None) -> "SkewSetting":
         with open(Path(os.getcwd()) / Path(filename), "r") as file:
             config = yaml.safe_load(file)
-        return SkewSetting.from_yaml_dict(config)
+        return SkewSetting.from_yaml_dict(
+            config,
+            clockmaster_ip=clockmaster_ip,
+        )
 
     @staticmethod
     def from_yaml_dict(
         yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+        *,
+        clockmaster_ip: str | None = None,
     ) -> "SkewSetting":
         reference_port = str2port(cast(str, yaml_dict["reference_port"]))
         monitor_port = str2port(cast(str, yaml_dict["monitor_port"]))
@@ -180,20 +185,33 @@ class SkewSetting:
             str2port(p): v
             for p, v in cast(dict[str, float], yaml_dict["scale"]).items()
         }
-        repeats = {
-            str2port(p): v
-            for p, v in cast(dict[str, int], yaml_dict["repeats"]).items()
-        }
-        rf_switches = {
-            box_name: {
-                nport: state
-                for nport, state in cast(dict[Quel1PortType, str], box_setting).items()
+        if "repeats" in yaml_dict:
+            repeats = {
+                str2port(p): v
+                for p, v in cast(dict[str, int], yaml_dict["repeats"]).items()
             }
-            for box_name, box_setting in cast(
-                dict[str, dict[Quel1PortType, str]], yaml_dict["rf_switches"]
-            ).items()
-        }
-        clocckmaster_ip = cast(str, yaml_dict["clockmaster_ip"])
+        else:
+            repeats = {}
+        if "rf_switches" in yaml_dict:
+            rf_switches = {
+                box_name: {
+                    nport: state
+                    for nport, state in cast(
+                        dict[Quel1PortType, str], box_setting
+                    ).items()
+                }
+                for box_name, box_setting in cast(
+                    dict[str, dict[Quel1PortType, str]], yaml_dict["rf_switches"]
+                ).items()
+            }
+        else:
+            rf_switches = {}
+        if clockmaster_ip is not None:
+            pass
+        elif "clockmaster_ip" in yaml_dict:
+            clockmaster_ip = cast(str, yaml_dict["clockmaster_ip"])
+        else:
+            raise ValueError("clockmaster_ip is required")
         return SkewSetting(
             reference_port=reference_port,
             monitor_port=monitor_port,
@@ -202,7 +220,7 @@ class SkewSetting:
             scale=scale,
             repeats=repeats,
             rf_switches=rf_switches,
-            clockmaster_ip=clocckmaster_ip,
+            clockmaster_ip=clockmaster_ip,
         )
 
     @property
@@ -331,8 +349,9 @@ class Skew:
         system: Quel1System | None = None,
         boxes: list[str] = [],
         ignore_boxes: list[str] = [],
+        clockmaster_ip: str | None = None,
     ) -> Skew:
-        setting = SkewSetting.from_yaml(skew_yaml)
+        setting = SkewSetting.from_yaml(skew_yaml, clockmaster_ip=clockmaster_ip)
 
         if sysdb is None and box_yaml is None:
             raise ValueError("Either sysdb or box_yaml must be provided")
