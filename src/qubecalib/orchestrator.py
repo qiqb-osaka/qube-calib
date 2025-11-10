@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from logging import getLogger
+from typing import Any
+
+from typing_extensions import deprecated
 
 from .driverbase import Driver
 
@@ -23,7 +26,14 @@ class DriverRegistry:
 
 @dataclass
 class ExecutionContext:
+    session_key: str = ""  # Unique identifier for the execution session TODO: required?
     driver_registry: DriverRegistry = field(default_factory=DriverRegistry)
+    cache: dict[str, Any] = field(default_factory=dict)
+    logdir: str | None = None
 
-    def driver(self, kind: str) -> Driver:
+    def get_driver(self, kind: str) -> Driver:
         return self.driver_registry.get(kind)
+
+    @deprecated("Use 'get_driver' instead.")
+    def driver(self, kind: str) -> Driver:
+        return self.get_driver(kind)
