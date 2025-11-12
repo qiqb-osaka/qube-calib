@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from logging import Formatter, Handler, Logger, StreamHandler, getLogger
-from typing import Any
+from typing import Any, Iterable
 
 from quel_ic_config import Quel1Box, Quel1PortType
+from quel_ic_config_utils import configuration
 
 from ...driverbase import Driver
 from .boxregistry import BoxRegistry
@@ -49,6 +50,21 @@ class Quel1Driver(Driver):
         #     else None
         # )
 
+    @classmethod
+    def from_configuration(
+        cls,
+        boxes: list[str],
+        deadline: float | None = 3600,
+        interval_sec: int = 10,
+    ) -> Quel1Driver:
+        conf = configuration.load_default_configuration()
+        driver = Quel1Driver(
+            deadline=deadline,
+            interval_sec=interval_sec,
+        )
+        driver.setup_boxes([b for b in conf.boxes if b.name in boxes])
+        return driver
+
     def _on_registry_state_change(self, count: int) -> None:
         """Called whenever the number of active Boxces changes."""
         if count > 0 and self.kill_timer is None:
@@ -63,27 +79,46 @@ class Quel1Driver(Driver):
             # self.kill_timer.join(timeout=self.interval_sec + 5.0)
             self.kill_timer = None
 
-    def setup_boxes(self, mapping: dict[str, dict[str, Any]]) -> None:
-        boxes = {}
-        for name, config in mapping.items():
-            if "name" not in config:
-                config["name"] = name
-            elif config["name"] != name:
-                raise ValueError(f"Box name mismatch: {name} != {config['name']}")
-            config["skip_init"] = True
-            box = Quel1Box.create(**config)
-            boxes[name] = box
-        keys = list(boxes.keys())
-        for name in keys:
-            self.registry.register(name, boxes[name])
-            boxes.pop(name)
+    def setup_boxes(self, boxes: Iterable[configuration.Box]) -> None:
+        name_to_box = {
+            box.name: box for box in configuration.get_boxes_in_parallel(boxes)
+        }
 
-        logger.debug(f"Boxes setting up: {list(mapping.keys())}")
-        for name in mapping.keys():
-            box = self.box(name)
-            box.initialize()
-            box.reconnect()
+        keys = list(name_to_box.keys())
+        for name in keys:
+            self.registry.register(name, name_to_box[name])
+
+        logger.debug(f"Boxes setting up: {list(name_to_box.keys())}")
+        configuration.reconnect_and_get_link_status_in_parallel(name_to_box.values())
         logger.debug("Boxes initialized and reconnected.")
+
+        name_to_box.clear()
+
+        # names = list(name_to_box.keys())
+        # for name in names:
+        #     del name_to_box[name]
+
+    # def setup_boxes(self, mapping: dict[str, dict[str, Any]]) -> None:
+    #     boxes = {}
+    #     for name, config in mapping.items():
+    #         if "name" not in config:
+    #             config["name"] = name
+    #         elif config["name"] != name:
+    #             raise ValueError(f"Box name mismatch: {name} != {config['name']}")
+    #         config["skip_init"] = True
+    #         box = Quel1Box.create(**config)
+    #         boxes[name] = box
+    #     keys = list(boxes.keys())
+    #     for name in keys:
+    #         self.registry.register(name, boxes[name])
+    #         boxes.pop(name)
+
+    #     logger.debug(f"Boxes setting up: {list(mapping.keys())}")
+    #     for name in mapping.keys():
+    #         box = self.box(name)
+    #         box.initialize()
+    #         box.reconnect()
+    #     logger.debug("Boxes initialized and reconnected.")
 
     def release(self, name: str | None = None) -> None:
         if name is not None:
