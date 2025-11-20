@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from logging import Formatter, Handler, Logger, StreamHandler, getLogger
 from typing import Any, Iterable
 
-from quel_ic_config import Quel1Box, Quel1PortType
+from quel_ic_config import (
+    Quel1Box,
+    Quel1PortType,
+)
 from quel_ic_config_utils import configuration
 
 from ...driverbase import Driver
@@ -34,15 +37,16 @@ class Quel1Driver(Driver):
     def __init__(
         self,
         # clock_master_ip: str | None = None,
-        deadline: float | None = 3600,
-        interval_sec: int = 10,
+        # deadline: float | None = 3600,
+        # interval_sec: int = 10,
     ) -> None:
         self.registry = BoxRegistry(
-            default_deadline=deadline,
+            default_deadline=None,
             on_state_change=self._on_registry_state_change,
         )
         self.kill_timer: KillTimer | None = None
-        self.interval_sec = interval_sec
+        # self.interval_sec = interval_sec
+        self.interval_sec = 10
 
         # self._clock_master: QuelClockMasterV1 | None = (
         #     QuelClockMasterV1(ipaddr=clock_master_ip, boxes=[])
@@ -54,13 +58,14 @@ class Quel1Driver(Driver):
     def from_configuration(
         cls,
         boxes: list[str],
-        deadline: float | None = 3600,
-        interval_sec: int = 10,
+        # *,
+        # deadline: float | None = 18000,  # 5 hours
+        # interval_sec: int = 10,
     ) -> Quel1Driver:
         conf = configuration.load_default_configuration()
         driver = Quel1Driver(
-            deadline=deadline,
-            interval_sec=interval_sec,
+            # deadline=deadline,
+            # interval_sec=interval_sec,
         )
         driver.setup_boxes([b for b in conf.boxes if b.name in boxes])
         return driver
@@ -69,15 +74,17 @@ class Quel1Driver(Driver):
         """Called whenever the number of active Boxces changes."""
         if count > 0 and self.kill_timer is None:
             # start a new KillTimer
-            logger.debug("Starting KillTimer thread.")
-            self.kill_timer = KillTimer(self.registry, interval_sec=self.interval_sec)
-            self.kill_timer.start()
+            # logger.debug("Starting KillTimer thread.")
+            # self.kill_timer = KillTimer(self.registry, interval_sec=self.interval_sec)
+            # self.kill_timer.start()
+            pass
         elif count == 0 and self.kill_timer is not None:
             # stop and deleter KillTimer
-            logger.debug("Stopping KillTimer thread (no active boxes).")
-            self.kill_timer.stop()
+            # logger.debug("Stopping KillTimer thread (no active boxes).")
+            # self.kill_timer.stop()
             # self.kill_timer.join(timeout=self.interval_sec + 5.0)
-            self.kill_timer = None
+            # self.kill_timer = None
+            pass
 
     def setup_boxes(self, boxes: Iterable[configuration.Box]) -> None:
         name_to_box = {
@@ -94,32 +101,6 @@ class Quel1Driver(Driver):
 
         name_to_box.clear()
 
-        # names = list(name_to_box.keys())
-        # for name in names:
-        #     del name_to_box[name]
-
-    # def setup_boxes(self, mapping: dict[str, dict[str, Any]]) -> None:
-    #     boxes = {}
-    #     for name, config in mapping.items():
-    #         if "name" not in config:
-    #             config["name"] = name
-    #         elif config["name"] != name:
-    #             raise ValueError(f"Box name mismatch: {name} != {config['name']}")
-    #         config["skip_init"] = True
-    #         box = Quel1Box.create(**config)
-    #         boxes[name] = box
-    #     keys = list(boxes.keys())
-    #     for name in keys:
-    #         self.registry.register(name, boxes[name])
-    #         boxes.pop(name)
-
-    #     logger.debug(f"Boxes setting up: {list(mapping.keys())}")
-    #     for name in mapping.keys():
-    #         box = self.box(name)
-    #         box.initialize()
-    #         box.reconnect()
-    #     logger.debug("Boxes initialized and reconnected.")
-
     def release(self, name: str | None = None) -> None:
         if name is not None:
             self.registry.release(name)
@@ -127,9 +108,13 @@ class Quel1Driver(Driver):
             for name in list(self.registry._handles.keys()):
                 self.registry.release(name)
             if self.kill_timer:
-                self.kill_timer.stop()
-                # self.kill_timer.join(timeout=self.interval_sec + 5.0)
-                self.kill_timer = None
+                # self.kill_timer.stop()
+                # # self.kill_timer.join(timeout=self.interval_sec + 5.0)
+                # self.kill_timer = None
+                pass
+
+    def list_active(self) -> list[str]:
+        return list(self.registry.list_active())
 
     def box(self, name: str) -> Quel1Box:
         return self.registry.get(name)
