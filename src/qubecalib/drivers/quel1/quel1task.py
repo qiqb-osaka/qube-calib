@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
 from quel_ic_config import AwgParam, CapParam, Quel1PortType
+from quel_ic_config_utils import deskew_tools
 
 from ...core.task import ConcreteTaskBase, TemplateTaskBase
 from .bandref import BandRef
@@ -24,8 +25,31 @@ class BandParam:
 
 
 @dataclass
-class Quel1SynchronizedPulseCaptureTemplate(TemplateTaskBase):
+class Quel1PulseCaptureTemplate(TemplateTaskBase):
     pass
+
+
+@dataclass
+class Quel1ClearWaveformTask(ConcreteTaskBase):
+    """Quel1Box 上の波形データを全てクリアする Task"""
+
+    device_key: str = "quel1"
+    band_refs: list[BandRef] = field(default_factory=list)
+
+    def execute(self) -> Any:
+        drv = self.driver()
+        if not isinstance(drv, Quel1Driver):
+            raise TypeError("Driver must be an instance of Quel1Driver.")
+
+        for band in self.band_refs:
+            box = drv.box(band.box_key)
+            port = band.port
+            band_key = band.band_key
+            for name in box.get_names_of_wavedata(port, band_key):
+                if name == "null":
+                    continue
+                box.delete_wavedata(port, band_key, name)
+        return {"cleared_boxes": {band.box_key for band in self.band_refs}}
 
 
 @dataclass
@@ -63,7 +87,7 @@ class Quel1WaveformLoadTask(ConcreteTaskBase):
 class Quel1PulseCaptureTask(ConcreteTaskBase):
     device_key: str = "quel1"
     box_adjust: dict[str, BoxAdjustParam] = field(default_factory=dict)
-    commands: dict[BandRef, CapParam | AwgParam] = field(default_factory=dict)
+    commands: Mapping[BandRef, CapParam | AwgParam] = field(default_factory=dict)
 
     delay_sec: float = 0.15
 
@@ -120,6 +144,7 @@ class Quel1PulseCaptureTask(ConcreteTaskBase):
             # AwgParam 補正と設定
             for band, awg_param in box_to_awg.get(box_name, []):
                 port = band.port
+                deskew_tools.register_blank_wavedata(box, port, band.band_key)
                 word_to_wait = wait_amount_resolver.get_word_to_wait(box_name, port)
                 adjusted_awg = delay_compensator.adjust_awg_param(
                     awg_param, word_to_wait

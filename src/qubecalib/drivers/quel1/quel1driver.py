@@ -96,8 +96,11 @@ class Quel1Driver(Driver):
             self.registry.register(name, name_to_box[name])
 
         logger.debug(f"Boxes setting up: {list(name_to_box.keys())}")
-        configuration.reconnect_and_get_link_status_in_parallel(name_to_box.values())
+        name_to_status = configuration.reconnect_and_get_link_status_in_parallel(
+            name_to_box.values()
+        )
         logger.debug("Boxes initialized and reconnected.")
+        logger.debug(f"link_status: {name_to_status}")
 
         name_to_box.clear()
 
@@ -116,14 +119,20 @@ class Quel1Driver(Driver):
     def list_active(self) -> list[str]:
         return list(self.registry.list_active())
 
-    def box(self, name: str) -> Quel1Box:
+    def get_box(self, name: str) -> Quel1Box:
         return self.registry.get(name)
+
+    def box(self, name: str) -> Quel1Box:
+        return self.get_box(name)
 
     def dump_box(self, name: str) -> dict[str, Any]:
         return self.box(name).dump_box()
 
     def dump_port(self, name: str, port: Quel1PortType) -> dict[str, Any]:
         return self.box(name).dump_port(port)
+
+    def relinkup(self, name: str) -> dict[int, bool]:
+        return self.get_box(name).relinkup()
 
 
 @dataclass
