@@ -10,7 +10,7 @@ from quel_ic_config import (
 )
 from quel_ic_config_utils import configuration
 
-from ...driverbase import Driver
+from ...core.context import Driver
 from .boxregistry import BoxRegistry
 from .killtimer import KillTimer
 

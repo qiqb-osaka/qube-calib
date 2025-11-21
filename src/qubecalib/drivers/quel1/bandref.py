@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quel_ic_config import Quel1PortType
 
@@ -20,18 +20,18 @@ class BandRef:
         return f"{self.box_key}:port{p}:band{self.band_key}"
 
 
-@dataclass
-class BandAssignment:
-    band_to_channels: dict[BandRef, list[str]] = field(default_factory=dict)
+# @dataclass
+# class BandAssignment:
+#     band_to_channels: dict[BandRef, list[str]] = field(default_factory=dict)
 
-    def add(self, band: BandRef, channel_key: str) -> None:
-        self.band_to_channels.setdefault(band, []).append(channel_key)
+#     def add(self, band: BandRef, channel_key: str) -> None:
+#         self.band_to_channels.setdefault(band, []).append(channel_key)
 
-    def channels_of(self, band: BandRef) -> list[str]:
-        return self.band_to_channels.get(band, [])
+#     def channels_of(self, band: BandRef) -> list[str]:
+#         return self.band_to_channels.get(band, [])
 
-    def bands(self) -> list[BandRef]:
-        return list(self.band_to_channels.keys())
+#     def bands(self) -> list[BandRef]:
+#         return list(self.band_to_channels.keys())
 
 
 # @dataclass
