@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import weakref
 from dataclasses import dataclass
 from logging import Formatter, Handler, Logger, StreamHandler, getLogger
 from typing import Any, Iterable
@@ -35,7 +34,7 @@ def show_log(
 
 
 class Quel1Driver(Driver):
-    instances: list[weakref.ref[Quel1Driver]] = []
+    # instances: list[weakref.ref[Quel1Driver]] = []
 
     # @classmethod
     # def release_all(cls) -> None:
@@ -48,11 +47,11 @@ class Quel1Driver(Driver):
         # deadline: float | None = 3600,
         # interval_sec: int = 10,
     ) -> None:
-        self.__class__.instances.append(weakref.ref(self))
-        self.id = len(self.__class__.instances)
+        # self.__class__.instances.append(weakref.ref(self))
+        # self.id = len(self.__class__.instances)
         self.registry = BoxRegistry(
             default_deadline=None,
-            on_state_change=self._on_registry_state_change,
+            # on_state_change=self._on_registry_state_change,
         )
         self.kill_timer: KillTimer | None = None
         # self.interval_sec = interval_sec
@@ -80,21 +79,19 @@ class Quel1Driver(Driver):
         driver.setup_boxes([b for b in conf.boxes if b.name in boxes])
         return driver
 
-    def _on_registry_state_change(self, count: int) -> None:
-        """Called whenever the number of active Boxces changes."""
-        if count > 0 and self.kill_timer is None:
-            # start a new KillTimer
-            # logger.debug("Starting KillTimer thread.")
-            # self.kill_timer = KillTimer(self.registry, interval_sec=self.interval_sec)
-            # self.kill_timer.start()
-            pass
-        elif count == 0 and self.kill_timer is not None:
-            # stop and deleter KillTimer
-            # logger.debug("Stopping KillTimer thread (no active boxes).")
-            # self.kill_timer.stop()
-            # self.kill_timer.join(timeout=self.interval_sec + 5.0)
-            # self.kill_timer = None
-            pass
+    # def _on_registry_state_change(self, count: int) -> None:
+    #     """Called whenever the number of active Boxces changes."""
+    #     if count > 0 and self.kill_timer is None:
+    #         start a new KillTimer
+    #         logger.debug("Starting KillTimer thread.")
+    #         self.kill_timer = KillTimer(self.registry, interval_sec=self.interval_sec)
+    #         self.kill_timer.start()
+    #     elif count == 0 and self.kill_timer is not None:
+    #         stop and deleter KillTimer
+    #         logger.debug("Stopping KillTimer thread (no active boxes).")
+    #         self.kill_timer.stop()
+    #         self.kill_timer.join(timeout=self.interval_sec + 5.0)
+    #         self.kill_timer = None
 
     def setup_boxes(self, boxes: Iterable[configuration.Box]) -> None:
         name_to_box = {
@@ -120,11 +117,11 @@ class Quel1Driver(Driver):
         else:
             for name in list(self.registry._handles.keys()):
                 self.registry.release(name)
-            if self.kill_timer:
-                # self.kill_timer.stop()
-                # # self.kill_timer.join(timeout=self.interval_sec + 5.0)
-                # self.kill_timer = None
-                pass
+            # if self.kill_timer:
+            #     # self.kill_timer.stop()
+            #     # # self.kill_timer.join(timeout=self.interval_sec + 5.0)
+            #     # self.kill_timer = None
+            #     pass
 
     def list_active(self) -> list[str]:
         return list(self.registry.list_active())
