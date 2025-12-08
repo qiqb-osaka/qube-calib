@@ -112,9 +112,18 @@ class Quel1PulseCaptureTask(ConcreteTaskBase):
         if not isinstance(deskew_env, Quel1DeskewEnv):
             raise TypeError("backend_env['quel1.deskew'] must be Quel1DeskewEnv.")
 
-        wait_amount_resolver = deskew_env.wait_amount_resolver
-        delay_compensator = deskew_env.delay_compensator
-        count_proposer = deskew_env.count_proposer
+        deskew_config = deskew_env.deskew_config
+
+        # wait_amount_resolver = deskew_env.wait_amount_resolver
+        # delay_compensator = deskew_env.delay_compensator
+        # count_proposer = deskew_env.count_proposer
+        wait_amount_resolver = (
+            deskew_tools.WaitAmountResolver.from_deskew_configuration(deskew_config)
+        )
+        count_proposer = deskew_tools.StableCountProposer.from_deskew_configuration(
+            deskew_config
+        )
+        delay_compensator = deskew_tools.E7awgDelayCompensator()
 
         # --- 1) Box ごとに AwgParam / CapParam を仕分け ---
         box_to_awg: dict[str, list[tuple[BandRef, AwgParam]]] = {}

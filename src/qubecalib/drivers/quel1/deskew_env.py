@@ -11,6 +11,7 @@ from ...core.context import BackendEnv
 class Quel1DeskewEnv(BackendEnv):
     """Quel1 向けの deskew 関連ユーティリティをまとめた環境。"""
 
-    wait_amount_resolver: deskew_tools.WaitAmountResolver
-    delay_compensator: deskew_tools.E7awgDelayCompensator
-    count_proposer: deskew_tools.StableCountProposer
+    deskew_config: deskew_tools.DeskewConfiguration
+    # wait_amount_resolver: deskew_tools.WaitAmountResolver
+    # delay_compensator: deskew_tools.E7awgDelayCompensator
+    # count_proposer: deskew_tools.StableCountProposer

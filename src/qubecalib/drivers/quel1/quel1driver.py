@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass
 from logging import Formatter, Handler, Logger, StreamHandler, getLogger
 from typing import Any, Iterable
@@ -34,12 +35,21 @@ def show_log(
 
 
 class Quel1Driver(Driver):
+    instances: list[weakref.ref[Quel1Driver]] = []
+
+    # @classmethod
+    # def release_all(cls) -> None:
+    #     for instance in cls.instances:
+    #         instance().release()
+
     def __init__(
         self,
         # clock_master_ip: str | None = None,
         # deadline: float | None = 3600,
         # interval_sec: int = 10,
     ) -> None:
+        self.__class__.instances.append(weakref.ref(self))
+        self.id = len(self.__class__.instances)
         self.registry = BoxRegistry(
             default_deadline=None,
             on_state_change=self._on_registry_state_change,
@@ -133,6 +143,10 @@ class Quel1Driver(Driver):
 
     def relinkup(self, name: str) -> dict[int, bool]:
         return self.get_box(name).relinkup()
+
+    # def __del__(self) -> None:
+    #     # self.__class__.instances.remove(weakref.ref(self))
+    #     self.release()
 
 
 @dataclass

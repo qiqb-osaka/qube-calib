@@ -22,6 +22,29 @@ class QcAwgSegment:
 
 
 @dataclass
+class AwgProgramTemplate:
+    SAMPLES_PER_WORD: int = 4  # 1 word = 4 samples = 8 ns
+
+    wait_words: int = 0  # 1 word = 4  samples = 8 ns, min=0
+    waves: list[NDArray] = field(default_factory=list)  # waveform samples (500MHz)
+    chunks: list[QcAwgChunk] = field(default_factory=list)
+
+    # def __init__(self, awg_param: AwgParam, waves: list[NDArray]) -> None:
+    #     self.wait_words = awg_param.num_wait_word
+    #     self.waves = waves
+    #     self.chunks = [
+    #         QcAwgChunk(
+    #             wave_id=chunk,
+    #             prev_blank_words=chunk["blank_words"],
+    #             pad_front=chunk.get("pad_front", 0),
+    #             pad_back=chunk.get("pad_back", 0),
+    #             loops=chunk.get("loops", 1),
+    #         )
+    #         for chunk in awg_param.chunks
+    #     ]
+
+
+@dataclass
 class QcAwgProgram:
     SAMPLES_PER_WORD: int = 4  # 1 word = 4 samples = 8 ns
 
