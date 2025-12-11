@@ -7,23 +7,75 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Any, Final, MutableSequence, Optional, Set
+from typing import Any, Final, MutableSequence, Optional, Set, cast
 
 import yaml
-from quel_clock_master import QuBEMasterClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
     Quel1BoxType,
-    Quel1BoxWithRawWss,
     Quel1ConfigOption,
 )
 
+from .e7utils import QuBEMasterClient
 from .instrument.quel.quel1 import driver as direct
 from .instrument.quel.quel1.driver import Quel1PortType
 
 DEFAULT_SIDEBAND = "U"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BandId:
+    box_name: str
+    port: Quel1PortType
+    band: int
+
+
+class ConfigHelper:
+    def __init__(self, sysdb: SystemConfigDatabase) -> None:
+        self.sysdb = sysdb
+
+    def register_target(
+        self,
+        target_name: str,
+        *,
+        box_name: str,
+        port: Quel1PortType,
+        band: int,
+        frequency: float | None = None,
+    ) -> None:
+        sysdb = self.sysdb
+        channel_names_by_channel: dict[tuple[str, Quel1PortType, int], str] = {}
+        # すでに登録されている channel 名を収集
+        for k, v in sysdb._relation_channel_port:
+            p = sysdb._port_settings[cast(str, v["port_name"])]
+            channel = (p.box_name, p.port, cast(int, v["channel_number"]))
+            channel_names_by_channel[channel] = k
+        channel = (box_name, port, band)
+        if channel not in channel_names_by_channel:
+            port_name = f"{box_name}.PORT{port}"
+            channel_name = f"{port_name}.BAND{band}"
+            sysdb.add_port_setting(
+                port_name=port_name,
+                box_name=box_name,
+                port=port,
+                ndelay_or_nwait=tuple([0]),
+            )
+            sysdb._relation_channel_port.append(
+                (
+                    channel_name,
+                    {
+                        "port_name": port_name,
+                        "channel_number": band,
+                    },
+                )
+            )
+        else:
+            channel_name = channel_names_by_channel[channel]
+        # ターゲットを定義
+        sysdb._relation_channel_target.append((channel_name, target_name))
+        sysdb._target_settings[target_name] = dict(frequency=frequency)
 
 
 class SystemConfigDatabase:
@@ -387,39 +439,39 @@ class SystemConfigDatabase:
             ndelay_or_nwait=ndelay_or_nwait,
         )
 
-    def create_box(
-        self,
-        box_name: str,
-        reconnect: bool = True,
-    ) -> Quel1BoxWithRawWss:
-        s = self._box_settings[box_name]
-        box = Quel1BoxWithRawWss.create(
-            ipaddr_wss=str(s.ipaddr_wss),
-            ipaddr_sss=str(s.ipaddr_sss),
-            ipaddr_css=str(s.ipaddr_css),
-            boxtype=s.boxtype,
-        )
-        if reconnect:
-            if not all([_ for _ in box.link_status().values()]):
-                box.relinkup(use_204b=False, background_noise_threshold=350)
-            status = box.reconnect()
-            for mxfe_idx, _ in status.items():
-                if not _:
-                    logger.error(
-                        f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
-                    )
-        return box
+    # def create_box(
+    #     self,
+    #     box_name: str,
+    #     reconnect: bool = True,
+    # ) -> Quel1Box:
+    #     s = self._box_settings[box_name]
+    #     box = Quel1Box.create(
+    #         ipaddr_wss=str(s.ipaddr_wss),
+    #         ipaddr_sss=str(s.ipaddr_sss),
+    #         ipaddr_css=str(s.ipaddr_css),
+    #         boxtype=s.boxtype,
+    #     )
+    #     if reconnect:
+    #         if not all([_ for _ in box.link_status().values()]):
+    #             box.relinkup(use_204b=False, background_noise_threshold=350)
+    #         status = box.reconnect()
+    #         for mxfe_idx, _ in status.items():
+    #             if not _:
+    #                 logger.error(
+    #                     f"be aware that mxfe-#{mxfe_idx} is not linked-up properly"
+    #                 )
+    #     return box
 
-    def create_named_box(
-        self, box_name: str, *, reconnect: bool = True
-    ) -> direct.NamedBox:
-        return direct.NamedBox(
-            name=box_name,
-            box=self.create_box(
-                box_name,
-                reconnect=reconnect,
-            ),
-        )
+    # def create_named_box(
+    #     self, box_name: str, *, reconnect: bool = True
+    # ) -> direct.NamedBox:
+    #     return direct.NamedBox(
+    #         name=box_name,
+    #         box=self.create_box(
+    #             box_name,
+    #             reconnect=reconnect,
+    #         ),
+    #     )
 
     def create_quel1system(
         self,
@@ -428,13 +480,20 @@ class SystemConfigDatabase:
         if self._clockmaster_setting is None:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける?
-        system = direct.Quel1System.create(
+        # system = direct.Quel1System.create(
+        #     clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
+        #     boxes=[self.create_named_box(b, reconnect=True) for b in box_names],
+        # )
+        # system.initialize()
+        # self.refresh_quel1system(system)
+        system = direct.Quel1System.create_with_driver(
             clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
-            boxes=[self.create_named_box(b, reconnect=True) for b in box_names],
+            box_names=box_names,
         )
-        system.initialize()
-        self.refresh_quel1system(system)
         return system
+
+    # def create_executor(self, system: direct.Quel1System):
+    #     return direct.Executor(sysdb=self, quel1system=system)
 
     def refresh_quel1system(self, system: direct.Quel1System) -> direct.Quel1System:
         # clockmaster と boxes は再利用する

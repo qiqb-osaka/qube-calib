@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import sys
-from typing import Any, MutableMapping, MutableSequence
+from enum import Enum
+from typing import Any, MutableMapping, MutableSequence, cast
 
 import numpy as np
 
@@ -14,6 +15,23 @@ from .neopulse import CapSampledSequence, GenSampledSequence
 # import json
 
 SAMPLING_PERIOD = 2  # [ns]
+
+
+class CaptureReturnCode(Enum):
+    CAPTURE_TIMEOUT = 1
+    CAPTURE_ERROR = 2
+    BROKEN_DATA = 3
+    SUCCESS = 4
+
+
+class SequencerClient:
+    def __init__(self, ipaddr: str) -> None:
+        self._ipaddr = ipaddr
+
+
+class QuBEMasterClient:
+    def __init__(self, master_ipaddr: str) -> None:
+        self._ipaddr = master_ipaddr
 
 
 class WaveSequenceTools:
@@ -201,16 +219,20 @@ class CaptureParamTools:
             int((up - low) / unit) if low is not None and up is not None else None
             for low, up in zip(aligned[:-1], aligned[1:])
         ] + [chain[-1] if chain[-1] is not None else 0]
-        total_duration_words = sum(new_chain)
+        total_duration_words = sum(cast(list[int], new_chain))
         interval_words = int(interval_samples // unit)
         # 先頭に blank を入れた分末尾にも同じ長さの blank を入れないと wave と同期しなくなる TOOO ?
         # wave の先頭を wait で合わせるという選択もあり（そっちの方が良さげ） <- これはダメ　 X wait は先頭のみ
-        new_chain[-1] = interval_words - total_duration_words + new_chain[0]
+        new_chain[-1] = (
+            interval_words - total_duration_words + cast(list[int], new_chain)[0]
+        )
         for i in range(2, len(new_chain), 2):
             if new_chain[i] == 0:
                 if new_chain[i - 1] == 1:
                     raise ValueError("Capture is too short")
-                new_chain[i - 1] -= 1
+                if new_chain[i - 1] is None:
+                    raise ValueError("Capture blank duration is None")
+                cast(list[int], new_chain)[i - 1] -= 1
                 new_chain[i] = 1
         # if new_chain[-1] == 0:
         #     new_chain[-2] -= 1
@@ -218,7 +240,7 @@ class CaptureParamTools:
         # TODO new_chain の blank 要素が潰れることがある（capt は拡張なので潰れない）この処理を追加しないといけない
         # TODO post_blank は 1 以上の制約がある
         capprm = CaptureParam()
-        capprm.capture_delay = capture_delay_words + new_chain[0]
+        capprm.capture_delay = capture_delay_words + cast(list[int], new_chain)[0]
         capprm.num_integ_sections = repeats
         for duration, blank in zip(new_chain[1::2], new_chain[2::2]):
             capprm.add_sum_section(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import getpass
-import json
 import logging
 import math
 import os
@@ -10,7 +9,6 @@ import time
 import warnings
 from collections import Counter, deque
 from enum import Enum
-from pathlib import Path
 from typing import (
     Any,
     Final,
@@ -24,23 +22,31 @@ from typing import (
 import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
-from quel_clock_master import QuBEMasterClient, SequencerClient
+
+# from quel_clock_master import QuBEMasterClient, SequencerClient
 from quel_ic_config import (
     QUEL1_BOXTYPE_ALIAS,
-    CaptureReturnCode,
+    Quel1Box,
     Quel1BoxType,
-    Quel1BoxWithRawWss,
     Quel1ConfigOption,
 )
-from typing_extensions import deprecated
 
 from . import __version__, neopulse
+from .core.context import TaskResult
 from .e7utils import (
     CaptureParamTools,
+    CaptureReturnCode,
+    QuBEMasterClient,
+    SequencerClient,
     WaveSequenceTools,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
 )
 from .instrument.quel.quel1 import driver as direct
+from .instrument.quel.quel1.driver import Quel1PortType
+from .instrument.quel.quel1.driver.compat import (
+    convert_settings_to_params,
+    run,
+)
 from .neopulse import (
     CapSampledSequence,
     Capture,
@@ -49,7 +55,7 @@ from .neopulse import (
     Slot,
     Waveform,
 )
-from .sysconfdb import BoxSetting, PortSetting, Quel1PortType, SystemConfigDatabase
+from .sysconfdb import BoxSetting, PortSetting, SystemConfigDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -118,20 +124,20 @@ class QubeCalib:
     def Quel1BoxType(self) -> type[Quel1BoxType]:
         return Quel1BoxType
 
-    @deprecated("use sysdb.create_quel1system() instead")
-    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
-        return self.sysdb.create_quel1system(*box_names)
+    # @deprecated("use sysdb.create_quel1system() instead")
+    # def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+    #     return self.sysdb.create_quel1system(*box_names)
 
-    @deprecated("use sysdb.create_quel1system() instead")
-    def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
-        if self.sysdb._clockmaster_setting is None:
-            raise ValueError("clock master is not found")
-            # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
-        system = direct.Quel1System.create(
-            clockmaster=QuBEMasterClient(str(self.sysdb._clockmaster_setting.ipaddr)),
-            boxes=[self.sysdb.create_named_box(b) for b in box_names],
-        )
-        return system
+    # @deprecated("use sysdb.create_quel1system() instead")
+    # def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
+    #     if self.sysdb._clockmaster_setting is None:
+    #         raise ValueError("clock master is not found")
+    #         # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
+    #     system = direct.Quel1System.create(
+    #         clockmaster=QuBEMasterClient(str(self.sysdb._clockmaster_setting.ipaddr)),
+    #         boxes=[self.sysdb.create_named_box(b) for b in box_names],
+    #     )
+    #     return system
 
     def execute(self) -> tuple:
         return self._executor.execute()
@@ -173,9 +179,9 @@ class QubeCalib:
             frequency
         )
 
-    def add_rfswitch(self, box_name: str, port: int, rfswitch: str) -> None:
-        """(block / pass), (loop / open)"""
-        self._executor.add_command(RfSwitch(box_name, port, rfswitch))
+    # def add_rfswitch(self, box_name: str, port: int, rfswitch: str) -> None:
+    #     """(block / pass), (loop / open)"""
+    #     self._executor.add_command(RfSwitch(box_name, port, rfswitch))
 
     def add_sequence(
         self,
@@ -216,43 +222,43 @@ class QubeCalib:
             )
         )
 
-    def add_config_port(
-        self,
-        box_name: str,
-        port: int,
-        *,
-        subport: int = 0,
-        lo_freq: Optional[float] = None,
-        cnco_freq: Optional[float] = None,
-        cnco_locked_with: Optional[int | tuple[int, int]] = None,
-        vatt: Optional[int] = None,
-        sideband: Optional[str] = None,
-        fullscale_current: Optional[int] = None,
-        rfswitch: Optional[str] = None,
-    ) -> None:
-        p: dict[int | tuple[int, int] | str, PortSetting | float | int | str | None] = {
-            pset.port: pset
-            for pset in self.system_config_database._port_settings.values()
-            if pset.box_name == box_name
-        }
-        p["lo_freq"] = lo_freq
-        p["cnco_freq"] = cnco_freq
-        p["vatt"] = vatt
-        p["sideband"] = sideband
-        self._executor.add_command(
-            ConfigPort(
-                box_name,
-                port,
-                subport=subport,
-                lo_freq=lo_freq,
-                cnco_freq=cnco_freq,
-                cnco_locked_with=cnco_locked_with,
-                vatt=vatt,
-                sideband=sideband,
-                fullscale_current=fullscale_current,
-                rfswitch=rfswitch,
-            )
-        )
+    # def add_config_port(
+    #     self,
+    #     box_name: str,
+    #     port: int,
+    #     *,
+    #     subport: int = 0,
+    #     lo_freq: Optional[float] = None,
+    #     cnco_freq: Optional[float] = None,
+    #     cnco_locked_with: Optional[int | tuple[int, int]] = None,
+    #     vatt: Optional[int] = None,
+    #     sideband: Optional[str] = None,
+    #     fullscale_current: Optional[int] = None,
+    #     rfswitch: Optional[str] = None,
+    # ) -> None:
+    #     p: dict[int | tuple[int, int] | str, PortSetting | float | int | str | None] = {
+    #         pset.port: pset
+    #         for pset in self.system_config_database._port_settings.values()
+    #         if pset.box_name == box_name
+    #     }
+    #     p["lo_freq"] = lo_freq
+    #     p["cnco_freq"] = cnco_freq
+    #     p["vatt"] = vatt
+    #     p["sideband"] = sideband
+    #     self._executor.add_command(
+    #         ConfigPort(
+    #             box_name,
+    #             port,
+    #             subport=subport,
+    #             lo_freq=lo_freq,
+    #             cnco_freq=cnco_freq,
+    #             cnco_locked_with=cnco_locked_with,
+    #             vatt=vatt,
+    #             sideband=sideband,
+    #             fullscale_current=fullscale_current,
+    #             rfswitch=rfswitch,
+    #         )
+    #     )
 
     def define_target(
         self,
@@ -396,49 +402,49 @@ class QubeCalib:
     def get_box_name_by_alias(self, alias: str) -> str:
         return self.system_config_database._box_aliases[alias]
 
-    def create_box(
-        self,
-        box_name: str,
-        reconnect: bool = True,
-    ) -> Quel1BoxWithRawWss:
-        return self.system_config_database.create_box(
-            box_name=box_name,
-            reconnect=reconnect,
-        )
+    # def create_box(
+    #     self,
+    #     box_name: str,
+    #     reconnect: bool = True,
+    # ) -> Quel1Box:
+    #     return self.system_config_database.create_box(
+    #         box_name=box_name,
+    #         reconnect=reconnect,
+    #     )
 
-    @deprecated("use sysdb.create_named_box() instead")
-    def create_named_box(
-        self, box_name: str, *, reconnect: bool = True
-    ) -> direct.NamedBox:
-        return direct.NamedBox(
-            name=box_name,
-            box=self.create_box(
-                box_name,
-                reconnect=reconnect,
-            ),
-        )
+    # @deprecated("use sysdb.create_named_box() instead")
+    # def create_named_box(
+    #     self, box_name: str, *, reconnect: bool = True
+    # ) -> direct.NamedBox:
+    #     return direct.NamedBox(
+    #         name=box_name,
+    #         box=self.create_box(
+    #             box_name,
+    #             reconnect=reconnect,
+    #         ),
+    #     )
 
-    def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
-        return [
-            SequencerClient(
-                target_ipaddr=str(
-                    self.system_config_database._box_settings[_].ipaddr_sss
-                )
-            ).read_clock()
-            for _ in box_names
-        ]
+    # def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
+    #     return [
+    #         SequencerClient(
+    #             target_ipaddr=str(
+    #                 self.system_config_database._box_settings[_].ipaddr_sss
+    #             )
+    #         ).read_clock()
+    #         for _ in box_names
+    #     ]
 
-    def resync(
-        self, *box_names: str
-    ) -> list[tuple[bool, int] | MutableSequence[tuple[bool, int, int]]]:
-        db = self.system_config_database
-        if db._clockmaster_setting is None:
-            raise ValueError("clock master is not found")
-        master = QuBEMasterClient(master_ipaddr=str(db._clockmaster_setting.ipaddr))
-        master.kick_clock_synch(
-            [str(db._box_settings[_].ipaddr_sss) for _ in box_names]
-        )
-        return [self.read_clock(_) for _ in box_names] + [master.read_clock()]
+    # def resync(
+    #     self, *box_names: str
+    # ) -> list[tuple[bool, int] | MutableSequence[tuple[bool, int, int]]]:
+    #     db = self.system_config_database
+    #     if db._clockmaster_setting is None:
+    #         raise ValueError("clock master is not found")
+    #     master = QuBEMasterClient(master_ipaddr=str(db._clockmaster_setting.ipaddr))
+    #     master.kick_clock_synch(
+    #         [str(db._box_settings[_].ipaddr_sss) for _ in box_names]
+    #     )
+    #     return [self.read_clock(_) for _ in box_names] + [master.read_clock()]
 
     def show_available_boxtype(self) -> MutableSequence[str]:
         return [_ for _ in QUEL1_BOXTYPE_ALIAS]
@@ -451,52 +457,52 @@ class QubeCalib:
     ) -> float:
         return sequence_duration // constrain * constrain
 
-    def get_all_box_configs(self) -> dict[str, dict[str, Any]]:
-        return {
-            box_name: self.system_config_database.create_box(box_name).dump_box()
-            for box_name in self.system_config_database._box_settings
-        }
+    # def get_all_box_configs(self) -> dict[str, dict[str, Any]]:
+    #     return {
+    #         box_name: self.system_config_database.create_box(box_name).dump_box()
+    #         for box_name in self.system_config_database._box_settings
+    #     }
 
-    def store_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
-        with open(Path(os.getcwd()) / Path(path_to_config_file), "w") as fp:
-            json.dump(
-                self.get_all_box_configs(),
-                fp,
-                indent=4,
-            )
+    # def store_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
+    #     with open(Path(os.getcwd()) / Path(path_to_config_file), "w") as fp:
+    #         json.dump(
+    #             self.get_all_box_configs(),
+    #             fp,
+    #             indent=4,
+    #         )
 
-    def load_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
-        with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
-            configs = json.load(fp)
-        for box_name, _ in configs.items():
-            ports: dict[int | tuple[int, int], dict[str, Any]] = {
-                int(k): v for k, v in _["ports"].items()
-            }
-            _["ports"] = ports
-            for port, port_config in ports.items():
-                if "channels" in port_config:
-                    port_config["channels"] = {
-                        int(k): v for k, v in port_config["channels"].items()
-                    }
-                if "runits" in port_config:
-                    port_config["runits"] = {
-                        int(k): v for k, v in port_config["runits"].items()
-                    }
-        self._box_configs = configs
+    # def load_all_box_configs(self, path_to_config_file: str | os.PathLike) -> None:
+    #     with open(Path(os.getcwd()) / Path(path_to_config_file), "r") as fp:
+    #         configs = json.load(fp)
+    #     for box_name, _ in configs.items():
+    #         ports: dict[int | tuple[int, int], dict[str, Any]] = {
+    #             int(k): v for k, v in _["ports"].items()
+    #         }
+    #         _["ports"] = ports
+    #         for port, port_config in ports.items():
+    #             if "channels" in port_config:
+    #                 port_config["channels"] = {
+    #                     int(k): v for k, v in port_config["channels"].items()
+    #                 }
+    #             if "runits" in port_config:
+    #                 port_config["runits"] = {
+    #                     int(k): v for k, v in port_config["runits"].items()
+    #                 }
+    #     self._box_configs = configs
 
-    def apply_all_box_configs(self) -> None:
-        for box_name in self._box_configs:
-            self._apply_box_config(box_name)
+    # def apply_all_box_configs(self) -> None:
+    #     for box_name in self._box_configs:
+    #         self._apply_box_config(box_name)
 
-    def _apply_box_config(self, box_name: str) -> None:
-        box = self.create_box(box_name)
-        box.config_box(self._box_configs[box_name]["ports"])
+    # def _apply_box_config(self, box_name: str) -> None:
+    #     box = self.create_box(box_name)
+    #     box.config_box(self._box_configs[box_name]["ports"])
 
-    def apply_box_config(self, *target_names: str) -> set[str]:
-        box_names = self.get_box_names_by_targets(*target_names)
-        for box_name in box_names:
-            self._apply_box_config(box_name)
-        return box_names
+    # def apply_box_config(self, *target_names: str) -> set[str]:
+    #     box_names = self.get_box_names_by_targets(*target_names)
+    #     for box_name in box_names:
+    #         self._apply_box_config(box_name)
+    #     return box_names
 
     def clear_command_queue(self) -> None:
         self._executor._work_queue.clear()
@@ -504,29 +510,29 @@ class QubeCalib:
     def show_command_queue(self) -> MutableSequence:
         return self._executor._work_queue
 
-    def create_boxpool(self, *box_names: str) -> BoxPool:
-        boxpool = BoxPool()
-        if self.system_config_database._clockmaster_setting is not None:
-            boxpool.create_clock_master(
-                ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr),
-            )
-        for box_name in box_names:
-            if box_name not in self.system_config_database._box_settings:
-                raise ValueError(f"box({box_name}) is not defined")
-            setting = self.system_config_database._box_settings[box_name]
-            box = boxpool.create(
-                box_name,
-                ipaddr_wss=str(setting.ipaddr_wss),
-                ipaddr_sss=str(setting.ipaddr_sss),
-                ipaddr_css=str(setting.ipaddr_css),
-                boxtype=setting.boxtype,
-                # config_root=Path(setting.config_root)
-                # if setting.config_root is not None
-                # else None,
-                # config_options=setting.config_options,
-            )
-            box.reconnect()
-        return boxpool
+    # def create_boxpool(self, *box_names: str) -> BoxPool:
+    #     boxpool = BoxPool()
+    #     if self.system_config_database._clockmaster_setting is not None:
+    #         boxpool.create_clock_master(
+    #             ipaddr=str(self.system_config_database._clockmaster_setting.ipaddr),
+    #         )
+    #     for box_name in box_names:
+    #         if box_name not in self.system_config_database._box_settings:
+    #             raise ValueError(f"box({box_name}) is not defined")
+    #         setting = self.system_config_database._box_settings[box_name]
+    #         box = boxpool.create(
+    #             box_name,
+    #             ipaddr_wss=str(setting.ipaddr_wss),
+    #             ipaddr_sss=str(setting.ipaddr_sss),
+    #             ipaddr_css=str(setting.ipaddr_css),
+    #             boxtype=setting.boxtype,
+    #             # config_root=Path(setting.config_root)
+    #             # if setting.config_root is not None
+    #             # else None,
+    #             # config_options=setting.config_options,
+    #         )
+    #         box.reconnect()
+    #     return boxpool
 
 
 class Converter:
@@ -967,6 +973,8 @@ class Converter:
     ) -> float:
         """Calculate modulation frequency from target frequency and port configuration."""
         # Note that port_config has frequencies in Hz.
+        if target_freq is None:
+            raise ValueError("target frequency is not defined")
         if sideband == Sideband.UpperSideBand.value:
             f_diff = target_freq - lo_freq - (cnco_freq + fnco_freq)
         elif sideband == Sideband.LowerSideBand.value:
@@ -1076,13 +1084,13 @@ class Converter:
 class Command:
     def execute(
         self,
-        boxpool: BoxPool,
+        # boxpool: BoxPool,
     ) -> Any:
         pass
 
 
 class TargetBPC(TypedDict):
-    box: Quel1BoxWithRawWss
+    box: Quel1Box
     port: int | tuple[int, int]
     channel: int
     box_name: str
@@ -1091,57 +1099,64 @@ class TargetBPC(TypedDict):
 class PortConfigAcquirer:
     def __init__(
         self,
-        boxpool: BoxPool,
+        # boxpool: BoxPool,
         box_name: str,
-        box: Quel1BoxWithRawWss,
+        box: Quel1Box,
         port: Quel1PortType,
         channel: int,
         *,
-        driver: direct.Quel1System | None = None,
+        driver: direct.Quel1System,
     ):
-        if driver is None:
-            # boxpool にキャッシュされている box の設定を取得する
-            if box_name not in boxpool._box_config_cache:
-                boxpool._box_config_cache[box_name] = box.dump_box()
-            dump_box = boxpool._box_config_cache[box_name]["ports"]
-            self.dump_config = dp = dump_box[port]
-            sideband = dp["sideband"] if "sideband" in dp else DEFAULT_SIDEBAND
-            fnco_freq = 0
-            if port in box.get_output_ports():
-                fnco_freq = dp["channels"][channel]["fnco_freq"]
-            if port in box.get_input_ports():
-                fnco_freq = dp["runits"][channel]["fnco_freq"]
-                if port in box.get_read_input_ports():
-                    lpbackps = box.get_loopbacks_of_port(port)
-                    if lpbackps:
-                        lpbackp = next(iter(lpbackps))
-                        dumped_port = dump_box[lpbackp]
-                        sideband = (
-                            dumped_port["sideband"]
-                            if "sideband" in dumped_port
-                            else DEFAULT_SIDEBAND
-                        )
-                elif port in box.get_monitor_input_ports():
-                    lpbackps = box.get_loopbacks_of_port(port)
-                    if lpbackps:
-                        lpbackp = next(iter(lpbackps))
-                        dumped_port = dump_box[lpbackp]
-                        sideband = (
-                            dumped_port["sideband"]
-                            if "sideband" in dumped_port
-                            else DEFAULT_SIDEBAND
-                        )
-            self.lo_freq: float | None = dp["lo_freq"] if "lo_freq" in dp else None
-            self.cnco_freq: float = dp["cnco_freq"]
-            self.fnco_freq: float = fnco_freq
-            self.sideband: str = sideband
-        else:
-            self.dump_config = driver.dump_port(box_name, port)
-            self.lo_freq = driver.get_lo_freq(box_name, port)
-            self.cnco_freq = driver.get_cnco_freq(box_name, port)
-            self.fnco_freq = driver.get_fnco_freq(box_name, port, channel)
-            sideband = driver.get_sideband(box_name, port)
-            self.sideband = sideband if sideband is not None else DEFAULT_SIDEBAND
+        # if driver is None:
+        #     # boxpool にキャッシュされている box の設定を取得する
+        #     if box_name not in boxpool._box_config_cache:
+        #         boxpool._box_config_cache[box_name] = box.dump_box()
+        #     dump_box = boxpool._box_config_cache[box_name]["ports"]
+        #     self.dump_config = dp = dump_box[port]
+        #     sideband = dp["sideband"] if "sideband" in dp else DEFAULT_SIDEBAND
+        #     fnco_freq = 0
+        #     if port in box.get_output_ports():
+        #         fnco_freq = dp["channels"][channel]["fnco_freq"]
+        #     if port in box.get_input_ports():
+        #         fnco_freq = dp["runits"][channel]["fnco_freq"]
+        #         if port in box.get_read_input_ports():
+        #             lpbackps = box.get_loopbacks_of_port(port)
+        #             if lpbackps:
+        #                 lpbackp = next(iter(lpbackps))
+        #                 dumped_port = dump_box[lpbackp]
+        #                 sideband = (
+        #                     dumped_port["sideband"]
+        #                     if "sideband" in dumped_port
+        #                     else DEFAULT_SIDEBAND
+        #                 )
+        #         elif port in box.get_monitor_input_ports():
+        #             lpbackps = box.get_loopbacks_of_port(port)
+        #             if lpbackps:
+        #                 lpbackp = next(iter(lpbackps))
+        #                 dumped_port = dump_box[lpbackp]
+        #                 sideband = (
+        #                     dumped_port["sideband"]
+        #                     if "sideband" in dumped_port
+        #                     else DEFAULT_SIDEBAND
+        #                 )
+        #     self.lo_freq: float | None = dp["lo_freq"] if "lo_freq" in dp else None
+        #     self.cnco_freq: float = dp["cnco_freq"]
+        #     self.fnco_freq: float = fnco_freq
+        #     self.sideband: str = sideband
+        # else:
+        #     self.dump_config = driver.dump_port(box_name, port)
+        #     self.lo_freq = driver.get_lo_freq(box_name, port)
+        #     self.cnco_freq = driver.get_cnco_freq(box_name, port)
+        #     self.fnco_freq = driver.get_fnco_freq(box_name, port, channel)
+        #     sideband = driver.get_sideband(box_name, port)
+        #     self.sideband = sideband if sideband is not None else DEFAULT_SIDEBAND
+        self.dump_config = driver.dump_port(box_name, port)
+        self.lo_freq = driver.get_lo_freq(box_name, port)
+        self.cnco_freq = driver.get_cnco_freq(box_name, port)
+        self.fnco_freq = driver.get_fnco_freq(box_name, port, channel)
+        sideband = driver.get_sideband(box_name, port)
+        self.sideband = sideband if sideband is not None else DEFAULT_SIDEBAND
+
         self._box_name = box_name
         self._port = port
         self._channel = channel
@@ -1150,18 +1165,18 @@ class PortConfigAcquirer:
         return f"{self.__class__.__name__}(lo_freq={self.lo_freq}, cnco_freq={self.cnco_freq}, fnco_freq={self.fnco_freq}, sideband={self.sideband})"
 
 
-class RfSwitch(Command):
-    def __init__(self, box_name: str, port: int, rfswitch: str):
-        self._box_name = box_name
-        self._port = port
-        self._rfswitch = rfswitch
+# class RfSwitch(Command):
+#     def __init__(self, box_name: str, port: int, rfswitch: str):
+#         self._box_name = box_name
+#         self._port = port
+#         self._rfswitch = rfswitch
 
-    def execute(
-        self,
-        boxpool: BoxPool,
-    ) -> None:
-        box = boxpool.get_box(self._box_name)[0]
-        box.config_rfswitch(self._port, rfswitch=self._rfswitch)
+#     def execute(
+#         self,
+#         boxpool: BoxPool,
+#     ) -> None:
+#         box = boxpool.get_box(self._box_name)[0]
+#         box.config_rfswitch(self._port, rfswitch=self._rfswitch)
 
 
 class Sequencer(Command):
@@ -1174,7 +1189,7 @@ class Sequencer(Command):
         ],
         *,
         sysdb: SystemConfigDatabase,
-        driver: direct.Quel1System | None = None,
+        driver: direct.Quel1System,
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
         group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
@@ -1188,7 +1203,7 @@ class Sequencer(Command):
         self.syncoffset_by_boxname = time_offset  # taps
         self.timetostart_by_boxname = time_to_start  # sysref
         self.interval = interval
-        self.driver = driver
+        self._driver = driver
 
         settings = sysdb._target_settings
         for target_name, gss in gen_sampled_sequence.items():
@@ -1310,14 +1325,21 @@ class Sequencer(Command):
             for target_name, cseq in cap_sampled_sequence.items():
                 cseq.readin_offsets = readin_offsets[target_name]
 
+    @property
+    def driver(self) -> direct.Quel1System:
+        # if self._driver is None:
+        #     raise ValueError("driver is not defined")
+        return self._driver
+
     def is_output_port(self, box_name: str, port: Quel1PortType) -> bool:
-        if self.driver is None:
-            if box_name in self.sysdb._box_settings:
-                raise ValueError(f"box({box_name}) is not defined")
-            box = self.sysdb.create_box(box_name, reconnect=True)
-            return port in box.get_output_ports()
-        else:
-            return self.driver.is_output_port(box_name, port)
+        # if self._driver is None:
+        #     if box_name in self.sysdb._box_settings:
+        #         raise ValueError(f"box({box_name}) is not defined")
+        #     box = self.sysdb.create_box(box_name, reconnect=True)
+        #     return port in box.get_output_ports()
+        # else:
+        #     return self.driver.is_output_port(box_name, port)
+        return self.driver.is_output_port(box_name, port)
 
     def set_measurement_option(
         self,
@@ -1344,7 +1366,10 @@ class Sequencer(Command):
         self.line_param0 = line_param0
         self.line_param1 = line_param1
 
-    def generate_cap_resource_map(self, boxpool: BoxPool) -> dict[str, Any]:
+    def generate_cap_resource_map(
+        self,
+        # boxpool: BoxPool,
+    ) -> dict[str, Any]:
         _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
@@ -1356,10 +1381,11 @@ class Sequencer(Command):
                     port = m["port"].port
                 else:
                     raise ValueError("port is not defined")
-                if self.driver is None:
-                    is_input_port = boxpool.get_port_direction(box_name, port) == "in"
-                else:
-                    is_input_port = self.driver.is_input_port(box_name, port)
+                # if self._driver is None:
+                #     is_input_port = boxpool.get_port_direction(box_name, port) == "in"
+                # else:
+                #     is_input_port = self.driver.is_input_port(box_name, port)
+                is_input_port = self.driver.is_input_port(box_name, port)
                 if is_input_port and target_name in self.cap_sampled_sequence:
                     if target_name in _cap_resource_map:
                         _cap_resource_map[target_name].append(m)
@@ -1381,14 +1407,14 @@ class Sequencer(Command):
 
     def generate_e7_settings(
         self,
-        boxpool: BoxPool,
+        # boxpool: BoxPool,
     ) -> tuple[
         dict[tuple[str, Quel1PortType, int], CaptureParam],
         dict[tuple[str, Quel1PortType, int], WaveSequence],
         dict[str, Any],
     ]:
         # cap 用の cap_e7_setting と gen 用の gen_e7setting を作る
-        cap_resource_map = self.generate_cap_resource_map(boxpool)
+        cap_resource_map = self.generate_cap_resource_map()
         _gen_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
@@ -1400,10 +1426,11 @@ class Sequencer(Command):
                     port = m["port"].port
                 else:
                     raise ValueError("port is not defined")
-                if self.driver is None:
-                    is_output_port = boxpool.get_port_direction(box_name, port) == "out"
-                else:
-                    is_output_port = self.driver.is_output_port(box_name, port)
+                # if self._driver is None:
+                #     is_output_port = boxpool.get_port_direction(box_name, port) == "out"
+                # else:
+                #     is_output_port = self.driver.is_output_port(box_name, port)
+                is_output_port = self.driver.is_output_port(box_name, port)
                 if is_output_port and target_name in self.gen_sampled_sequence:
                     if target_name in _gen_resource_map:
                         _gen_resource_map[target_name].append(m)
@@ -1419,7 +1446,8 @@ class Sequencer(Command):
         # e7 の生成に必要な lo_hz などをまとめた辞書を作る
         cap_target_bpc: dict[str, TargetBPC] = {
             target_name: TargetBPC(
-                box=boxpool.get_box(m["box"].box_name)[0],
+                box=self.driver.box[m["box"].box_name],
+                # box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
                 box_name=m["box"].box_name,
@@ -1428,7 +1456,8 @@ class Sequencer(Command):
         }
         gen_target_bpc: dict[str, TargetBPC] = {
             target_name: TargetBPC(
-                box=boxpool.get_box(m["box"].box_name)[0],
+                box=self.driver.box[m["box"].box_name],
+                # box=boxpool.get_box(m["box"].box_name)[0],
                 port=m["port"].port if isinstance(m["port"], PortSetting) else 0,
                 channel=m["channel_number"],
                 box_name=m["box"].box_name,
@@ -1437,7 +1466,7 @@ class Sequencer(Command):
         }
         cap_target_portconf = {
             target_name: PortConfigAcquirer(
-                boxpool=boxpool,
+                # boxpool=boxpool,
                 box_name=m["box_name"],
                 box=m["box"],
                 port=m["port"],
@@ -1485,7 +1514,7 @@ class Sequencer(Command):
 
         gen_target_portconf = {
             target_name: PortConfigAcquirer(
-                boxpool=boxpool,
+                # boxpool=boxpool,
                 box_name=m["box_name"],
                 box=m["box"],
                 port=m["port"],
@@ -1508,12 +1537,81 @@ class Sequencer(Command):
 
     def execute(
         self,
-        boxpool: BoxPool,
-    ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
-        quel1system = (
-            self.create_quel1system(boxpool) if self.driver is None else self.driver
+        # boxpool: BoxPool,
+        # ) -> tuple[dict[str, CaptureReturnCode], dict[str, list], dict]:
+    ) -> dict[str, TaskResult]:
+        if self._driver is None:
+            raise ValueError("driver is not defined")
+        # quel1system = (
+        #     self.create_quel1system(boxpool) if self._driver is None else self.driver
+        # )
+        quel1system = self.driver
+        # c, g, m = self.generate_e7_settings()
+
+        # settings: list[
+        #     direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting
+        # ] = []
+        # for (name, cport, runit), cprm in c.items():
+        #     settings.append(
+        #         direct.RunitSetting(
+        #             runit=direct.RunitId(
+        #                 box=name,
+        #                 port=cport,
+        #                 runit=runit,
+        #             ),
+        #             cprm=cprm,
+        #         )
+        #     )
+        # for (name, gport, channel), wseq in g.items():
+        #     settings.append(
+        #         direct.AwgSetting(
+        #             awg=direct.AwgId(
+        #                 box=name,
+        #                 port=gport,
+        #                 channel=channel,
+        #             ),
+        #             wseq=wseq,
+        #         )
+        #     )
+        # settings += self.select_trigger(quel1system, settings)
+        # if len(settings) == 0:
+        #     raise ValueError("no settings")
+
+        # return settings
+        # sys.exit()  # TODO: breakpoint for debug
+
+        settings, _ = self.convert_sequence_to_settings()
+
+        # if self._sideload_settings:
+        #     action = direct.Action.build(
+        #         system=quel1system, settings=self._sideload_settings
+        #     )
+        # else:
+        #     action = direct.Action.build(system=quel1system, settings=settings)
+        # status, results = action.action()
+        # return self.parse_capture_results(status, results, action, m)
+
+        # quelware 0.10  対応コード
+        # 内部では quelware4 向けの実装が呼ばれている
+        commands, waveforms = convert_settings_to_params(settings)
+        results = run(
+            quel1system,
+            band_refs=[w.band for w in waveforms],
+            waveforms=waveforms,
+            commands=commands,
         )
-        c, g, m = self.generate_e7_settings(boxpool)
+        # TODO 結果を qubecalib3 互換形式に変換するコードを書く
+        return results
+
+    def convert_sequence_to_settings(
+        self,
+    ) -> tuple[
+        list[direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting],
+        dict[str, Any],
+    ]:
+        quel1system = self.driver
+
+        c, g, m = self.generate_e7_settings()
 
         settings: list[
             direct.RunitSetting | direct.AwgSetting | direct.TriggerSetting
@@ -1544,14 +1642,7 @@ class Sequencer(Command):
         if len(settings) == 0:
             raise ValueError("no settings")
 
-        if self._sideload_settings:
-            action = direct.Action.build(
-                system=quel1system, settings=self._sideload_settings
-            )
-        else:
-            action = direct.Action.build(system=quel1system, settings=settings)
-        status, results = action.action()
-        return self.parse_capture_results(status, results, action, m)
+        return settings, m
 
     def parse_capture_results(
         self,
@@ -1619,20 +1710,20 @@ class Sequencer(Command):
             result = np.hsplit(data, width * word)
         return status, result
 
-    def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
-        if boxpool._clock_master is None:
-            raise ValueError("clock master is not set")
-        quel1system = direct.Quel1System.create(
-            clockmaster=boxpool._clock_master,
-            boxes=[
-                direct.NamedBox(name, box) for name, (box, _) in boxpool._boxes.items()
-            ],
-        )
-        quel1system.trigger = self.sysdb.trigger
-        for box_name, timing_shift in self.sysdb.timing_shift.items():
-            quel1system.timing_shift[box_name] = timing_shift
-        quel1system.displacement = self.sysdb.time_to_start
-        return quel1system
+    # def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
+    #     if boxpool._clock_master is None:
+    #         raise ValueError("clock master is not set")
+    #     quel1system = direct.Quel1System.create(
+    #         clockmaster=boxpool._clock_master,
+    #         boxes=[
+    #             direct.NamedBox(name, box) for name, (box, _) in boxpool._boxes.items()
+    #         ],
+    #     )
+    #     quel1system.trigger = self.sysdb.trigger
+    #     for box_name, timing_shift in self.sysdb.timing_shift.items():
+    #         quel1system.timing_shift[box_name] = timing_shift
+    #     quel1system.displacement = self.sysdb.time_to_start
+    #     return quel1system
 
     def convert(
         self,
@@ -1771,70 +1862,70 @@ class Sequencer(Command):
         return _status, sorted_iqs
 
 
-class Configurator(Command):
-    def execute(
-        self,
-        boxpool: BoxPool,
-    ) -> None:
-        print(f"{self.__class__.__name__} executed")
+# class Configurator(Command):
+#     def execute(
+#         self,
+#         boxpool: BoxPool,
+#     ) -> None:
+#         print(f"{self.__class__.__name__} executed")
 
 
-class ConfigPort(Command):
-    def __init__(
-        self,
-        box_name: str,
-        port: int,
-        *,
-        subport: int = 0,
-        lo_freq: Optional[float] = None,
-        cnco_freq: Optional[float] = None,
-        cnco_locked_with: Optional[int | tuple[int, int]] = None,
-        vatt: Optional[int] = None,
-        sideband: Optional[str] = None,
-        fullscale_current: Optional[int] = None,
-        rfswitch: Optional[str] = None,
-    ) -> None:
-        self.box_name = box_name
-        self.port = port
-        self.subport = subport
-        self.lo_freq = lo_freq
-        self.cnco_freq = cnco_freq
-        self.cnco_locked_with = cnco_locked_with
-        self.vatt = vatt
-        self.sideband = sideband
-        self.fullscale_current = fullscale_current
-        self.rfswitch = rfswitch
+# class ConfigPort(Command):
+#     def __init__(
+#         self,
+#         box_name: str,
+#         port: int,
+#         *,
+#         subport: int = 0,
+#         lo_freq: Optional[float] = None,
+#         cnco_freq: Optional[float] = None,
+#         cnco_locked_with: Optional[int | tuple[int, int]] = None,
+#         vatt: Optional[int] = None,
+#         sideband: Optional[str] = None,
+#         fullscale_current: Optional[int] = None,
+#         rfswitch: Optional[str] = None,
+#     ) -> None:
+#         self.box_name = box_name
+#         self.port = port
+#         self.subport = subport
+#         self.lo_freq = lo_freq
+#         self.cnco_freq = cnco_freq
+#         self.cnco_locked_with = cnco_locked_with
+#         self.vatt = vatt
+#         self.sideband = sideband
+#         self.fullscale_current = fullscale_current
+#         self.rfswitch = rfswitch
 
-    def execute(
-        self,
-        boxpool: BoxPool,
-    ) -> None:
-        print(f"{self.__class__.__name__} executed")
+#     def execute(
+#         self,
+#         boxpool: BoxPool,
+#     ) -> None:
+#         print(f"{self.__class__.__name__} executed")
 
 
-class ConfigChannel(Command):
-    def __init__(
-        self,
-        box_name: str,
-        port: int,
-        channel: int,
-        *,
-        subport: int = 0,
-        fnco_freq: Optional[float] = None,
-    ):
-        self.box_name = box_name
-        self.port = port
-        self.channel = channel
-        self.subport = subport
-        self.fnco_freq = fnco_freq
+# class ConfigChannel(Command):
+#     def __init__(
+#         self,
+#         box_name: str,
+#         port: int,
+#         channel: int,
+#         *,
+#         subport: int = 0,
+#         fnco_freq: Optional[float] = None,
+#     ):
+#         self.box_name = box_name
+#         self.port = port
+#         self.channel = channel
+#         self.subport = subport
+#         self.fnco_freq = fnco_freq
 
-    def execute(
-        self,
-        boxpool: BoxPool,
-    ) -> None:
-        print(f"{self.__class__.__name__} executed")
-        # box = boxpool(self.box_name)
-        # box.config_port()
+#     def execute(
+#         self,
+#         boxpool: BoxPool,
+#     ) -> None:
+#         print(f"{self.__class__.__name__} executed")
+#         # box = boxpool(self.box_name)
+#         # box.config_port()
 
 
 class Executor:
@@ -1848,8 +1939,8 @@ class Executor:
         self._config_buffer: Final[deque] = deque()
         self.sysdb = sysdb
         self.quel1system: Final[direct.Quel1System | None] = quel1system
-        self._boxpool = BoxPool()
-        self.refresh_boxpool()
+        # self._boxpool = BoxPool()
+        # self.refresh_boxpool()
 
     def reset(self) -> None:
         self._work_queue.clear()
@@ -1913,14 +2004,16 @@ class Executor:
                 #     box.initialize_all_awgs()
                 break
             # Sequencer 以外のコマンドを逐次実行
-            next.execute(self._boxpool)
+            # next.execute(self._boxpool)
+            next.execute()
         for command in self._work_queue:
             # もしコマンドキューに Sequencer が残っていれば次の Sequencer を実行する
             if isinstance(command, Sequencer):
                 # if self._quel1system is None:
                 #     raise ValueError("Quel1System is not defined")
                 # status, iqs, config = next.execute(self._boxpool, self._quel1system)
-                results = next.execute(self._boxpool)
+                # results = next.execute(self._boxpool)
+                results = next.execute()
                 user_name = getpass.getuser()
                 current_pyfile = os.path.abspath(__file__)
                 date_time = datetime.datetime.now()
@@ -1946,7 +2039,8 @@ class Executor:
         # if self._quel1system is None:
         #     raise ValueError("Quel1System is not defined")
         # status, iqs, config = next.execute(self._boxpool, self._quel1system)
-        results = next.execute(self._boxpool)
+        # results = next.execute(self._boxpool)
+        results = next.execute()
         # status, iqs, config = next.execute(self._boxpool)
         user_name = getpass.getuser()
         current_pyfile = os.path.abspath(__file__)
@@ -1963,7 +2057,8 @@ class Executor:
             )
         )
         for command in self._work_queue:
-            command.execute(self._boxpool)
+            # command.execute(self._boxpool)
+            command.execute()
         if not self._work_queue:
             self.check_config()
             self._boxpool._box_config_cache.clear()
@@ -2040,7 +2135,7 @@ class Executor:
         else:
             for box_name in self.quel1system.boxes:
                 box = self.quel1system.boxes[box_name]
-                sqc = SequencerClient(box.wss._wss_addr)
+                sqc = SequencerClient(box.wss._ipaddr_wss)
                 self._boxpool._boxes[box_name] = (box, sqc)
                 self._boxpool._linkstatus[box_name] = False
 
@@ -2136,10 +2231,10 @@ class BoxPool:
     DEFAULT_NUM_SYSREF_MEASUREMENTS: Final[int] = 100
 
     def __init__(self) -> None:
-        self._clock_master = (
+        self._clock_master: QuBEMasterClient | None = (
             None  # QuBEMasterClient(settings["CLOCK_MASTER"]["ipaddr"])
         )
-        self._boxes: dict[str, tuple[Quel1BoxWithRawWss, SequencerClient]] = {}
+        self._boxes: dict[str, tuple[Quel1Box, SequencerClient]] = {}
         self._linkstatus: dict[str, bool] = {}
         self._estimated_timediff: dict[str, int] = {}
         self._cap_sysref_time_offset: int = 0
@@ -2152,26 +2247,26 @@ class BoxPool:
     ) -> None:
         self._clock_master = QuBEMasterClient(master_ipaddr=ipaddr)
 
-    def measure_timediff(
-        self, num_iters: int = DEFAULT_NUM_SYSREF_MEASUREMENTS
-    ) -> tuple[str, int]:
-        sqcs = {name: sqc for name, (_, sqc) in self._boxes.items()}
-        counter_at_sysref_clk = {name: 0 for name in self._boxes}
-        for _ in range(num_iters):
-            for name, sqc in sqcs.items():
-                m = sqc.read_clock()
-                if len(m) < 2:
-                    raise RuntimeError("firmware doesn't support this measurement")
-                counter_at_sysref_clk[name] += m[2] % self.SYSREF_PERIOD
-        avg: dict[str, int] = {
-            name: round(cntr / num_iters)
-            for name, cntr in counter_at_sysref_clk.items()
-        }
-        refname = list(self._boxes.keys())[0]
-        adj = avg[refname]
-        self._estimated_timediff = {name: cntr - adj for name, cntr in avg.items()}
-        self._cap_sysref_time_offset = avg[refname]
-        return refname, avg[refname]
+    # def measure_timediff(
+    #     self, num_iters: int = DEFAULT_NUM_SYSREF_MEASUREMENTS
+    # ) -> tuple[str, int]:
+    #     sqcs = {name: sqc for name, (_, sqc) in self._boxes.items()}
+    #     counter_at_sysref_clk = {name: 0 for name in self._boxes}
+    #     for _ in range(num_iters):
+    #         for name, sqc in sqcs.items():
+    #             m = sqc.read_clock()
+    #             if len(m) < 2:
+    #                 raise RuntimeError("firmware doesn't support this measurement")
+    #             counter_at_sysref_clk[name] += m[2] % self.SYSREF_PERIOD
+    #     avg: dict[str, int] = {
+    #         name: round(cntr / num_iters)
+    #         for name, cntr in counter_at_sysref_clk.items()
+    #     }
+    #     refname = list(self._boxes.keys())[0]
+    #     adj = avg[refname]
+    #     self._estimated_timediff = {name: cntr - adj for name, cntr in avg.items()}
+    #     self._cap_sysref_time_offset = avg[refname]
+    #     return refname, avg[refname]
 
     def create(
         self,
@@ -2183,8 +2278,8 @@ class BoxPool:
         boxtype: Quel1BoxType,
         # config_root: Optional[Path],
         # config_options: Optional[Collection[Quel1ConfigOption]] = None,
-    ) -> Quel1BoxWithRawWss:
-        box = Quel1BoxWithRawWss.create(
+    ) -> Quel1Box:
+        box = Quel1Box.create(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
@@ -2247,14 +2342,14 @@ class BoxPool:
             self._linkstatus[name] = link_status
 
     def reset_awg(self) -> None:
-        for name, (box, _) in self._boxes.items():
-            box.easy_stop_all(control_port_rfswitch=True)
-            box.initialize_all_awgs()
+        for box, _ in self._boxes.values():
+            # box.easy_stop_all(control_port_rfswitch=True)
+            box.initialize_all_awgunits()
 
     def get_box(
         self,
         name: str,
-    ) -> tuple[Quel1BoxWithRawWss, SequencerClient]:
+    ) -> tuple[Quel1Box, SequencerClient]:
         if name in self._boxes:
             box, sqc = self._boxes[name]
             return box, sqc

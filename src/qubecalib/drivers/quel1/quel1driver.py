@@ -106,8 +106,12 @@ class Quel1Driver(Driver):
         name_to_status = configuration.reconnect_and_get_link_status_in_parallel(
             name_to_box.values()
         )
-        logger.debug("Boxes initialized and reconnected.")
-        logger.debug(f"link_status: {name_to_status}")
+        if all([b for b in name_to_status.values()]):
+            logger.debug("Boxes initialized and reconnected.")
+            logger.debug(f"link_status: {name_to_status}")
+        else:
+            logger.warning("Some boxes failed to reconnect. Relinkup may be needed.")
+            logger.warning(f"link_status: {name_to_status}")
 
         name_to_box.clear()
 
