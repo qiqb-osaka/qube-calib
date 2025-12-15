@@ -15,8 +15,7 @@ import plotly.graph_objects as go
 import yaml
 from tqdm.auto import tqdm
 
-from .....instrument.quel.quel1.driver import Quel1System
-from .....instrument.quel.quel1.driver.single import Quel1PortType
+from .....instrument.quel.quel1.driver import Quel1PortType, Quel1System
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
 from .....qubecalib import Executor, PortSetting, QubeCalib, SystemConfigDatabase
 

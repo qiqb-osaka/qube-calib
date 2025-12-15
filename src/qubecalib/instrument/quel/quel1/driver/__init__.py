@@ -1,6 +1,7 @@
+from quel_ic_config import Quel1PortType
+
 from .common import Action, AwgId, AwgSetting, RunitId, RunitSetting, TriggerSetting
 from .multi import NamedBox, Quel1System
-from .single import Quel1PortType
 
 __all__ = [
     "AwgId",

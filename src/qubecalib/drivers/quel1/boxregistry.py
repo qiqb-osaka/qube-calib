@@ -64,7 +64,7 @@ class BoxRegistry:
             self._handles[name] = handle
             count = len(self._handles)
         logger.debug(
-            f"Box {name} registered (deadline {datetime.datetime.fromtimestamp(resolved_deadline)} sec)."
+            f"Box {name} registered (deadline {datetime.datetime.fromtimestamp(resolved_deadline) if resolved_deadline != float('inf') else 'inf'} sec)."
         )
         if self._on_state_change:
             # call outside lock to avoid potential deadlock

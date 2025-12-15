@@ -1,8 +1,8 @@
 import pytest
 from e7awgsw import CaptureParam, WaveSequence
+from qubecalib.e7utils import QuBEMasterClient
 from qubecalib.instrument.quel.quel1.driver import multi, single
-from quel_clock_master import QuBEMasterClient
-from quel_ic_config import Quel1BoxType, Quel1BoxWithRawWss
+from quel_ic_config import Quel1Box, Quel1BoxType
 
 MASTER_IPADDR = "10.3.0.255"
 # 64QMUX10 R26A, U7B
@@ -16,8 +16,8 @@ def master() -> QuBEMasterClient:
 
 
 @pytest.fixture
-def box() -> Quel1BoxWithRawWss:
-    return Quel1BoxWithRawWss.create(
+def box() -> Quel1Box:
+    return Quel1Box.create(
         ipaddr_wss=list(BOX_KEYS)[0],
         boxtype=list(BOX_TYPES)[0],
         # QuBE_OU_TypeA = ("qube", "ou-type-a")
@@ -45,11 +45,11 @@ def quel1system() -> multi.Quel1System:
             master_ipaddr=MASTER_IPADDR,
         ),
         boxes=[
-            Quel1BoxWithRawWss.create(
+            Quel1Box.create(
                 ipaddr_wss=list(BOX_KEYS)[0],
                 boxtype=list(BOX_TYPES)[0],
             ),
-            Quel1BoxWithRawWss.create(
+            Quel1Box.create(
                 ipaddr_wss=list(BOX_KEYS)[1],
                 boxtype=list(BOX_TYPES)[1],
             ),

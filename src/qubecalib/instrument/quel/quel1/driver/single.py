@@ -3,14 +3,15 @@ from __future__ import annotations
 from collections import defaultdict
 from concurrent.futures import Future
 from types import MappingProxyType
-from typing import Final, NamedTuple, Optional, Union
+from typing import Final, NamedTuple, Optional
 
 import numpy as np
 import numpy.typing as npt
 from e7awgsw import CaptureParam, WaveSequence
-from quel_ic_config import CaptureReturnCode, Quel1BoxWithRawWss, Quel1WaveSubsystem
+from quel_ic_config import Quel1Box, Quel1WaveSubsystem
 
-Quel1PortType = Union[int, tuple[int, int]]
+from .....e7utils import CaptureReturnCode
+from . import Quel1PortType
 
 
 class AwgId(NamedTuple):
@@ -41,12 +42,12 @@ class TriggerSetting(NamedTuple):
 class Action:
     def __init__(
         self,
-        box: Quel1BoxWithRawWss,
+        box: Quel1Box,
         wseqs: MappingProxyType[AwgId, WaveSequence],
         cprms: MappingProxyType[RunitId, CaptureParam],
         triggers: MappingProxyType[Quel1PortType, AwgId],
     ) -> None:
-        self._box: Final[Quel1BoxWithRawWss] = box
+        self._box: Final[Quel1Box] = box
         self._wseqs: Final[MappingProxyType[AwgId, WaveSequence]] = wseqs
         self._cprms: Final[MappingProxyType[RunitId, CaptureParam]] = cprms
         self._triggers: Final[MappingProxyType[Quel1PortType, AwgId]] = triggers
@@ -55,14 +56,14 @@ class Action:
     def build(
         cls,
         *,
-        box: Quel1BoxWithRawWss,
+        box: Quel1Box,
         settings: list[RunitSetting | AwgSetting | TriggerSetting],
     ) -> Action:
         wseqs, cprms, triggers = cls.parse_settings(settings)
         self = cls(box, wseqs, cprms, triggers)
         self._load_to_device()
         awgs = set([(s.port, s.channel) for s in self._wseqs])
-        box.prepare_for_emission(awgs)
+        # box.prepare_for_emission(awgs)
         return self
 
     @staticmethod
@@ -223,5 +224,5 @@ class Action:
     # box を変更されたくないので getter を用意し setter は用意しない
     # 細かな制御は直接 box を操作することで行う
     @property
-    def box(self) -> Quel1BoxWithRawWss:
+    def box(self) -> Quel1Box:
         return self._box
