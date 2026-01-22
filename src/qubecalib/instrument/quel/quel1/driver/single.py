@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from concurrent.futures import Future
 from types import MappingProxyType
-from typing import Final, NamedTuple, Optional, Union
+from typing import Final, NamedTuple, Optional, Union, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -81,7 +81,7 @@ class Action:
             if isinstance(setting, AwgSetting):
                 wseqs[setting.awg] = setting.wseq
             elif isinstance(setting, RunitSetting):
-                cprms[setting.runit] = setting.cprm
+                cprms[setting.runit] = cast(RunitSetting, setting).cprm
             elif isinstance(setting, TriggerSetting):
                 triggers[setting.triggerd_port] = setting.trigger_awg
             else:
