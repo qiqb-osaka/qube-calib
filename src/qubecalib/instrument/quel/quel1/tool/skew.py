@@ -6,8 +6,7 @@ from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from logging import getLogger
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Final, Type, cast
+from typing import Any, Final, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -70,12 +69,6 @@ class EstimatedPulseParams:
     idx: int
     scale: int
     mean: int
-    # slot: int = field(init=False)
-    # wait: int = field(init=False)
-
-    # def __post_init__(self) -> None:
-    #     self.slot = self.idx // 64
-    #     self.wait = self.idx % 64
 
 
 @dataclass
@@ -233,53 +226,53 @@ class SkewSetting:
         return set({box_name for box_name, _ in self.target_port})
 
 
-class SkewAdjustResetter:
-    def __init__(
-        self,
-        skew_adjust: SkewAdjust,
-        *,
-        reference_port: PORT,
-        target_ports: set[PORT],
-    ) -> None:
-        self._skew_adjust = skew_adjust
-        self._reference_port = reference_port
-        self._target_ports = target_ports
-        self._backup_reference: tuple[int, int] | None = None
-        self._backup_targets: dict[PORT, tuple[int, int]] = {}
+# class SkewAdjustResetter:
+#     def __init__(
+#         self,
+#         skew_adjust: SkewAdjust,
+#         *,
+#         reference_port: PORT,
+#         target_ports: set[PORT],
+#     ) -> None:
+#         self._skew_adjust = skew_adjust
+#         self._reference_port = reference_port
+#         self._target_ports = target_ports
+#         self._backup_reference: tuple[int, int] | None = None
+#         self._backup_targets: dict[PORT, tuple[int, int]] = {}
 
-    def __enter__(self) -> None:
-        self._backup_reference = (
-            self._skew_adjust.slot[self._reference_port],
-            self._skew_adjust.wait[self._reference_port],
-        )
-        self._skew_adjust.slot[self._reference_port] = 0
-        self._skew_adjust.wait[self._reference_port] = 0
-        for target_port in self._target_ports:
-            self._backup_targets[target_port] = (
-                self._skew_adjust.slot[target_port],
-                self._skew_adjust.wait[target_port],
-            )
-            self._skew_adjust.slot[target_port] = 0
-            self._skew_adjust.wait[target_port] = 0
-        self._skew_adjust.push()
+#     def __enter__(self) -> None:
+#         self._backup_reference = (
+#             self._skew_adjust.slot[self._reference_port],
+#             self._skew_adjust.wait[self._reference_port],
+#         )
+#         self._skew_adjust.slot[self._reference_port] = 0
+#         self._skew_adjust.wait[self._reference_port] = 0
+#         for target_port in self._target_ports:
+#             self._backup_targets[target_port] = (
+#                 self._skew_adjust.slot[target_port],
+#                 self._skew_adjust.wait[target_port],
+#             )
+#             self._skew_adjust.slot[target_port] = 0
+#             self._skew_adjust.wait[target_port] = 0
+#         self._skew_adjust.push()
 
-    def __exit__(
-        self,
-        exc_type: Type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        adj = self._skew_adjust
-        (
-            adj.slot[self._reference_port],
-            adj.wait[self._reference_port],
-        ) = cast(tuple[int, int], self._backup_reference)
-        for target_port in self._target_ports:
-            (
-                adj.slot[target_port],
-                adj.wait[target_port],
-            ) = self._backup_targets[target_port]
-        self._skew_adjust.push()
+#     def __exit__(
+#         self,
+#         exc_type: Type[BaseException] | None,
+#         exc_value: BaseException | None,
+#         traceback: TracebackType | None,
+#     ) -> None:
+#         adj = self._skew_adjust
+#         (
+#             adj.slot[self._reference_port],
+#             adj.wait[self._reference_port],
+#         ) = cast(tuple[int, int], self._backup_reference)
+#         for target_port in self._target_ports:
+#             (
+#                 adj.slot[target_port],
+#                 adj.wait[target_port],
+#             ) = self._backup_targets[target_port]
+#         self._skew_adjust.push()
 
 
 class Skew:
@@ -338,6 +331,18 @@ class Skew:
     #     logger.addHandler(handler)
     #     logger.setLevel(level)
     #     return logger
+
+    def reload_yaml(self, skew_yaml: str) -> None:
+        if self.setting is None:
+            raise ValueError("Skew setting is not defined")
+        self.setting = SkewSetting.from_yaml(
+            skew_yaml,
+            clockmaster_ip=self.setting.clockmaster_ip,
+        )
+        return None
+
+    def prepare(self) -> None:
+        self.config_rfswitches()
 
     @classmethod
     def from_yaml(
@@ -632,7 +637,6 @@ class Skew:
         logger.debug(
             f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
-
         lo_freq, cnco_freq = (
             cast(float, freqs["lo_freq"]) if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]) + ch_freqs[0]["fnco_freq"],
@@ -655,6 +659,10 @@ class Skew:
             dump_port["cnco_freq"] = cnco_freq
             for k, v in dump_port["channels"].items():
                 v["fnco_freq"] = 0
+
+            # ignore rfswitch setting
+            del dump_port["rfswitch"]
+
             config_box: dict[int | tuple[int, int], dict[str, Any]] = {nport: dump_port}
             box.config_box(config_box)
         elif "runits" in dump_port:
@@ -677,6 +685,8 @@ class Skew:
                     "fnco_freq"
                 ] = fnco_freq
 
+            # ignore rfswitch setting
+            del dump_port["rfswitch"]
             config_box = {nport: dump_port}
             box.config_box(config_box)
 
@@ -825,14 +835,14 @@ class Skew:
             f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
-    def reset_skew_parameter(self) -> SkewAdjustResetter:
-        # with reset_skew_parameter():
-        #     skew.measure()
-        return SkewAdjustResetter(
-            self._skew_adjust,
-            reference_port=self._reference_port,
-            target_ports=self._target_port,
-        )
+    # def reset_skew_parameter(self) -> SkewAdjustResetter:
+    #     # with reset_skew_parameter():
+    #     #     skew.measure()
+    #     return SkewAdjustResetter(
+    #         self._skew_adjust,
+    #         reference_port=self._reference_port,
+    #         target_ports=self._target_port,
+    #     )
 
     def config_rfswitches(self) -> None:
         for box_name, box in self.system.boxes.items():
@@ -844,7 +854,7 @@ class Skew:
         target_ports: set[PORT] | None = None,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
-        reset_skew_parameter: bool = False,
+        # reset_skew_parameter: bool = False,
         repeats: int = DEFAULT_REPEATS,
     ) -> None:
         target_ports = (
@@ -853,21 +863,21 @@ class Skew:
             else target_ports
         )
         self.define_targets(target_ports=target_ports)
-        if reset_skew_parameter:
-            with self.reset_skew_parameter():
-                self._measure_targets(
-                    target_ports,
-                    show_reference=show_reference,
-                    extra_capture_range=extra_capture_range,
-                    repeats=repeats,
-                )
-        else:
-            self._measure_targets(
-                target_ports,
-                show_reference=show_reference,
-                extra_capture_range=extra_capture_range,
-                repeats=repeats,
-            )
+        # if reset_skew_parameter:
+        #     with self.reset_skew_parameter():
+        #         self._measure_targets(
+        #             target_ports,
+        #             show_reference=show_reference,
+        #             extra_capture_range=extra_capture_range,
+        #             repeats=repeats,
+        #         )
+        # else:
+        self._measure_targets(
+            target_ports,
+            show_reference=show_reference,
+            extra_capture_range=extra_capture_range,
+            repeats=repeats,
+        )
 
     def _measure_targets(
         self,
@@ -878,7 +888,7 @@ class Skew:
         repeats: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        self._open_rfswitches(target_ports)
+        # self._open_rfswitches(target_ports)
         repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         with tqdm(target_ports) as t:
             for target_port in t:
