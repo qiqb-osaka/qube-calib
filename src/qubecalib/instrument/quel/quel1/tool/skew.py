@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 from .....instrument.quel.quel1.driver import Quel1System
 from .....instrument.quel.quel1.driver.single import Quel1PortType
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
-from .....qubecalib import Executor, PortSetting, QubeCalib, SystemConfigDatabase
+from .....qubecalib import Executor, PortSetting, SystemConfigDatabase
 
 DEFAULT_FREQUENCY = 9.75
 DEFAULT_LO_FREQ = 11000e6
@@ -236,7 +236,7 @@ class Skew:
         *,
         sysdb: SystemConfigDatabase,
         skew_yaml_path: str | None = None,
-    ) -> None:  # TODO ここは多分変わります
+    ) -> None:
         self._system: Final[Quel1System] = system
         self._sysdb: Final[SystemConfigDatabase] = sysdb
         self._executor: Final[Executor] = Executor(self.sysdb, quel1system=system)
@@ -287,8 +287,8 @@ class Skew:
         box_yaml: str | None = None,
         sysdb: SystemConfigDatabase | None = None,
         system: Quel1System | None = None,
-        boxes: list[str] = [],
-        ignore_boxes: list[str] = [],
+        boxes: list[str] | None = None,
+        ignore_boxes: list[str] | None = None,
         clockmaster_ip: str | None = None,
     ) -> Skew:
         setting = SkewSetting.from_yaml(skew_yaml, clockmaster_ip=clockmaster_ip)
@@ -305,9 +305,6 @@ class Skew:
         else:
             sysdb.load_skew_yaml(skew_yaml)
 
-        # if boxes and ignore_boxes:
-        #     raise ValueError("Only one of boxes or ignore_boxes must be provided")
-
         if system is not None and boxes != []:
             raise ValueError("Only one of system or boxes must be provided")
 
@@ -315,6 +312,8 @@ class Skew:
             list(setting.target_box_names) + [setting.monitor_box_name]
         )
 
+        boxes = [] if boxes is None else boxes
+        ignore_boxes = [] if ignore_boxes is None else ignore_boxes
         if boxes:
             if not all([box in available_boxes for box in boxes]):
                 raise ValueError("Some boxes in boxes are not available")
@@ -387,42 +386,14 @@ class Skew:
         cls,
         target_freq: float,  # Hz
         *,
-        minimum_lo_freq: float = 2e9,  # Hz
         minimum_cnco_freq: float = 2e9,  # Hz
-        maximum_cnco_freq: float = 3.5e9,  # Hz
         lo_step_size: float = 500e6,  # Hz
         cnco_step_size: float = 125e6,  # Hz
     ) -> dict[str, float | str]:
-        # !!! CAUTION !!! Frequency is in HMz, not in GHz
-        # target_freq = target_freq * 1e3
-        # MINIMUM_LO_FREQ = 2000  # 2000 まで可能 x 80 / 4 * 100 MHz
-        # MINIMUM_CNCO_FREQ = 2000
-        # LO_STEP_SIZE = 500
-        # CNCO_STEP_SIZE = 125
-        # if minimum_lo_freq + minimum_cnco_freq < target_freq:
-        #     sideband = "U"
-        #     lo_freq = (
-        #         minimum_lo_freq
-        #         + (target_freq - (minimum_lo_freq + minimum_cnco_freq))
-        #         // lo_step_size
-        #         * lo_step_size
-        #     )
-        #     cnco_freq = (target_freq - lo_freq) // cnco_step_size * cnco_step_size
-        #     fnco_freq = 0
-        # else:
-        #     sideband = "L"
-        #     lo_freq = (
-        #         minimum_lo_freq
-        #         + (
-        #             (target_freq - (minimum_lo_freq - minimum_cnco_freq))
-        #             // lo_step_size
-        #             + 1
-        #         )
-        #         * lo_step_size
-        #     )
-        #     cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
-        #     fnco_freq = 0
-        sideband = "L"
+        """
+        Compute LO/CNCO/FNCO assuming lower sideband (LSB) only.
+        """
+        sideband = "L"  # LSB only
         lo_freq = (target_freq + minimum_cnco_freq) // lo_step_size * lo_step_size
         cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
         fnco_freq = 0
@@ -462,7 +433,7 @@ class Skew:
         return {
             (box_name, nport)
             for box_name, nport in self._target_port
-            if box_name in box_names  #  and (box_name, nport) != self._reference_port
+            if box_name in box_names
         }
 
     def sync_lo_nco(
@@ -536,7 +507,6 @@ class Skew:
         freqs, ch_freqs = cls._parse_freqs_from_dump_port(
             dump_port=dump_port,
         )
-
         logger.debug(
             f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
@@ -633,8 +603,6 @@ class Skew:
         system: Quel1System,
         sysdb: SystemConfigDatabase,
     ) -> None:
-        # box = system.box[box_name]
-        # ports = box.dump_box()["ports"]
         ports = system.dump_box(box_name)["ports"]
         for nport, v in ports.items():
             nport = cast(int, nport)
@@ -650,9 +618,7 @@ class Skew:
                 sideband="U",
                 vatt=2048,
                 fnco_freq=None,
-                ndelay_or_nwait=tuple(
-                    len(channels) * [7 if io == "IN" else 0]
-                ),  # TODO: hard coding
+                ndelay_or_nwait=tuple(len(channels) * [7 if io == "IN" else 0]),
             )
             sysdb._port_settings[port_name] = port_setting
             for nchannel, v in channels.items():
@@ -672,7 +638,6 @@ class Skew:
     ) -> None:
         """target に合わせて周波数を設定する"""
         name, nport = target_port
-        # box = system.box[name]
         if not system.is_output_port(name, nport):
             raise ValueError(f"{target_port} is not output port")
         freqs = cls._sync_lo_nco(
@@ -682,13 +647,6 @@ class Skew:
         )
         ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
         DEFAULT_CHANNEL = 0
-        # lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
-        #     cast(float, freqs["lo_freq"]) * 1e-9 if "lo_freq" in freqs else 0,
-        #     cast(float, freqs["cnco_freq"]) * 1e-9,
-        #     ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
-        #     ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
-        #     cast(str, freqs["sideband"]),
-        # )
         target_freq = ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9
         target = cls.get_target_by_channel(sysdb, target_port)
         sysdb._target_settings[target] = dict(frequency=target_freq)
@@ -702,18 +660,6 @@ class Skew:
             f"_setup_monitor_port(): Target {target}:{target_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
         )
 
-    def setup_trigger_port(
-        self,
-        *,
-        trigger_port: PORT,
-    ) -> None:
-        """trigger の target 周波数を設定する"""
-        self._setup_trigger_port(
-            trigger_port=trigger_port,
-            system=self._system,
-            sysdb=self._sysdb,
-        )
-
     @classmethod
     def _setup_trigger_port(
         cls,
@@ -722,7 +668,7 @@ class Skew:
         system: Quel1System,
         sysdb: SystemConfigDatabase,
     ) -> None:
-        # """nco 設定に合わせて target 周波数を設定する"""
+        """nco 設定に合わせて target 周波数を設定する"""
         dump_port = system.dump_port(*trigger_port)
         freqs, ch_freqs = cls._parse_freqs_from_dump_port(dump_port=dump_port)
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
@@ -738,15 +684,6 @@ class Skew:
             f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
-    # def reset_skew_parameter(self) -> SkewAdjustResetter:
-    #     # with reset_skew_parameter():
-    #     #     skew.measure()
-    #     return SkewAdjustResetter(
-    #         self._skew_adjust,
-    #         reference_port=self._reference_port,
-    #         target_ports=self._target_port,
-    #     )
-
     def config_rfswitches(self) -> None:
         for box_name, box in self.system.boxes.items():
             box.config_rfswitches(cast(SkewSetting, self.setting).rf_switches[box_name])
@@ -759,16 +696,13 @@ class Skew:
         repeats: int = DEFAULT_REPEATS,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        self.define_targets(target_ports=target_ports)
-        # if reset_skew_parameter:
-        #     with self.reset_skew_parameter():
-        #         self._measure_targets(
-        #             target_ports,
-        #             show_reference=show_reference,
-        #             extra_capture_range=extra_capture_range,
-        #             repeats=repeats,
-        #         )
-        # else:
+        self._define_targets(
+            target_ports=target_ports,
+            reference_port=self._reference_port,
+            monitor_port=self._monitor_port,
+            trigger_nport=self._trigger_nport,
+            sysdb=self._sysdb,
+        )
         self._measure_targets(
             target_ports,
             show_reference=show_reference,
@@ -785,7 +719,6 @@ class Skew:
         repeats: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        # self._open_rfswitches(target_ports)
         repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         with tqdm(target_ports) as t:
             for target_port in t:
@@ -894,32 +827,6 @@ class Skew:
     def _store(self, target_port: PORT, iqs: npt.NDArray) -> None:
         self._measured_waveform[target_port] = iqs
 
-    def _open_rfswitches(
-        self,
-        target_ports: set[PORT],
-        *,
-        reference_port: PORT | None = None,
-    ) -> None:
-        # create alias
-        system = self._system
-        # default values
-        reference_port = (
-            self._reference_port if reference_port is None else reference_port
-        )
-        confs: dict[str, dict[str, Any]] = {}
-        for ctrl_box, _ in [reference_port] + [p for p in target_ports]:
-            m = system.get_monitor_input_ports(ctrl_box)
-            if m:
-                for port in m:
-                    if isinstance(port, tuple):
-                        raise ValueError("fogi port is not supported yet")
-                    if ctrl_box not in confs:
-                        confs[ctrl_box] = {"ports": {}}
-                    confs[ctrl_box]["ports"][port] = {"rfswitch": "open"}
-                    # system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
-        for box_name, conf in confs.items():
-            system.box[box_name].config_box(conf)
-
     def _config_ports(
         self,
         target_port: PORT,
@@ -948,7 +855,6 @@ class Skew:
 
         monitor_box_name, _ = monitor_port
         trigger_port: PORT = (monitor_box_name, trigger_nport)
-        # target_ports = set([target_port])
         trigger_box_name, trigger_port_number = trigger_port
         trigger_channel: tuple[str, int, int] = (
             trigger_box_name,
@@ -1019,8 +925,6 @@ class Skew:
                 target_name = channel_name
                 sysdb._relation_channel_target.append((target_name, channel_name))
                 sysdb._target_settings[target_name] = dict(frequency=0)
-            # sysdb._relation_channel_target.append((target_name, channel_name))
-            # sysdb._target_settings[target_name] = dict(frequency=0)
 
     def define_targets(
         self,
@@ -1030,6 +934,7 @@ class Skew:
         monitor_port: PORT | None = None,
         trigger_nport: int | None = None,
     ) -> None:
+        """Deprecated public wrapper retained for backward compatibility."""
         # default values
         reference_port = (
             self._reference_port if reference_port is None else reference_port
@@ -1105,7 +1010,6 @@ class Skew:
                     x=2 * np.arange(len(iqs)),
                     y=np.abs(iqs),
                     mode="lines",
-                    # name=f"{focused_port}: measured",
                 ),
                 row=1 + i,
                 col=1,
@@ -1118,7 +1022,6 @@ class Skew:
                     x=2 * np.arange(len(iqs)),
                     y=iqs,
                     mode="lines",
-                    # name=f"{focused_port}: estimated",
                 ),
                 row=1 + i,
                 col=1,
