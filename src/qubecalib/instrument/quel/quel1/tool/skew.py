@@ -287,6 +287,7 @@ class Skew:
         # executor: Executor | None = None,
         qubecalib: QubeCalib
         | None = None,  # TODO: qubex の experiment.py:138 を修正してもらう
+        skew_yaml_path: str | None = None,
     ) -> None:  # TODO ここは多分変わります
         if qubecalib is not None:
             sysdb = qubecalib.sysdb
@@ -305,6 +306,7 @@ class Skew:
         self._target_port: set[PORT] = set()
         self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
+        self._skew_yaml_path: str | None = skew_yaml_path
         # self._estimated_idx: dict[PORT, int] = {}
         # self._estimated_slot: dict[PORT, int] = {}
         # self._estimated_wait: dict[PORT, int] = {}
@@ -333,13 +335,29 @@ class Skew:
     #     return logger
 
     def reload_yaml(self, skew_yaml: str) -> None:
-        if self.setting is None:
-            raise ValueError("Skew setting is not defined")
-        self.setting = SkewSetting.from_yaml(
-            skew_yaml,
-            clockmaster_ip=self.setting.clockmaster_ip,
-        )
+        """Backward-compatible wrapper. Use reload() instead."""
+        self.reload(skew_yaml)
         return None
+
+    def reload(self, skew_yaml: str | None = None) -> None:
+        """
+        Reload skew parameters from skew.yaml without recreating system objects.
+        This is intended for quick trial iterations.
+        """
+        path = skew_yaml if skew_yaml is not None else self._skew_yaml_path
+        if path is None:
+            raise ValueError("skew_yaml path must be provided at least once")
+        clockmaster_ip = self.setting.clockmaster_ip if self.setting else None
+        self._skew_yaml_path = path
+        self._sysdb.load_skew_yaml(path)
+        new_setting = SkewSetting.from_yaml(path, clockmaster_ip=clockmaster_ip)
+        self.setting = new_setting
+        self._skew_adjust.target_ports = copy(new_setting.target_port)
+        self._skew_adjust.pull()
+        self.config_rfswitches()
+        # drop old measurement cache to avoid confusion after parameter change
+        self._measured_waveform.clear()
+        self._estimated.clear()
 
     def prepare(self) -> None:
         self.config_rfswitches()
@@ -395,7 +413,7 @@ class Skew:
         else:
             system = sysdb.refresh_quel1system(system)
 
-        self = Skew(system=system, sysdb=sysdb)
+        self = Skew(system=system, sysdb=sysdb, skew_yaml_path=skew_yaml)
         self.setting = setting
         return self
 
