@@ -226,55 +226,6 @@ class SkewSetting:
         return set({box_name for box_name, _ in self.target_port})
 
 
-# class SkewAdjustResetter:
-#     def __init__(
-#         self,
-#         skew_adjust: SkewAdjust,
-#         *,
-#         reference_port: PORT,
-#         target_ports: set[PORT],
-#     ) -> None:
-#         self._skew_adjust = skew_adjust
-#         self._reference_port = reference_port
-#         self._target_ports = target_ports
-#         self._backup_reference: tuple[int, int] | None = None
-#         self._backup_targets: dict[PORT, tuple[int, int]] = {}
-
-#     def __enter__(self) -> None:
-#         self._backup_reference = (
-#             self._skew_adjust.slot[self._reference_port],
-#             self._skew_adjust.wait[self._reference_port],
-#         )
-#         self._skew_adjust.slot[self._reference_port] = 0
-#         self._skew_adjust.wait[self._reference_port] = 0
-#         for target_port in self._target_ports:
-#             self._backup_targets[target_port] = (
-#                 self._skew_adjust.slot[target_port],
-#                 self._skew_adjust.wait[target_port],
-#             )
-#             self._skew_adjust.slot[target_port] = 0
-#             self._skew_adjust.wait[target_port] = 0
-#         self._skew_adjust.push()
-
-#     def __exit__(
-#         self,
-#         exc_type: Type[BaseException] | None,
-#         exc_value: BaseException | None,
-#         traceback: TracebackType | None,
-#     ) -> None:
-#         adj = self._skew_adjust
-#         (
-#             adj.slot[self._reference_port],
-#             adj.wait[self._reference_port],
-#         ) = cast(tuple[int, int], self._backup_reference)
-#         for target_port in self._target_ports:
-#             (
-#                 adj.slot[target_port],
-#                 adj.wait[target_port],
-#             ) = self._backup_targets[target_port]
-#         self._skew_adjust.push()
-
-
 class Skew:
     DEFAULT_CHANNEL = 0
     DEFAULT_REPEATS = 100
@@ -283,16 +234,9 @@ class Skew:
         self,
         system: Quel1System,
         *,
-        sysdb: SystemConfigDatabase | None = None,
-        # executor: Executor | None = None,
-        qubecalib: QubeCalib
-        | None = None,  # TODO: qubex の experiment.py:138 を修正してもらう
+        sysdb: SystemConfigDatabase,
         skew_yaml_path: str | None = None,
     ) -> None:  # TODO ここは多分変わります
-        if qubecalib is not None:
-            sysdb = qubecalib.sysdb
-        if sysdb is None:
-            raise ValueError("sysdb and executor must be provided")
         self._system: Final[Quel1System] = system
         self._sysdb: Final[SystemConfigDatabase] = sysdb
         self._executor: Final[Executor] = Executor(self.sysdb, quel1system=system)
@@ -301,43 +245,16 @@ class Skew:
         self._reference_port: PORT = ("", 0)
         self._scale: dict[PORT, float] = {}
         self._measured_waveform: dict[PORT, npt.NDArray] = {}
-        # self._estimated_waveform: dict[PORT, npt.NDArray] = {}
-        self._offset: dict[PORT, int] = {}
         self._target_port: set[PORT] = set()
         self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
         self._skew_yaml_path: str | None = skew_yaml_path
-        # self._estimated_idx: dict[PORT, int] = {}
-        # self._estimated_slot: dict[PORT, int] = {}
-        # self._estimated_wait: dict[PORT, int] = {}
         self._estimated: dict[PORT, EstimatedPulseParams] = {}
         for box_name in self._system.boxes:
             if not self.is_channel_defined(box_name, sysdb=self.sysdb):
                 self._define_channel_names(
                     box_name, system=self._system, sysdb=self.sysdb
                 )
-        self._repeats = 100
-
-    # def show_log(
-    #     self,
-    #     name: str = __name__,
-    #     *,
-    #     level: int = logging.DEBUG,
-    #     handler: logging.Handler = logging.StreamHandler(),
-    #     formatter: logging.Formatter = logging.Formatter(
-    #         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    #     ),
-    # ) -> Logger:
-    #     handler.setFormatter(formatter)
-    #     logger = getLogger(__name__)
-    #     logger.addHandler(handler)
-    #     logger.setLevel(level)
-    #     return logger
-
-    def reload_yaml(self, skew_yaml: str) -> None:
-        """Backward-compatible wrapper. Use reload() instead."""
-        self.reload(skew_yaml)
-        return None
 
     def reload(self, skew_yaml: str | None = None) -> None:
         """
@@ -416,27 +333,6 @@ class Skew:
         self = Skew(system=system, sysdb=sysdb, skew_yaml_path=skew_yaml)
         self.setting = setting
         return self
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        setting: SkewSetting,
-        system: Quel1System,
-        sysdb: SystemConfigDatabase,
-        monitor_port: PORT | None = None,
-        trigger_nport: int | None = None,
-        reference_port: PORT | None = None,
-    ) -> Skew:
-        skew = Skew(system=system, sysdb=sysdb)
-        skew.setting = setting
-        if monitor_port is not None:
-            skew._monitor_port = monitor_port
-        if trigger_nport is not None:
-            skew._trigger_nport = trigger_nport
-        if reference_port is not None:
-            skew._reference_port = reference_port
-        return skew
 
     @property
     def sysdb(self) -> SystemConfigDatabase:
@@ -553,17 +449,6 @@ class Skew:
         target = next(iter({t for t in targets if len(t.split("-")) == 1}))
         return target
 
-    @classmethod
-    def acquire_target(
-        cls,
-        sysdb: SystemConfigDatabase,
-        port: PORT,
-        channel: int | None = None,
-    ) -> str:
-        # default value
-        # channel = DEFAULT_CHANNEL_NUM if channel is None else channel
-        return cls.get_target_by_channel(sysdb, port, channel)
-
     def _acquire_target(
         self,
         port: PORT,
@@ -571,7 +456,7 @@ class Skew:
         sysdb: SystemConfigDatabase | None = None,
     ) -> str:
         sysdb = self._sysdb if sysdb is None else sysdb
-        return self.acquire_target(sysdb, port, channel)
+        return self.get_target_by_channel(sysdb, port, channel)
 
     def target_from_box(self, box_names: list[str]) -> set[PORT]:
         return {
@@ -805,9 +690,9 @@ class Skew:
         #     cast(str, freqs["sideband"]),
         # )
         target_freq = ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9
-        target = cls.acquire_target(sysdb, target_port)
+        target = cls.get_target_by_channel(sysdb, target_port)
         sysdb._target_settings[target] = dict(frequency=target_freq)
-        monitor = cls.acquire_target(sysdb, monitor_port)
+        monitor = cls.get_target_by_channel(sysdb, monitor_port)
         sysdb._target_settings[monitor] = dict(frequency=target_freq)
         lo_freq = system.get_lo_freq(*monitor_port)
         cnco_freq = system.get_cnco_freq(*monitor_port)
@@ -847,7 +732,7 @@ class Skew:
             ch_freqs[cls.DEFAULT_CHANNEL]["target_freq"] * 1e-9,
             cast(str, freqs["sideband"]),
         )
-        trigger = cls.acquire_target(sysdb, trigger_port)
+        trigger = cls.get_target_by_channel(sysdb, trigger_port)
         sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
             f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
@@ -869,17 +754,11 @@ class Skew:
     def measure(
         self,
         *,
-        target_ports: set[PORT] | None = None,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
-        # reset_skew_parameter: bool = False,
         repeats: int = DEFAULT_REPEATS,
     ) -> None:
-        target_ports = (
-            self.target_from_box(list(self._system.boxes))
-            if target_ports is None
-            else target_ports
-        )
+        target_ports = self.target_from_box(list(self._system.boxes))
         self.define_targets(target_ports=target_ports)
         # if reset_skew_parameter:
         #     with self.reset_skew_parameter():
