@@ -44,23 +44,64 @@ def str2port(v: str) -> PORT:
     box_name, nport = v.split("-")[:2]
     return box_name, int(nport)
 
+    # def port2str(v: PORT) -> str:
+    #     box_name, nport = v
+    #     return f"{box_name}-{nport}"
 
-# def port2str(v: PORT) -> str:
-#     box_name, nport = v
-#     return f"{box_name}-{nport}"
+    # @dataclass
+    # class BoxSkewData:
+    #     target_port: PORT
+    #     slot: int
+    #     wait: int
+
+    # @dataclass
+    # class MeasuredPulseWaveform:
+    #     waveform: npt.NDArray[np.complex64]
+    #     offset: int
 
 
-# @dataclass
-# class BoxSkewData:
-#     target_port: PORT
-#     slot: int
-#     wait: int
+def _parse_port_type(k: Any) -> Quel1PortType:
+    """
+    Normalize rf_switches keys loaded from YAML into Quel1PortType
+    (int | tuple[int, int]).
 
+    Notes
+    -----
+    - Quel1PortType is a *type alias*, not a runtime class.
+      Therefore:
+        * isinstance(k, Quel1PortType) is invalid
+        * Quel1PortType[...] (Enum-style access) is invalid
+    - Runtime checks must be performed against concrete types
+      (int / tuple), and the result is cast to Quel1PortType.
+    """
 
-# @dataclass
-# class MeasuredPulseWaveform:
-#     waveform: npt.NDArray[np.complex64]
-#     offset: int
+    # Case 1: already an integer port index
+    if isinstance(k, int):
+        return cast(Quel1PortType, k)
+
+    # Case 2: already a tuple[int, int]
+    if isinstance(k, tuple) and len(k) == 2 and all(isinstance(x, int) for x in k):
+        return cast(Quel1PortType, k)
+
+    # Case 3: string representations coming from YAML or user edits
+    if isinstance(k, str):
+        s = k.strip()
+
+        # "3" -> 3
+        if s.isdecimal():
+            return cast(Quel1PortType, int(s))
+
+        # "(3, 4)" or "3,4" -> (3, 4)
+        s2 = s
+        if s2.startswith("(") and s2.endswith(")"):
+            s2 = s2[1:-1].strip()
+
+        parts = [p.strip() for p in s2.split(",")]
+        if len(parts) == 2 and all(p.isdecimal() for p in parts):
+            return cast(Quel1PortType, (int(parts[0]), int(parts[1])))
+
+    # Any other form is considered invalid
+    raise TypeError(f"Invalid rf_switch port key: {k!r}")
 
 
 @dataclass
@@ -173,6 +214,11 @@ class SkewSetting:
         reference_port = str2port(cast(str, yaml_dict["reference_port"]))
         monitor_port = str2port(cast(str, yaml_dict["monitor_port"]))
         trigger_nport = cast(int, yaml_dict["trigger_nport"])
+        raw_targets = yaml_dict["target_port"]
+        if isinstance(raw_targets, (list, tuple, set)):
+            target_port = {str2port(v) for v in raw_targets}
+        else:
+            raise TypeError("target_port must be a list/tuple/set of strings")
         target_port = {str2port(v) for v in cast(set[str], yaml_dict["target_port"])}
         scale = {
             str2port(p): v
@@ -187,14 +233,9 @@ class SkewSetting:
             repeats = {}
         if "rf_switches" in yaml_dict:
             rf_switches = {
-                box_name: {
-                    nport: state
-                    for nport, state in cast(
-                        dict[Quel1PortType, str], box_setting
-                    ).items()
-                }
+                box_name: {_parse_port_type(k): str(v) for k, v in box_setting.items()}
                 for box_name, box_setting in cast(
-                    dict[str, dict[Quel1PortType, str]], yaml_dict["rf_switches"]
+                    dict[str, dict[str, Any]], yaml_dict["rf_switches"]
                 ).items()
             }
         else:
@@ -325,7 +366,6 @@ class Skew:
         boxes = [box for box in boxes if box not in ignore_boxes]
 
         if system is None:
-            system = cast(Quel1System, system)
             system = sysdb.create_quel1system(*boxes)
         else:
             system = sysdb.refresh_quel1system(system)
@@ -563,9 +603,10 @@ class Skew:
             del dump_port["rfswitch"]
             config_box = {nport: dump_port}
             box.config_box(config_box)
-
+        channels_or_runits = freqs.get("channels", freqs.get("runits"))
         logger.debug(
-            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={freqs['sideband']}"
+            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, "
+            f"units={channels_or_runits}, sideband={freqs.get('sideband', '')}"
         )
 
         return freqs
@@ -686,8 +727,12 @@ class Skew:
         )
 
     def config_rfswitches(self) -> None:
+        setting = cast(SkewSetting, self.setting)
         for box_name, box in self.system.boxes.items():
-            box.config_rfswitches(cast(SkewSetting, self.setting).rf_switches[box_name])
+            box_setting = setting.rf_switches.get(box_name)
+            if not box_setting:
+                continue
+            box.config_rfswitches(box_setting)
 
     def measure(
         self,
