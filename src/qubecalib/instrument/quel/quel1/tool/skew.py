@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 from collections import OrderedDict
-from copy import copy, deepcopy
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Final, cast
@@ -45,22 +45,22 @@ def str2port(v: str) -> PORT:
     return box_name, int(nport)
 
 
-def port2str(v: PORT) -> str:
-    box_name, nport = v
-    return f"{box_name}-{nport}"
+# def port2str(v: PORT) -> str:
+#     box_name, nport = v
+#     return f"{box_name}-{nport}"
 
 
-@dataclass
-class BoxSkewData:
-    target_port: PORT
-    slot: int
-    wait: int
+# @dataclass
+# class BoxSkewData:
+#     target_port: PORT
+#     slot: int
+#     wait: int
 
 
-@dataclass
-class MeasuredPulseWaveform:
-    waveform: npt.NDArray[np.complex64]
-    offset: int
+# @dataclass
+# class MeasuredPulseWaveform:
+#     waveform: npt.NDArray[np.complex64]
+#     offset: int
 
 
 @dataclass
@@ -71,71 +71,71 @@ class EstimatedPulseParams:
     mean: int
 
 
-@dataclass
-class SkewData:
-    sysdb: SystemConfigDatabase
-    boxes: dict[str, BoxSkewData] = field(default_factory=dict)
-    time_to_start: int = 0
+# @dataclass
+# class SkewData:
+#     sysdb: SystemConfigDatabase
+#     boxes: dict[str, BoxSkewData] = field(default_factory=dict)
+#     time_to_start: int = 0
 
 
-@dataclass
-class SkewAdjust:
-    sysdb: SystemConfigDatabase
-    target_ports: set[PORT] = field(default_factory=set)
-    slot: dict[PORT, int] = field(default_factory=dict)
-    wait: dict[PORT, int] = field(default_factory=dict)
-    time_to_start: int = 0
+# @dataclass
+# class SkewAdjust:
+#     sysdb: SystemConfigDatabase
+#     target_ports: set[PORT] = field(default_factory=set)
+#     slot: dict[PORT, int] = field(default_factory=dict)
+#     wait: dict[PORT, int] = field(default_factory=dict)
+#     time_to_start: int = 0
 
-    @staticmethod
-    def load(
-        config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-        sysdb: SystemConfigDatabase,
-        target_ports: set[PORT],
-    ) -> SkewAdjust:
-        return SkewAdjust.from_yaml_dict(config, sysdb, target_ports)
+#     @staticmethod
+#     def load(
+#         config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+#         sysdb: SystemConfigDatabase,
+#         target_ports: set[PORT],
+#     ) -> SkewAdjust:
+#         return SkewAdjust.from_yaml_dict(config, sysdb, target_ports)
 
-    @staticmethod
-    def from_yaml_dict(
-        yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-        sysdb: SystemConfigDatabase,
-        target_ports: set[PORT],
-    ) -> SkewAdjust:
-        box_setting = cast(dict[str, dict[str, int]], yaml_dict["box_setting"])
-        slot = {
-            (bname, nport): box_setting[bname]["slot"]
-            for (bname, nport) in target_ports
-        }
-        wait = {
-            (bname, nport): box_setting[bname]["wait"]
-            for (bname, nport) in target_ports
-        }
-        time_to_start = cast(int, yaml_dict["time_to_start"])
-        return SkewAdjust(
-            sysdb,
-            target_ports=target_ports,
-            slot=slot,
-            wait=wait,
-            time_to_start=time_to_start,
-        )
+#     @staticmethod
+#     def from_yaml_dict(
+#         yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+#         sysdb: SystemConfigDatabase,
+#         target_ports: set[PORT],
+#     ) -> SkewAdjust:
+#         box_setting = cast(dict[str, dict[str, int]], yaml_dict["box_setting"])
+#         slot = {
+#             (bname, nport): box_setting[bname]["slot"]
+#             for (bname, nport) in target_ports
+#         }
+#         wait = {
+#             (bname, nport): box_setting[bname]["wait"]
+#             for (bname, nport) in target_ports
+#         }
+#         time_to_start = cast(int, yaml_dict["time_to_start"])
+#         return SkewAdjust(
+#             sysdb,
+#             target_ports=target_ports,
+#             slot=slot,
+#             wait=wait,
+#             time_to_start=time_to_start,
+#         )
 
-    def push(self) -> None:
-        for (box_name, _), slot in self.slot.items():
-            self.sysdb.timing_shift[box_name] = slot * 16
-        for (box_name, _), wait in self.wait.items():
-            self.sysdb.skew[box_name] = wait
-        self.sysdb.time_to_start = self.time_to_start
+#     def push(self) -> None:
+#         for (box_name, _), slot in self.slot.items():
+#             self.sysdb.timing_shift[box_name] = slot * 16
+#         for (box_name, _), wait in self.wait.items():
+#             self.sysdb.skew[box_name] = wait
+#         self.sysdb.time_to_start = self.time_to_start
 
-    def pull(self) -> None:
-        for port in self.target_ports:
-            box_name, _ = port
-            self.slot[port] = self.sysdb.timing_shift[box_name] // 16
-            self.wait[port] = self.sysdb.skew[box_name]
-        self.time_to_start = self.sysdb.time_to_start
+#     def pull(self) -> None:
+#         for port in self.target_ports:
+#             box_name, _ = port
+#             self.slot[port] = self.sysdb.timing_shift[box_name] // 16
+#             self.wait[port] = self.sysdb.skew[box_name]
+#         self.time_to_start = self.sysdb.time_to_start
 
-    def backup(self) -> SkewAdjust:
-        o = SkewAdjust(self.sysdb, target_ports=self.target_ports)
-        o.pull()
-        return o
+#     def backup(self) -> SkewAdjust:
+#         o = SkewAdjust(self.sysdb, target_ports=self.target_ports)
+#         o.pull()
+#         return o
 
 
 @dataclass
@@ -149,11 +149,11 @@ class SkewSetting:
     rf_switches: dict[str, dict[Quel1PortType, str]]
     clockmaster_ip: str
 
-    @staticmethod
-    def load(
-        config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-    ) -> "SkewSetting":
-        return SkewSetting.from_yaml_dict(config)
+    # @staticmethod
+    # def load(
+    #     config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+    # ) -> "SkewSetting":
+    #     return SkewSetting.from_yaml_dict(config)
 
     @staticmethod
     def from_yaml(filename: str, *, clockmaster_ip: str | None = None) -> "SkewSetting":
@@ -246,7 +246,7 @@ class Skew:
         self._scale: dict[PORT, float] = {}
         self._measured_waveform: dict[PORT, npt.NDArray] = {}
         self._target_port: set[PORT] = set()
-        self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
+        # self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
         self._skew_yaml_path: str | None = skew_yaml_path
         self._estimated: dict[PORT, EstimatedPulseParams] = {}
@@ -267,11 +267,12 @@ class Skew:
         clockmaster_ip = self.setting.clockmaster_ip if self.setting else None
         self._skew_yaml_path = path
         self._sysdb.load_skew_yaml(path)
+        self._sysdb.refresh_quel1system(self._system)
         new_setting = SkewSetting.from_yaml(path, clockmaster_ip=clockmaster_ip)
         self.setting = new_setting
-        self._skew_adjust.target_ports = copy(new_setting.target_port)
-        self._skew_adjust.pull()
-        self.config_rfswitches()
+        # self._skew_adjust.target_ports = copy(new_setting.target_port)
+        # self._skew_adjust.pull()
+        # self.config_rfswitches()
         # drop old measurement cache to avoid confusion after parameter change
         self._measured_waveform.clear()
         self._estimated.clear()
@@ -1043,40 +1044,40 @@ class Skew:
             )
         return fig
 
-    def load(self, filename: str) -> None:
-        with open(Path(os.getcwd()) / Path(filename), "r") as file:
-            config = yaml.safe_load(file)
-        self.setting = SkewSetting.from_yaml_dict(config)
-        sysdb = self._sysdb
-        target = self._target_port
-        self._skew_adjust = SkewAdjust.from_yaml_dict(
-            config,
-            sysdb=sysdb,
-            target_ports=target,
-        )
-        self._skew_adjust.push()
+    # def load(self, filename: str) -> None:
+    #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
+    #         config = yaml.safe_load(file)
+    #     self.setting = SkewSetting.from_yaml_dict(config)
+    #     sysdb = self._sysdb
+    #     target = self._target_port
+    #     self._skew_adjust = SkewAdjust.from_yaml_dict(
+    #         config,
+    #         sysdb=sysdb,
+    #         target_ports=target,
+    #     )
+    #     self._skew_adjust.push()
 
-    def load_setting(self, filename: str) -> None:
-        with open(Path(os.getcwd()) / Path(filename), "r") as file:
-            config = yaml.safe_load(file)
-        self.setting = SkewSetting.from_yaml_dict(config)
-        setting = cast(SkewSetting, self.setting)
-        self._skew_adjust.target_ports = copy(setting.target_port)
-        self._skew_adjust.pull()
+    # def load_setting(self, filename: str) -> None:
+    #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
+    #         config = yaml.safe_load(file)
+    #     self.setting = SkewSetting.from_yaml_dict(config)
+    #     setting = cast(SkewSetting, self.setting)
+    #     self._skew_adjust.target_ports = copy(setting.target_port)
+    #     self._skew_adjust.pull()
 
-    def save(self, filename: str) -> None:
-        sysdb = self._sysdb
-        config = {
-            "time_to_start": sysdb.time_to_start,
-            "box_setting": {
-                box_name: {"slot": v // 16, "wait": sysdb.skew[box_name]}
-                for box_name, v in sysdb.timing_shift.items()
-            },
-            "reference_port": port2str(self._reference_port),
-            "monitor_port": port2str(self._monitor_port),
-            "trigger_nport": self._trigger_nport,
-            "target_port": {port2str(v) for v in self._target_port},
-            "scale": {port2str(p): v for p, v in self._scale.items()},
-        }
-        with open(Path(os.getcwd()) / Path(filename), "w") as file:
-            yaml.safe_dump(config, file)
+    # def save(self, filename: str) -> None:
+    #     sysdb = self._sysdb
+    #     config = {
+    #         "time_to_start": sysdb.time_to_start,
+    #         "box_setting": {
+    #             box_name: {"slot": v // 16, "wait": sysdb.skew[box_name]}
+    #             for box_name, v in sysdb.timing_shift.items()
+    #         },
+    #         "reference_port": port2str(self._reference_port),
+    #         "monitor_port": port2str(self._monitor_port),
+    #         "trigger_nport": self._trigger_nport,
+    #         "target_port": {port2str(v) for v in self._target_port},
+    #         "scale": {port2str(p): v for p, v in self._scale.items()},
+    #     }
+    #     with open(Path(os.getcwd()) / Path(filename), "w") as file:
+    #         yaml.safe_dump(config, file)
