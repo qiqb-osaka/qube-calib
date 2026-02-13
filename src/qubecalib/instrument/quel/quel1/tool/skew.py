@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import os
 from collections import OrderedDict
-from copy import copy, deepcopy
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Final, Type, cast
+from typing import Any, Final, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -18,7 +17,7 @@ from tqdm.auto import tqdm
 from .....instrument.quel.quel1.driver import Quel1System
 from .....instrument.quel.quel1.driver.single import Quel1PortType
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
-from .....qubecalib import Executor, PortSetting, QubeCalib, SystemConfigDatabase
+from .....qubecalib import Executor, PortSetting, SystemConfigDatabase
 
 DEFAULT_FREQUENCY = 9.75
 DEFAULT_LO_FREQ = 11000e6
@@ -45,23 +44,64 @@ def str2port(v: str) -> PORT:
     box_name, nport = v.split("-")[:2]
     return box_name, int(nport)
 
+    # def port2str(v: PORT) -> str:
+    #     box_name, nport = v
+    #     return f"{box_name}-{nport}"
 
-def port2str(v: PORT) -> str:
-    box_name, nport = v
-    return f"{box_name}-{nport}"
+    # @dataclass
+    # class BoxSkewData:
+    #     target_port: PORT
+    #     slot: int
+    #     wait: int
+
+    # @dataclass
+    # class MeasuredPulseWaveform:
+    #     waveform: npt.NDArray[np.complex64]
+    #     offset: int
 
 
-@dataclass
-class BoxSkewData:
-    target_port: PORT
-    slot: int
-    wait: int
+def _parse_port_type(k: Any) -> Quel1PortType:
+    """
+    Normalize rf_switches keys loaded from YAML into Quel1PortType
+    (int | tuple[int, int]).
 
+    Notes
+    -----
+    - Quel1PortType is a *type alias*, not a runtime class.
+      Therefore:
+        * isinstance(k, Quel1PortType) is invalid
+        * Quel1PortType[...] (Enum-style access) is invalid
+    - Runtime checks must be performed against concrete types
+      (int / tuple), and the result is cast to Quel1PortType.
+    """
 
-@dataclass
-class MeasuredPulseWaveform:
-    waveform: npt.NDArray[np.complex64]
-    offset: int
+    # Case 1: already an integer port index
+    if isinstance(k, int):
+        return cast(Quel1PortType, k)
+
+    # Case 2: already a tuple[int, int]
+    if isinstance(k, tuple) and len(k) == 2 and all(isinstance(x, int) for x in k):
+        return cast(Quel1PortType, k)
+
+    # Case 3: string representations coming from YAML or user edits
+    if isinstance(k, str):
+        s = k.strip()
+
+        # "3" -> 3
+        if s.isdecimal():
+            return cast(Quel1PortType, int(s))
+
+        # "(3, 4)" or "3,4" -> (3, 4)
+        s2 = s
+        if s2.startswith("(") and s2.endswith(")"):
+            s2 = s2[1:-1].strip()
+
+        parts = [p.strip() for p in s2.split(",")]
+        if len(parts) == 2 and all(p.isdecimal() for p in parts):
+            return cast(Quel1PortType, (int(parts[0]), int(parts[1])))
+
+    # Any other form is considered invalid
+    raise TypeError(f"Invalid rf_switch port key: {k!r}")
 
 
 @dataclass
@@ -70,79 +110,73 @@ class EstimatedPulseParams:
     idx: int
     scale: int
     mean: int
-    # slot: int = field(init=False)
-    # wait: int = field(init=False)
-
-    # def __post_init__(self) -> None:
-    #     self.slot = self.idx // 64
-    #     self.wait = self.idx % 64
 
 
-@dataclass
-class SkewData:
-    sysdb: SystemConfigDatabase
-    boxes: dict[str, BoxSkewData] = field(default_factory=dict)
-    time_to_start: int = 0
+# @dataclass
+# class SkewData:
+#     sysdb: SystemConfigDatabase
+#     boxes: dict[str, BoxSkewData] = field(default_factory=dict)
+#     time_to_start: int = 0
 
 
-@dataclass
-class SkewAdjust:
-    sysdb: SystemConfigDatabase
-    target_ports: set[PORT] = field(default_factory=set)
-    slot: dict[PORT, int] = field(default_factory=dict)
-    wait: dict[PORT, int] = field(default_factory=dict)
-    time_to_start: int = 0
+# @dataclass
+# class SkewAdjust:
+#     sysdb: SystemConfigDatabase
+#     target_ports: set[PORT] = field(default_factory=set)
+#     slot: dict[PORT, int] = field(default_factory=dict)
+#     wait: dict[PORT, int] = field(default_factory=dict)
+#     time_to_start: int = 0
 
-    @staticmethod
-    def load(
-        config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-        sysdb: SystemConfigDatabase,
-        target_ports: set[PORT],
-    ) -> SkewAdjust:
-        return SkewAdjust.from_yaml_dict(config, sysdb, target_ports)
+#     @staticmethod
+#     def load(
+#         config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+#         sysdb: SystemConfigDatabase,
+#         target_ports: set[PORT],
+#     ) -> SkewAdjust:
+#         return SkewAdjust.from_yaml_dict(config, sysdb, target_ports)
 
-    @staticmethod
-    def from_yaml_dict(
-        yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-        sysdb: SystemConfigDatabase,
-        target_ports: set[PORT],
-    ) -> SkewAdjust:
-        box_setting = cast(dict[str, dict[str, int]], yaml_dict["box_setting"])
-        slot = {
-            (bname, nport): box_setting[bname]["slot"]
-            for (bname, nport) in target_ports
-        }
-        wait = {
-            (bname, nport): box_setting[bname]["wait"]
-            for (bname, nport) in target_ports
-        }
-        time_to_start = cast(int, yaml_dict["time_to_start"])
-        return SkewAdjust(
-            sysdb,
-            target_ports=target_ports,
-            slot=slot,
-            wait=wait,
-            time_to_start=time_to_start,
-        )
+#     @staticmethod
+#     def from_yaml_dict(
+#         yaml_dict: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+#         sysdb: SystemConfigDatabase,
+#         target_ports: set[PORT],
+#     ) -> SkewAdjust:
+#         box_setting = cast(dict[str, dict[str, int]], yaml_dict["box_setting"])
+#         slot = {
+#             (bname, nport): box_setting[bname]["slot"]
+#             for (bname, nport) in target_ports
+#         }
+#         wait = {
+#             (bname, nport): box_setting[bname]["wait"]
+#             for (bname, nport) in target_ports
+#         }
+#         time_to_start = cast(int, yaml_dict["time_to_start"])
+#         return SkewAdjust(
+#             sysdb,
+#             target_ports=target_ports,
+#             slot=slot,
+#             wait=wait,
+#             time_to_start=time_to_start,
+#         )
 
-    def push(self) -> None:
-        for (box_name, _), slot in self.slot.items():
-            self.sysdb.timing_shift[box_name] = slot * 16
-        for (box_name, _), wait in self.wait.items():
-            self.sysdb.skew[box_name] = wait
-        self.sysdb.time_to_start = self.time_to_start
+#     def push(self) -> None:
+#         for (box_name, _), slot in self.slot.items():
+#             self.sysdb.timing_shift[box_name] = slot * 16
+#         for (box_name, _), wait in self.wait.items():
+#             self.sysdb.skew[box_name] = wait
+#         self.sysdb.time_to_start = self.time_to_start
 
-    def pull(self) -> None:
-        for port in self.target_ports:
-            box_name, _ = port
-            self.slot[port] = self.sysdb.timing_shift[box_name] // 16
-            self.wait[port] = self.sysdb.skew[box_name]
-        self.time_to_start = self.sysdb.time_to_start
+#     def pull(self) -> None:
+#         for port in self.target_ports:
+#             box_name, _ = port
+#             self.slot[port] = self.sysdb.timing_shift[box_name] // 16
+#             self.wait[port] = self.sysdb.skew[box_name]
+#         self.time_to_start = self.sysdb.time_to_start
 
-    def backup(self) -> SkewAdjust:
-        o = SkewAdjust(self.sysdb, target_ports=self.target_ports)
-        o.pull()
-        return o
+#     def backup(self) -> SkewAdjust:
+#         o = SkewAdjust(self.sysdb, target_ports=self.target_ports)
+#         o.pull()
+#         return o
 
 
 @dataclass
@@ -156,11 +190,11 @@ class SkewSetting:
     rf_switches: dict[str, dict[Quel1PortType, str]]
     clockmaster_ip: str
 
-    @staticmethod
-    def load(
-        config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
-    ) -> "SkewSetting":
-        return SkewSetting.from_yaml_dict(config)
+    # @staticmethod
+    # def load(
+    #     config: dict[str, str | int | set[str] | dict[str, dict[str, int]]],
+    # ) -> "SkewSetting":
+    #     return SkewSetting.from_yaml_dict(config)
 
     @staticmethod
     def from_yaml(filename: str, *, clockmaster_ip: str | None = None) -> "SkewSetting":
@@ -180,6 +214,11 @@ class SkewSetting:
         reference_port = str2port(cast(str, yaml_dict["reference_port"]))
         monitor_port = str2port(cast(str, yaml_dict["monitor_port"]))
         trigger_nport = cast(int, yaml_dict["trigger_nport"])
+        raw_targets = yaml_dict["target_port"]
+        if isinstance(raw_targets, (list, tuple, set)):
+            target_port = {str2port(v) for v in raw_targets}
+        else:
+            raise TypeError("target_port must be a list/tuple/set of strings")
         target_port = {str2port(v) for v in cast(set[str], yaml_dict["target_port"])}
         scale = {
             str2port(p): v
@@ -194,14 +233,9 @@ class SkewSetting:
             repeats = {}
         if "rf_switches" in yaml_dict:
             rf_switches = {
-                box_name: {
-                    nport: state
-                    for nport, state in cast(
-                        dict[Quel1PortType, str], box_setting
-                    ).items()
-                }
+                box_name: {_parse_port_type(k): str(v) for k, v in box_setting.items()}
                 for box_name, box_setting in cast(
-                    dict[str, dict[Quel1PortType, str]], yaml_dict["rf_switches"]
+                    dict[str, dict[str, Any]], yaml_dict["rf_switches"]
                 ).items()
             }
         else:
@@ -233,55 +267,6 @@ class SkewSetting:
         return set({box_name for box_name, _ in self.target_port})
 
 
-class SkewAdjustResetter:
-    def __init__(
-        self,
-        skew_adjust: SkewAdjust,
-        *,
-        reference_port: PORT,
-        target_ports: set[PORT],
-    ) -> None:
-        self._skew_adjust = skew_adjust
-        self._reference_port = reference_port
-        self._target_ports = target_ports
-        self._backup_reference: tuple[int, int] | None = None
-        self._backup_targets: dict[PORT, tuple[int, int]] = {}
-
-    def __enter__(self) -> None:
-        self._backup_reference = (
-            self._skew_adjust.slot[self._reference_port],
-            self._skew_adjust.wait[self._reference_port],
-        )
-        self._skew_adjust.slot[self._reference_port] = 0
-        self._skew_adjust.wait[self._reference_port] = 0
-        for target_port in self._target_ports:
-            self._backup_targets[target_port] = (
-                self._skew_adjust.slot[target_port],
-                self._skew_adjust.wait[target_port],
-            )
-            self._skew_adjust.slot[target_port] = 0
-            self._skew_adjust.wait[target_port] = 0
-        self._skew_adjust.push()
-
-    def __exit__(
-        self,
-        exc_type: Type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        adj = self._skew_adjust
-        (
-            adj.slot[self._reference_port],
-            adj.wait[self._reference_port],
-        ) = cast(tuple[int, int], self._backup_reference)
-        for target_port in self._target_ports:
-            (
-                adj.slot[target_port],
-                adj.wait[target_port],
-            ) = self._backup_targets[target_port]
-        self._skew_adjust.push()
-
-
 class Skew:
     DEFAULT_CHANNEL = 0
     DEFAULT_REPEATS = 100
@@ -290,15 +275,9 @@ class Skew:
         self,
         system: Quel1System,
         *,
-        sysdb: SystemConfigDatabase | None = None,
-        # executor: Executor | None = None,
-        qubecalib: QubeCalib
-        | None = None,  # TODO: qubex の experiment.py:138 を修正してもらう
-    ) -> None:  # TODO ここは多分変わります
-        if qubecalib is not None:
-            sysdb = qubecalib.sysdb
-        if sysdb is None:
-            raise ValueError("sysdb and executor must be provided")
+        sysdb: SystemConfigDatabase,
+        skew_yaml_path: str | None = None,
+    ) -> None:
         self._system: Final[Quel1System] = system
         self._sysdb: Final[SystemConfigDatabase] = sysdb
         self._executor: Final[Executor] = Executor(self.sysdb, quel1system=system)
@@ -307,37 +286,40 @@ class Skew:
         self._reference_port: PORT = ("", 0)
         self._scale: dict[PORT, float] = {}
         self._measured_waveform: dict[PORT, npt.NDArray] = {}
-        # self._estimated_waveform: dict[PORT, npt.NDArray] = {}
-        self._offset: dict[PORT, int] = {}
         self._target_port: set[PORT] = set()
-        self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
+        # self._skew_adjust: SkewAdjust = SkewAdjust(self.sysdb)
         self._setting: SkewSetting | None = None
-        # self._estimated_idx: dict[PORT, int] = {}
-        # self._estimated_slot: dict[PORT, int] = {}
-        # self._estimated_wait: dict[PORT, int] = {}
+        self._skew_yaml_path: str | None = skew_yaml_path
         self._estimated: dict[PORT, EstimatedPulseParams] = {}
         for box_name in self._system.boxes:
             if not self.is_channel_defined(box_name, sysdb=self.sysdb):
                 self._define_channel_names(
                     box_name, system=self._system, sysdb=self.sysdb
                 )
-        self._repeats = 100
 
-    # def show_log(
-    #     self,
-    #     name: str = __name__,
-    #     *,
-    #     level: int = logging.DEBUG,
-    #     handler: logging.Handler = logging.StreamHandler(),
-    #     formatter: logging.Formatter = logging.Formatter(
-    #         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    #     ),
-    # ) -> Logger:
-    #     handler.setFormatter(formatter)
-    #     logger = getLogger(__name__)
-    #     logger.addHandler(handler)
-    #     logger.setLevel(level)
-    #     return logger
+    def reload(self, skew_yaml: str | None = None) -> None:
+        """
+        Reload skew parameters from skew.yaml without recreating system objects.
+        This is intended for quick trial iterations.
+        """
+        path = skew_yaml if skew_yaml is not None else self._skew_yaml_path
+        if path is None:
+            raise ValueError("skew_yaml path must be provided at least once")
+        clockmaster_ip = self.setting.clockmaster_ip if self.setting else None
+        self._skew_yaml_path = path
+        self._sysdb.load_skew_yaml(path)
+        self._sysdb.refresh_quel1system(self._system)
+        new_setting = SkewSetting.from_yaml(path, clockmaster_ip=clockmaster_ip)
+        self.setting = new_setting
+        # self._skew_adjust.target_ports = copy(new_setting.target_port)
+        # self._skew_adjust.pull()
+        # self.config_rfswitches()
+        # drop old measurement cache to avoid confusion after parameter change
+        self._measured_waveform.clear()
+        self._estimated.clear()
+
+    def prepare(self) -> None:
+        self.config_rfswitches()
 
     @classmethod
     def from_yaml(
@@ -347,8 +329,8 @@ class Skew:
         box_yaml: str | None = None,
         sysdb: SystemConfigDatabase | None = None,
         system: Quel1System | None = None,
-        boxes: list[str] = [],
-        ignore_boxes: list[str] = [],
+        boxes: list[str] | None = None,
+        ignore_boxes: list[str] | None = None,
         clockmaster_ip: str | None = None,
     ) -> Skew:
         setting = SkewSetting.from_yaml(skew_yaml, clockmaster_ip=clockmaster_ip)
@@ -365,9 +347,6 @@ class Skew:
         else:
             sysdb.load_skew_yaml(skew_yaml)
 
-        # if boxes and ignore_boxes:
-        #     raise ValueError("Only one of boxes or ignore_boxes must be provided")
-
         if system is not None and boxes != []:
             raise ValueError("Only one of system or boxes must be provided")
 
@@ -375,6 +354,8 @@ class Skew:
             list(setting.target_box_names) + [setting.monitor_box_name]
         )
 
+        boxes = [] if boxes is None else boxes
+        ignore_boxes = [] if ignore_boxes is None else ignore_boxes
         if boxes:
             if not all([box in available_boxes for box in boxes]):
                 raise ValueError("Some boxes in boxes are not available")
@@ -385,35 +366,13 @@ class Skew:
         boxes = [box for box in boxes if box not in ignore_boxes]
 
         if system is None:
-            system = cast(Quel1System, system)
             system = sysdb.create_quel1system(*boxes)
         else:
             system = sysdb.refresh_quel1system(system)
 
-        self = Skew(system=system, sysdb=sysdb)
+        self = Skew(system=system, sysdb=sysdb, skew_yaml_path=skew_yaml)
         self.setting = setting
         return self
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        setting: SkewSetting,
-        system: Quel1System,
-        sysdb: SystemConfigDatabase,
-        monitor_port: PORT | None = None,
-        trigger_nport: int | None = None,
-        reference_port: PORT | None = None,
-    ) -> Skew:
-        skew = Skew(system=system, sysdb=sysdb)
-        skew.setting = setting
-        if monitor_port is not None:
-            skew._monitor_port = monitor_port
-        if trigger_nport is not None:
-            skew._trigger_nport = trigger_nport
-        if reference_port is not None:
-            skew._reference_port = reference_port
-        return skew
 
     @property
     def sysdb(self) -> SystemConfigDatabase:
@@ -468,42 +427,14 @@ class Skew:
         cls,
         target_freq: float,  # Hz
         *,
-        minimum_lo_freq: float = 2e9,  # Hz
         minimum_cnco_freq: float = 2e9,  # Hz
-        maximum_cnco_freq: float = 3.5e9,  # Hz
         lo_step_size: float = 500e6,  # Hz
         cnco_step_size: float = 125e6,  # Hz
     ) -> dict[str, float | str]:
-        # !!! CAUTION !!! Frequency is in HMz, not in GHz
-        # target_freq = target_freq * 1e3
-        # MINIMUM_LO_FREQ = 2000  # 2000 まで可能 x 80 / 4 * 100 MHz
-        # MINIMUM_CNCO_FREQ = 2000
-        # LO_STEP_SIZE = 500
-        # CNCO_STEP_SIZE = 125
-        # if minimum_lo_freq + minimum_cnco_freq < target_freq:
-        #     sideband = "U"
-        #     lo_freq = (
-        #         minimum_lo_freq
-        #         + (target_freq - (minimum_lo_freq + minimum_cnco_freq))
-        #         // lo_step_size
-        #         * lo_step_size
-        #     )
-        #     cnco_freq = (target_freq - lo_freq) // cnco_step_size * cnco_step_size
-        #     fnco_freq = 0
-        # else:
-        #     sideband = "L"
-        #     lo_freq = (
-        #         minimum_lo_freq
-        #         + (
-        #             (target_freq - (minimum_lo_freq - minimum_cnco_freq))
-        #             // lo_step_size
-        #             + 1
-        #         )
-        #         * lo_step_size
-        #     )
-        #     cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
-        #     fnco_freq = 0
-        sideband = "L"
+        """
+        Compute LO/CNCO/FNCO assuming lower sideband (LSB) only.
+        """
+        sideband = "L"  # LSB only
         lo_freq = (target_freq + minimum_cnco_freq) // lo_step_size * lo_step_size
         cnco_freq = (lo_freq - target_freq) // cnco_step_size * cnco_step_size
         fnco_freq = 0
@@ -530,17 +461,6 @@ class Skew:
         target = next(iter({t for t in targets if len(t.split("-")) == 1}))
         return target
 
-    @classmethod
-    def acquire_target(
-        cls,
-        sysdb: SystemConfigDatabase,
-        port: PORT,
-        channel: int | None = None,
-    ) -> str:
-        # default value
-        # channel = DEFAULT_CHANNEL_NUM if channel is None else channel
-        return cls.get_target_by_channel(sysdb, port, channel)
-
     def _acquire_target(
         self,
         port: PORT,
@@ -548,13 +468,13 @@ class Skew:
         sysdb: SystemConfigDatabase | None = None,
     ) -> str:
         sysdb = self._sysdb if sysdb is None else sysdb
-        return self.acquire_target(sysdb, port, channel)
+        return self.get_target_by_channel(sysdb, port, channel)
 
     def target_from_box(self, box_names: list[str]) -> set[PORT]:
         return {
             (box_name, nport)
             for box_name, nport in self._target_port
-            if box_name in box_names  #  and (box_name, nport) != self._reference_port
+            if box_name in box_names
         }
 
     def sync_lo_nco(
@@ -628,11 +548,9 @@ class Skew:
         freqs, ch_freqs = cls._parse_freqs_from_dump_port(
             dump_port=dump_port,
         )
-
         logger.debug(
             f"_sync_lo_nco(): SRC_PORT{src_port}; lo_freq={freqs['lo_freq'] if 'lo_freq' in freqs else 0}, cnco_freq={freqs['cnco_freq']}, channels={freqs['channels']}, sideband={freqs['sideband']}"
         )
-
         lo_freq, cnco_freq = (
             cast(float, freqs["lo_freq"]) if "lo_freq" in freqs else 0,
             cast(float, freqs["cnco_freq"]) + ch_freqs[0]["fnco_freq"],
@@ -655,6 +573,10 @@ class Skew:
             dump_port["cnco_freq"] = cnco_freq
             for k, v in dump_port["channels"].items():
                 v["fnco_freq"] = 0
+
+            # ignore rfswitch setting
+            del dump_port["rfswitch"]
+
             config_box: dict[int | tuple[int, int], dict[str, Any]] = {nport: dump_port}
             box.config_box(config_box)
         elif "runits" in dump_port:
@@ -677,11 +599,14 @@ class Skew:
                     "fnco_freq"
                 ] = fnco_freq
 
+            # ignore rfswitch setting
+            del dump_port["rfswitch"]
             config_box = {nport: dump_port}
             box.config_box(config_box)
-
+        channels_or_runits = freqs.get("channels", freqs.get("runits"))
         logger.debug(
-            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, channels={freqs['channels']}, sideband={freqs['sideband']}"
+            f"-> DEST_PORT{dest_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, "
+            f"units={channels_or_runits}, sideband={freqs.get('sideband', '')}"
         )
 
         return freqs
@@ -720,8 +645,6 @@ class Skew:
         system: Quel1System,
         sysdb: SystemConfigDatabase,
     ) -> None:
-        # box = system.box[box_name]
-        # ports = box.dump_box()["ports"]
         ports = system.dump_box(box_name)["ports"]
         for nport, v in ports.items():
             nport = cast(int, nport)
@@ -737,9 +660,7 @@ class Skew:
                 sideband="U",
                 vatt=2048,
                 fnco_freq=None,
-                ndelay_or_nwait=tuple(
-                    len(channels) * [7 if io == "IN" else 0]
-                ),  # TODO: hard coding
+                ndelay_or_nwait=tuple(len(channels) * [7 if io == "IN" else 0]),
             )
             sysdb._port_settings[port_name] = port_setting
             for nchannel, v in channels.items():
@@ -759,7 +680,6 @@ class Skew:
     ) -> None:
         """target に合わせて周波数を設定する"""
         name, nport = target_port
-        # box = system.box[name]
         if not system.is_output_port(name, nport):
             raise ValueError(f"{target_port} is not output port")
         freqs = cls._sync_lo_nco(
@@ -769,17 +689,10 @@ class Skew:
         )
         ch_freqs = cast(dict[int, dict[str, float]], freqs["channels"])
         DEFAULT_CHANNEL = 0
-        # lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
-        #     cast(float, freqs["lo_freq"]) * 1e-9 if "lo_freq" in freqs else 0,
-        #     cast(float, freqs["cnco_freq"]) * 1e-9,
-        #     ch_freqs[DEFAULT_CHANNEL]["fnco_freq"] * 1e-9,
-        #     ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9,
-        #     cast(str, freqs["sideband"]),
-        # )
         target_freq = ch_freqs[DEFAULT_CHANNEL]["target_freq"] * 1e-9
-        target = cls.acquire_target(sysdb, target_port)
+        target = cls.get_target_by_channel(sysdb, target_port)
         sysdb._target_settings[target] = dict(frequency=target_freq)
-        monitor = cls.acquire_target(sysdb, monitor_port)
+        monitor = cls.get_target_by_channel(sysdb, monitor_port)
         sysdb._target_settings[monitor] = dict(frequency=target_freq)
         lo_freq = system.get_lo_freq(*monitor_port)
         cnco_freq = system.get_cnco_freq(*monitor_port)
@@ -787,18 +700,6 @@ class Skew:
         fnco_freq = system.get_fnco_freq(*monitor_port, channel=DEFAULT_CHANNEL)
         logger.debug(
             f"_setup_monitor_port(): Target {target}:{target_port}; lo_freq={lo_freq}, cnco_freq={cnco_freq}, fnco_freq={fnco_freq}, target_freq={target_freq}, sideband={sideband}"
-        )
-
-    def setup_trigger_port(
-        self,
-        *,
-        trigger_port: PORT,
-    ) -> None:
-        """trigger の target 周波数を設定する"""
-        self._setup_trigger_port(
-            trigger_port=trigger_port,
-            system=self._system,
-            sysdb=self._sysdb,
         )
 
     @classmethod
@@ -809,7 +710,7 @@ class Skew:
         system: Quel1System,
         sysdb: SystemConfigDatabase,
     ) -> None:
-        # """nco 設定に合わせて target 周波数を設定する"""
+        """nco 設定に合わせて target 周波数を設定する"""
         dump_port = system.dump_port(*trigger_port)
         freqs, ch_freqs = cls._parse_freqs_from_dump_port(dump_port=dump_port)
         lo_freq, cnco_freq, fnco_freq, target_freq, sideband = (
@@ -819,55 +720,41 @@ class Skew:
             ch_freqs[cls.DEFAULT_CHANNEL]["target_freq"] * 1e-9,
             cast(str, freqs["sideband"]),
         )
-        trigger = cls.acquire_target(sysdb, trigger_port)
+        trigger = cls.get_target_by_channel(sysdb, trigger_port)
         sysdb._target_settings[trigger] = dict(frequency=target_freq)
         logger.debug(
             f"_setup_trigger_port(): Trigger {trigger_port}, lo_freq={lo_freq * 1e-9}, cnco_freq={cnco_freq * 1e-9}, fnco_freq={fnco_freq * 1e-9}, target_freq={target_freq}, sideband={sideband}"
         )
 
-    def reset_skew_parameter(self) -> SkewAdjustResetter:
-        # with reset_skew_parameter():
-        #     skew.measure()
-        return SkewAdjustResetter(
-            self._skew_adjust,
-            reference_port=self._reference_port,
-            target_ports=self._target_port,
-        )
-
     def config_rfswitches(self) -> None:
+        setting = cast(SkewSetting, self.setting)
         for box_name, box in self.system.boxes.items():
-            box.config_rfswitches(cast(SkewSetting, self.setting).rf_switches[box_name])
+            box_setting = setting.rf_switches.get(box_name)
+            if not box_setting:
+                continue
+            box.config_rfswitches(box_setting)
 
     def measure(
         self,
         *,
-        target_ports: set[PORT] | None = None,
         show_reference: bool | None = None,
         extra_capture_range: int | None = None,  # multiple of 128 ns
-        reset_skew_parameter: bool = False,
         repeats: int = DEFAULT_REPEATS,
     ) -> None:
-        target_ports = (
-            self.target_from_box(list(self._system.boxes))
-            if target_ports is None
-            else target_ports
+        target_ports = self.target_from_box(list(self._system.boxes))
+        self._define_targets(
+            target_ports=target_ports,
+            reference_port=self._reference_port,
+            monitor_port=self._monitor_port,
+            trigger_nport=self._trigger_nport,
+            sysdb=self._sysdb,
         )
-        self.define_targets(target_ports=target_ports)
-        if reset_skew_parameter:
-            with self.reset_skew_parameter():
-                self._measure_targets(
-                    target_ports,
-                    show_reference=show_reference,
-                    extra_capture_range=extra_capture_range,
-                    repeats=repeats,
-                )
-        else:
-            self._measure_targets(
-                target_ports,
-                show_reference=show_reference,
-                extra_capture_range=extra_capture_range,
-                repeats=repeats,
-            )
+        self._measure_targets(
+            target_ports,
+            show_reference=show_reference,
+            extra_capture_range=extra_capture_range,
+            repeats=repeats,
+        )
 
     def _measure_targets(
         self,
@@ -878,7 +765,6 @@ class Skew:
         repeats: int | None = None,
     ) -> None:
         target_ports = self.target_from_box(list(self._system.boxes))
-        self._open_rfswitches(target_ports)
         repeats = self.DEFAULT_REPEATS if repeats is None else repeats
         with tqdm(target_ports) as t:
             for target_port in t:
@@ -987,32 +873,6 @@ class Skew:
     def _store(self, target_port: PORT, iqs: npt.NDArray) -> None:
         self._measured_waveform[target_port] = iqs
 
-    def _open_rfswitches(
-        self,
-        target_ports: set[PORT],
-        *,
-        reference_port: PORT | None = None,
-    ) -> None:
-        # create alias
-        system = self._system
-        # default values
-        reference_port = (
-            self._reference_port if reference_port is None else reference_port
-        )
-        confs: dict[str, dict[str, Any]] = {}
-        for ctrl_box, _ in [reference_port] + [p for p in target_ports]:
-            m = system.get_monitor_input_ports(ctrl_box)
-            if m:
-                for port in m:
-                    if isinstance(port, tuple):
-                        raise ValueError("fogi port is not supported yet")
-                    if ctrl_box not in confs:
-                        confs[ctrl_box] = {"ports": {}}
-                    confs[ctrl_box]["ports"][port] = {"rfswitch": "open"}
-                    # system.box[ctrl_box].config_rfswitch(port, rfswitch="open")
-        for box_name, conf in confs.items():
-            system.box[box_name].config_box(conf)
-
     def _config_ports(
         self,
         target_port: PORT,
@@ -1041,7 +901,6 @@ class Skew:
 
         monitor_box_name, _ = monitor_port
         trigger_port: PORT = (monitor_box_name, trigger_nport)
-        # target_ports = set([target_port])
         trigger_box_name, trigger_port_number = trigger_port
         trigger_channel: tuple[str, int, int] = (
             trigger_box_name,
@@ -1112,8 +971,6 @@ class Skew:
                 target_name = channel_name
                 sysdb._relation_channel_target.append((target_name, channel_name))
                 sysdb._target_settings[target_name] = dict(frequency=0)
-            # sysdb._relation_channel_target.append((target_name, channel_name))
-            # sysdb._target_settings[target_name] = dict(frequency=0)
 
     def define_targets(
         self,
@@ -1123,6 +980,7 @@ class Skew:
         monitor_port: PORT | None = None,
         trigger_nport: int | None = None,
     ) -> None:
+        """Deprecated public wrapper retained for backward compatibility."""
         # default values
         reference_port = (
             self._reference_port if reference_port is None else reference_port
@@ -1198,7 +1056,6 @@ class Skew:
                     x=2 * np.arange(len(iqs)),
                     y=np.abs(iqs),
                     mode="lines",
-                    # name=f"{focused_port}: measured",
                 ),
                 row=1 + i,
                 col=1,
@@ -1211,7 +1068,6 @@ class Skew:
                     x=2 * np.arange(len(iqs)),
                     y=iqs,
                     mode="lines",
-                    # name=f"{focused_port}: estimated",
                 ),
                 row=1 + i,
                 col=1,
@@ -1233,40 +1089,40 @@ class Skew:
             )
         return fig
 
-    def load(self, filename: str) -> None:
-        with open(Path(os.getcwd()) / Path(filename), "r") as file:
-            config = yaml.safe_load(file)
-        self.setting = SkewSetting.from_yaml_dict(config)
-        sysdb = self._sysdb
-        target = self._target_port
-        self._skew_adjust = SkewAdjust.from_yaml_dict(
-            config,
-            sysdb=sysdb,
-            target_ports=target,
-        )
-        self._skew_adjust.push()
+    # def load(self, filename: str) -> None:
+    #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
+    #         config = yaml.safe_load(file)
+    #     self.setting = SkewSetting.from_yaml_dict(config)
+    #     sysdb = self._sysdb
+    #     target = self._target_port
+    #     self._skew_adjust = SkewAdjust.from_yaml_dict(
+    #         config,
+    #         sysdb=sysdb,
+    #         target_ports=target,
+    #     )
+    #     self._skew_adjust.push()
 
-    def load_setting(self, filename: str) -> None:
-        with open(Path(os.getcwd()) / Path(filename), "r") as file:
-            config = yaml.safe_load(file)
-        self.setting = SkewSetting.from_yaml_dict(config)
-        setting = cast(SkewSetting, self.setting)
-        self._skew_adjust.target_ports = copy(setting.target_port)
-        self._skew_adjust.pull()
+    # def load_setting(self, filename: str) -> None:
+    #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
+    #         config = yaml.safe_load(file)
+    #     self.setting = SkewSetting.from_yaml_dict(config)
+    #     setting = cast(SkewSetting, self.setting)
+    #     self._skew_adjust.target_ports = copy(setting.target_port)
+    #     self._skew_adjust.pull()
 
-    def save(self, filename: str) -> None:
-        sysdb = self._sysdb
-        config = {
-            "time_to_start": sysdb.time_to_start,
-            "box_setting": {
-                box_name: {"slot": v // 16, "wait": sysdb.skew[box_name]}
-                for box_name, v in sysdb.timing_shift.items()
-            },
-            "reference_port": port2str(self._reference_port),
-            "monitor_port": port2str(self._monitor_port),
-            "trigger_nport": self._trigger_nport,
-            "target_port": {port2str(v) for v in self._target_port},
-            "scale": {port2str(p): v for p, v in self._scale.items()},
-        }
-        with open(Path(os.getcwd()) / Path(filename), "w") as file:
-            yaml.safe_dump(config, file)
+    # def save(self, filename: str) -> None:
+    #     sysdb = self._sysdb
+    #     config = {
+    #         "time_to_start": sysdb.time_to_start,
+    #         "box_setting": {
+    #             box_name: {"slot": v // 16, "wait": sysdb.skew[box_name]}
+    #             for box_name, v in sysdb.timing_shift.items()
+    #         },
+    #         "reference_port": port2str(self._reference_port),
+    #         "monitor_port": port2str(self._monitor_port),
+    #         "trigger_nport": self._trigger_nport,
+    #         "target_port": {port2str(v) for v in self._target_port},
+    #         "scale": {port2str(p): v for p, v in self._scale.items()},
+    #     }
+    #     with open(Path(os.getcwd()) / Path(filename), "w") as file:
+    #         yaml.safe_dump(config, file)

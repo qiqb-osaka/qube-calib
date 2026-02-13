@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-import yaml
-from qubecalib.instrument.quel.quel1.tool.skew import SkewAdjust, SkewSetting
 from qubecalib.qubecalib import SystemConfigDatabase
 
+# def test_create_database() -> None:
+#     """create_database should create a database."""
+#     db = SkewAdjust(SystemConfigDatabase())
+#     assert isinstance(db, SkewAdjust)
 
-def test_create_database() -> None:
-    """create_database should create a database."""
-    db = SkewAdjust(SystemConfigDatabase())
-    assert isinstance(db, SkewAdjust)
 
-
-def test_load_skew_setting() -> None:
-    """load_skew_setting should load the skew setting."""
-    filename = "tests/unit/offline/instrument/quel/quel1/tool/skew.yaml"
-    try:
-        with open(filename, "r") as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        with open(f"qube-calib/{filename}", "r") as f:
-            config = yaml.safe_load(f)
-    skew_setting = SkewSetting.load(config)
-    assert isinstance(skew_setting, SkewSetting)
-    assert skew_setting.monitor_port == ("Q73A", 12)
+# def test_load_skew_setting() -> None:
+#     """load_skew_setting should load the skew setting."""
+#     filename = "tests/unit/offline/instrument/quel/quel1/tool/skew.yaml"
+#     try:
+#         with open(filename, "r") as f:
+#             config = yaml.safe_load(f)
+#     except FileNotFoundError:
+#         with open(f"qube-calib/{filename}", "r") as f:
+#             config = yaml.safe_load(f)
+#     skew_setting = SkewSetting.load(config)
+#     assert isinstance(skew_setting, SkewSetting)
+#     assert skew_setting.monitor_port == ("Q73A", 12)
 
 
 # def test_acquire_freq_setting() -> None:
