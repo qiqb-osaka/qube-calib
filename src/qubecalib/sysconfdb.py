@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Any, Final, MutableSequence, Optional, Set
+from typing import Any, Final, MutableSequence, Optional, Set, cast
 
 import yaml
 from quel_clock_master import QuBEMasterClient
@@ -24,6 +24,52 @@ from .instrument.quel.quel1.driver import Quel1PortType
 DEFAULT_SIDEBAND = "U"
 
 logger = logging.getLogger(__name__)
+
+
+class ConfigHelper:
+    def __init__(self, sysdb: SystemConfigDatabase) -> None:
+        self.sysdb = sysdb
+
+    def register_target(
+        self,
+        target_name: str,
+        *,
+        box_name: str,
+        port: Quel1PortType,
+        band: int,
+        frequency: float | None = None,
+    ) -> None:
+        sysdb = self.sysdb
+        channel_names_by_channel: dict[tuple[str, Quel1PortType, int], str] = {}
+        # すでに登録されている channel 名を収集
+        for k, v in sysdb._relation_channel_port:
+            p = sysdb._port_settings[cast(str, v["port_name"])]
+            channel = (p.box_name, p.port, cast(int, v["channel_number"]))
+            channel_names_by_channel[channel] = k
+        channel = (box_name, port, band)
+        if channel not in channel_names_by_channel:
+            port_name = f"{box_name}.PORT{port}"
+            channel_name = f"{port_name}.BAND{band}"
+            sysdb.add_port_setting(
+                port_name=port_name,
+                box_name=box_name,
+                port=port,
+                ndelay_or_nwait=tuple([0]),
+            )
+            sysdb._relation_channel_port.append(
+                (
+                    channel_name,
+                    {
+                        "port_name": port_name,
+                        "channel_number": band,
+                    },
+                )
+            )
+        else:
+            channel_name = channel_names_by_channel[channel]
+        # ターゲットを定義
+        sysdb._relation_channel_target.append((channel_name, target_name))
+        sysdb._target_settings[target_name] = dict(frequency=frequency)
 
 
 class SystemConfigDatabase:

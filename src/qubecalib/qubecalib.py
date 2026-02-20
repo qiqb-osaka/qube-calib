@@ -1310,6 +1310,63 @@ class Sequencer(Command):
             for target_name, cseq in cap_sampled_sequence.items():
                 cseq.readin_offsets = readin_offsets[target_name]
 
+    @classmethod
+    def create_from_sequence(
+        cls,
+        sequence: neopulse.Sequence,
+        *,
+        sysdb: SystemConfigDatabase,
+        driver: direct.Quel1System | None = None,  # TODO: driver
+        interval: Optional[float] = None,
+        time_offset: dict[str, int] = {},  # {box_name: time_offset}
+        time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
+    ) -> Sequencer:
+        gsseq, csseq = sequence.convert_to_sampled_sequence()
+        items_by_target = sequence._get_group_items_by_target()
+        targets = set([gtarget for gtarget in gsseq] + [ctarget for ctarget in csseq])
+        rmap = cls._create_target_resource_map(targets, sysdb=sysdb)
+        return cls(
+            gen_sampled_sequence=gsseq,
+            cap_sampled_sequence=csseq,
+            group_items_by_target=items_by_target,
+            resource_map=rmap,
+            sysdb=sysdb,
+            driver=driver,
+            interval=interval,
+            time_offset=time_offset,
+            time_to_start=time_to_start,
+        )
+
+    @classmethod
+    def _create_target_resource_map(
+        cls, target_names: Iterable[str], *, sysdb: SystemConfigDatabase
+    ) -> dict[
+        str, Iterable[dict[str, BoxSetting | PortSetting | int | dict[str, float]]]
+    ]:
+        # {target_name: sampled_sequence} の形式から
+        # {target_name: {box, port, channel_number)}} へ変換
+        db = sysdb
+        targets_channels: MutableSequence[tuple[str, set[str]]] = [
+            (target_name, db.get_channels_by_target(target_name))
+            for target_name in target_names
+        ]
+        bpc_targets = {
+            target_name: [db.get_channel(_) for _ in channels]
+            for target_name, channels in targets_channels
+        }
+        return {
+            target_name: [
+                {
+                    "box": db._box_settings[box_name],
+                    "port": db._port_settings[port_name],
+                    "channel_number": channel_number,
+                    "target": db._target_settings[target_name],
+                }
+                for box_name, port_name, channel_number in _
+            ]
+            for target_name, _ in bpc_targets.items()
+        }
+
     def is_output_port(self, box_name: str, port: Quel1PortType) -> bool:
         if self.driver is None:
             if box_name in self.sysdb._box_settings:
