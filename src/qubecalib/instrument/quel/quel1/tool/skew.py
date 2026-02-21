@@ -14,6 +14,9 @@ import plotly.graph_objects as go
 import yaml
 from tqdm.auto import tqdm
 
+import datetime
+import shutil
+
 from .....instrument.quel.quel1.driver import Quel1System
 from .....instrument.quel.quel1.driver.single import Quel1PortType
 from .....neopulse import Capture, Flushleft, Rectangle, Sequence
@@ -1088,6 +1091,61 @@ class Skew:
                 col=1,
             )
         return fig
+
+    def estimated_indices(self) -> dict[PORT, int]:
+        """
+        Return the current estimated skew index for each PORT.
+        """
+        return {k: v.idx for k, v in self._estimated.items()}
+
+    def update_skew(self, target_value: int, backup: bool = False) -> bool:
+        """
+        Update the skew configuration so that each PORT matches the target value.
+        
+        The skew wait value for each port is adjusted based on the difference
+        between the target value and the last estimated skew index.
+        The resulting wait value is clamped to a minimum of 0.        
+
+        Parameters
+        ----------
+        target_value : int
+            The desired skew index.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+        # backup current skew config data when required
+        if backup:
+            skewfile = self._skew_yaml_path
+            dt = datetime.datetime.now()
+            bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
+            shutil.copy(skewfile, bak)
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        updated = False
+        for k,v in self._estimated.items():
+            t,c = k
+            diff = (target_value - v.idx)
+            cur_wait = config['box_setting'][t]['port_wait'][c]
+            new_wait = cur_wait + diff
+            new_wait = max(0, new_wait) # clamp to minimum 0
+            if cur_wait != new_wait:
+                config['box_setting'][t]['port_wait'][c] = new_wait
+                updated = True
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+
+        return updated
 
     # def load(self, filename: str) -> None:
     #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
