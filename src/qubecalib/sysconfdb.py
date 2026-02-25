@@ -7,23 +7,126 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
-from typing import Any, Final, MutableSequence, Optional, Set, cast
-
-import yaml
-from quel_clock_master import QuBEMasterClient
-from quel_ic_config import (
-    QUEL1_BOXTYPE_ALIAS,
-    Quel1BoxType,
-    Quel1BoxWithRawWss,
-    Quel1ConfigOption,
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Final,
+    MutableSequence,
+    Optional,
+    Protocol,
+    Set,
+    cast,
 )
 
-from .instrument.quel.quel1 import driver as direct
-from .instrument.quel.quel1.driver import Quel1PortType
+import yaml
 
 DEFAULT_SIDEBAND = "U"
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from quel_ic_config import Quel1BoxType, Quel1ConfigOption
+
+    from .instrument.quel.quel1 import driver as direct
+    from .instrument.quel.quel1.driver import Quel1PortType
+else:
+    Quel1PortType = Any
+    Quel1BoxType = Any
+    Quel1ConfigOption = Any
+
+
+class DirectDriverModuleProtocol(Protocol):
+    NamedBox: Any
+    Quel1System: Any
+
+
+class QuBEMasterClientProtocol(Protocol):
+    def __init__(self, master_ipaddr: str) -> None: ...
+
+
+class Quel1BoxWithRawWssProtocol(Protocol):
+    @classmethod
+    def create(
+        cls,
+        *,
+        ipaddr_wss: str,
+        ipaddr_sss: str,
+        ipaddr_css: str,
+        boxtype: Quel1BoxType,
+    ) -> "Quel1BoxWithRawWssProtocol": ...
+
+    def link_status(self) -> dict[int, bool]: ...
+
+    def relinkup(self, use_204b: bool, background_noise_threshold: int) -> None: ...
+
+    def reconnect(self) -> dict[int, bool]: ...
+
+
+Quel1BoxWithRawWss = Quel1BoxWithRawWssProtocol
+
+
+def _default_direct_driver_provider() -> DirectDriverModuleProtocol:
+    from .instrument.quel.quel1 import driver as direct
+
+    return cast(DirectDriverModuleProtocol, direct)
+
+
+_direct_driver_provider: Callable[[], DirectDriverModuleProtocol] = (
+    _default_direct_driver_provider
+)
+
+
+def set_direct_driver_provider(
+    provider: Callable[[], DirectDriverModuleProtocol],
+) -> None:
+    global _direct_driver_provider
+    _direct_driver_provider = provider
+
+
+class _DirectDriverProxy:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_direct_driver_provider(), name)
+
+
+if not TYPE_CHECKING:
+    direct = cast(DirectDriverModuleProtocol, _DirectDriverProxy())
+
+
+def _create_master_client(master_ipaddr: str) -> QuBEMasterClientProtocol:
+    from quel_clock_master import QuBEMasterClient
+
+    return cast(QuBEMasterClientProtocol, QuBEMasterClient(master_ipaddr=master_ipaddr))
+
+
+def _create_quel1_box_with_raw_wss(
+    *,
+    ipaddr_wss: str,
+    ipaddr_sss: str,
+    ipaddr_css: str,
+    boxtype: Quel1BoxType,
+) -> Quel1BoxWithRawWssProtocol:
+    from quel_ic_config import Quel1BoxWithRawWss
+
+    return cast(
+        Quel1BoxWithRawWssProtocol,
+        Quel1BoxWithRawWss.create(
+            ipaddr_wss=ipaddr_wss,
+            ipaddr_sss=ipaddr_sss,
+            ipaddr_css=ipaddr_css,
+            boxtype=boxtype,
+        ),
+    )
+
+
+def _get_quel1_boxtype_alias() -> dict[str, Quel1BoxType]:
+    try:
+        from quel_ic_config import QUEL1_BOXTYPE_ALIAS
+    except ModuleNotFoundError:
+        # Tests may run without quel_ic_config installed.
+        return {}
+
+    return cast(dict[str, Quel1BoxType], QUEL1_BOXTYPE_ALIAS)
 
 
 class ConfigHelper:
@@ -223,7 +326,7 @@ class SystemConfigDatabase:
         adapter: str | None = None,
     ) -> None:
         if isinstance(boxtype, str):
-            boxtype = QUEL1_BOXTYPE_ALIAS[boxtype]
+            boxtype = _get_quel1_boxtype_alias().get(boxtype, boxtype)
         self._box_settings[box_name] = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
@@ -363,10 +466,11 @@ class SystemConfigDatabase:
         config_options: MutableSequence[Quel1ConfigOption] = [],
         adapter: str | None = None,
     ) -> dict[str, object]:
+        boxtype_alias = _get_quel1_boxtype_alias()
         box_setting = BoxSetting(
             box_name=box_name,
             ipaddr_wss=ipaddr_wss,
-            boxtype=QUEL1_BOXTYPE_ALIAS[boxtype],
+            boxtype=boxtype_alias.get(boxtype, boxtype),
             config_options=config_options,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
@@ -439,7 +543,7 @@ class SystemConfigDatabase:
         reconnect: bool = True,
     ) -> Quel1BoxWithRawWss:
         s = self._box_settings[box_name]
-        box = Quel1BoxWithRawWss.create(
+        box = _create_quel1_box_with_raw_wss(
             ipaddr_wss=str(s.ipaddr_wss),
             ipaddr_sss=str(s.ipaddr_sss),
             ipaddr_css=str(s.ipaddr_css),
@@ -475,7 +579,9 @@ class SystemConfigDatabase:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける?
         system = direct.Quel1System.create(
-            clockmaster=QuBEMasterClient(str(self._clockmaster_setting.ipaddr)),
+            clockmaster=_create_master_client(
+                master_ipaddr=str(self._clockmaster_setting.ipaddr)
+            ),
             boxes=[self.create_named_box(b, reconnect=True) for b in box_names],
         )
         system.initialize()
@@ -508,13 +614,14 @@ class SystemConfigDatabase:
         }
 
     def asjson(self) -> str:
+        boxtype_alias = _get_quel1_boxtype_alias()
+        boxtype_inverse_alias = {v: k for k, v in boxtype_alias.items()}
         box_settings = {
             box_name: _.asdict() for box_name, _ in self._box_settings.items()
         }
         for dct in box_settings.values():
-            dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[
-                dct["boxtype"]
-            ]
+            if dct["boxtype"] in boxtype_inverse_alias:
+                dct["boxtype"] = boxtype_inverse_alias[dct["boxtype"]]
         return json.dumps(
             {
                 "clockmaster_setting": self._clockmaster_setting.asdict()
@@ -691,7 +798,10 @@ class BoxSetting:
 
     def asjsonable(self) -> dict[str, Any]:
         dct = self.asdict()
-        dct["boxtype"] = {v: k for k, v in QUEL1_BOXTYPE_ALIAS.items()}[dct["boxtype"]]
+        boxtype_alias = _get_quel1_boxtype_alias()
+        boxtype_inverse_alias = {v: k for k, v in boxtype_alias.items()}
+        if dct["boxtype"] in boxtype_inverse_alias:
+            dct["boxtype"] = boxtype_inverse_alias[dct["boxtype"]]
         return dct
 
 

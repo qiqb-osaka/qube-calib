@@ -12,26 +12,21 @@ from collections import Counter, deque
 from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
+    Callable,
     Final,
     Iterable,
     MutableMapping,
     MutableSequence,
     Optional,
+    Protocol,
     TypedDict,
+    cast,
 )
 
 import numpy as np
 import numpy.typing as npt
-from e7awgsw import CaptureModule, CaptureParam, DspUnit, WaveSequence
-from quel_clock_master import QuBEMasterClient, SequencerClient
-from quel_ic_config import (
-    QUEL1_BOXTYPE_ALIAS,
-    CaptureReturnCode,
-    Quel1BoxType,
-    Quel1BoxWithRawWss,
-    Quel1ConfigOption,
-)
 from typing_extensions import deprecated
 
 from . import __version__, neopulse
@@ -40,7 +35,6 @@ from .e7utils import (
     WaveSequenceTools,
     _convert_gen_sampled_sequence_to_blanks_and_waves_chain,
 )
-from .instrument.quel.quel1 import driver as direct
 from .neopulse import (
     CapSampledSequence,
     Capture,
@@ -52,6 +46,214 @@ from .neopulse import (
 from .sysconfdb import BoxSetting, PortSetting, Quel1PortType, SystemConfigDatabase
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from e7awgsw import CaptureModule, CaptureParam, WaveSequence
+    from quel_ic_config import CaptureReturnCode, Quel1BoxType, Quel1ConfigOption
+
+    from .instrument.quel.quel1 import driver as direct
+else:
+    CaptureModule = Any
+    CaptureParam = Any
+    WaveSequence = Any
+    CaptureReturnCode = Any
+    Quel1BoxType = Any
+    Quel1ConfigOption = Any
+
+
+class DspUnitProtocol(Protocol):
+    INTEGRATION: Any
+    SUM: Any
+    DECIMATION: Any
+
+
+class DirectDriverModuleProtocol(Protocol):
+    Action: Any
+    AwgId: Any
+    AwgSetting: Any
+    NamedBox: Any
+    Quel1System: Any
+    RunitId: Any
+    RunitSetting: Any
+    TriggerSetting: Any
+    multi: Any
+
+
+class QuBEMasterClientProtocol(Protocol):
+    def read_clock(self) -> tuple[bool, int, int] | tuple[bool, int]: ...
+
+    def kick_clock_synch(self, ipaddrs: list[str]) -> None: ...
+
+
+class SequencerClientProtocol(Protocol):
+    def read_clock(self) -> tuple[bool, int, int]: ...
+
+
+class _CssProtocol(Protocol):
+    def get_all_groups(self) -> list[int]: ...
+
+
+class _WssProtocol(Protocol):
+    _wss_addr: str
+
+
+class _Quel1SystemBoxProtocol(Protocol):
+    wss: _WssProtocol
+
+    def _decode_port(self, port: Quel1PortType) -> tuple[int, int]: ...
+
+    def _convert_any_port(self, port: int) -> tuple[int, int]: ...
+
+
+class Quel1SystemProtocol(Protocol):
+    boxes: MutableMapping[str, _Quel1SystemBoxProtocol]
+    box: MutableMapping[str, _Quel1SystemBoxProtocol]
+    trigger: MutableMapping[tuple[str, Quel1PortType], tuple[str, Quel1PortType, int]]
+    timing_shift: MutableMapping[str, int]
+    displacement: Any
+
+    def dump_port(self, box_name: str, port: Quel1PortType) -> dict[str, Any]: ...
+
+    def get_lo_freq(self, box_name: str, port: Quel1PortType) -> float | None: ...
+
+    def get_cnco_freq(self, box_name: str, port: Quel1PortType) -> float: ...
+
+    def get_fnco_freq(
+        self, box_name: str, port: Quel1PortType, channel: int
+    ) -> float: ...
+
+    def get_sideband(self, box_name: str, port: Quel1PortType) -> str | None: ...
+
+    def is_output_port(self, box_name: str, port: Quel1PortType) -> bool: ...
+
+    def is_input_port(self, box_name: str, port: Quel1PortType) -> bool: ...
+
+
+class Quel1BoxWithRawWssProtocol(Protocol):
+    css: _CssProtocol
+    wss: _WssProtocol
+
+    def dump_box(self) -> dict[str, Any]: ...
+
+    def config_box(
+        self, ports: dict[int | tuple[int, int], dict[str, Any]]
+    ) -> None: ...
+
+    def reconnect(
+        self, ignore_crc_error_of_mxfe: list[int] | None = None
+    ) -> dict[int, bool]: ...
+
+    def link_status(
+        self,
+        ignore_crc_error_of_mxfe: list[int] | None = None,
+    ) -> dict[int, bool]: ...
+
+    def get_output_ports(self) -> list[int | tuple[int, int]]: ...
+
+    def get_input_ports(self) -> list[int | tuple[int, int]]: ...
+
+    def get_read_input_ports(self) -> list[int | tuple[int, int]]: ...
+
+    def get_monitor_input_ports(self) -> list[int | tuple[int, int]]: ...
+
+    def get_loopbacks_of_port(
+        self, port: int | tuple[int, int]
+    ) -> set[int | tuple[int, int]]: ...
+
+    def config_rfswitch(self, port: int, rfswitch: str) -> None: ...
+
+    def easy_stop_all(self, control_port_rfswitch: bool = True) -> None: ...
+
+    def initialize_all_awgs(self) -> None: ...
+
+    def dump_port(self, port: Quel1PortType) -> dict[str, Any]: ...
+
+
+class BoxPoolProtocol(Protocol):
+    _box_config_cache: dict[str, dict]
+
+    def get_box(
+        self,
+        name: str,
+    ) -> tuple[Quel1BoxWithRawWssProtocol, SequencerClientProtocol]: ...
+
+    def get_port_direction(self, box_name: str, port: Quel1PortType) -> str: ...
+
+
+Quel1BoxWithRawWss = Quel1BoxWithRawWssProtocol
+QuBEMasterClient = QuBEMasterClientProtocol
+SequencerClient = SequencerClientProtocol
+
+
+def _default_direct_driver_provider() -> DirectDriverModuleProtocol:
+    from .instrument.quel.quel1 import driver as direct
+
+    return cast(DirectDriverModuleProtocol, direct)
+
+
+_direct_driver_provider: Callable[[], DirectDriverModuleProtocol] = (
+    _default_direct_driver_provider
+)
+
+
+def set_direct_driver_provider(
+    provider: Callable[[], DirectDriverModuleProtocol],
+) -> None:
+    global _direct_driver_provider
+    _direct_driver_provider = provider
+
+
+class _DirectDriverProxy:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_direct_driver_provider(), name)
+
+
+if not TYPE_CHECKING:
+    direct = cast(DirectDriverModuleProtocol, _DirectDriverProxy())
+
+
+def _get_dsp_unit() -> DspUnitProtocol:
+    from e7awgsw import DspUnit
+
+    return cast(DspUnitProtocol, DspUnit)
+
+
+def _create_master_client(master_ipaddr: str) -> QuBEMasterClientProtocol:
+    from quel_clock_master import QuBEMasterClient
+
+    return cast(QuBEMasterClientProtocol, QuBEMasterClient(master_ipaddr=master_ipaddr))
+
+
+def _create_sequencer_client(target_ipaddr: str) -> SequencerClientProtocol:
+    from quel_clock_master import SequencerClient
+
+    return cast(SequencerClientProtocol, SequencerClient(target_ipaddr=target_ipaddr))
+
+
+def _create_quel1_box_with_raw_wss(
+    *,
+    ipaddr_wss: str,
+    ipaddr_sss: str,
+    ipaddr_css: str,
+    boxtype: Quel1BoxType,
+) -> Quel1BoxWithRawWssProtocol:
+    from quel_ic_config import Quel1BoxWithRawWss
+
+    return cast(
+        Quel1BoxWithRawWssProtocol,
+        Quel1BoxWithRawWss.create(
+            ipaddr_wss=ipaddr_wss,
+            ipaddr_sss=ipaddr_sss,
+            ipaddr_css=ipaddr_css,
+            boxtype=boxtype,
+        ),
+    )
+
+
+def _get_quel1_boxtype_alias() -> MutableSequence[str]:
+    from quel_ic_config import QUEL1_BOXTYPE_ALIAS
+
+    return cast(MutableSequence[str], QUEL1_BOXTYPE_ALIAS)
 
 
 class Direction(Enum):
@@ -119,16 +321,18 @@ class QubeCalib:
         return Quel1BoxType
 
     @deprecated("use sysdb.create_quel1system() instead")
-    def create_quel1system(self, box_names: list[str]) -> direct.Quel1System:
+    def create_quel1system(self, box_names: list[str]) -> Quel1SystemProtocol:
         return self.sysdb.create_quel1system(*box_names)
 
     @deprecated("use sysdb.create_quel1system() instead")
-    def quel1_create_quel1system(self, *box_names: str) -> direct.Quel1System:
+    def quel1_create_quel1system(self, *box_names: str) -> Quel1SystemProtocol:
         if self.sysdb._clockmaster_setting is None:
             raise ValueError("clock master is not found")
             # TODO : ここは例外を投げるのではなく、 None を設定するようにし，　single box モードを設ける
         system = direct.Quel1System.create(
-            clockmaster=QuBEMasterClient(str(self.sysdb._clockmaster_setting.ipaddr)),
+            clockmaster=_create_master_client(
+                master_ipaddr=str(self.sysdb._clockmaster_setting.ipaddr)
+            ),
             boxes=[self.sysdb.create_named_box(b) for b in box_names],
         )
         return system
@@ -181,7 +385,7 @@ class QubeCalib:
         self,
         sequence: neopulse.Sequence,
         *,
-        driver: direct.Quel1System | None = None,
+        driver: Quel1SystemProtocol | None = None,
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
@@ -420,7 +624,7 @@ class QubeCalib:
 
     def read_clock(self, *box_names: str) -> MutableSequence[tuple[bool, int, int]]:
         return [
-            SequencerClient(
+            _create_sequencer_client(
                 target_ipaddr=str(
                     self.system_config_database._box_settings[_].ipaddr_sss
                 )
@@ -434,14 +638,16 @@ class QubeCalib:
         db = self.system_config_database
         if db._clockmaster_setting is None:
             raise ValueError("clock master is not found")
-        master = QuBEMasterClient(master_ipaddr=str(db._clockmaster_setting.ipaddr))
+        master = _create_master_client(
+            master_ipaddr=str(db._clockmaster_setting.ipaddr)
+        )
         master.kick_clock_synch(
             [str(db._box_settings[_].ipaddr_sss) for _ in box_names]
         )
         return [self.read_clock(_) for _ in box_names] + [master.read_clock()]
 
     def show_available_boxtype(self) -> MutableSequence[str]:
-        return [_ for _ in QUEL1_BOXTYPE_ALIAS]
+        return [_ for _ in _get_quel1_boxtype_alias()]
 
     @classmethod
     def quantize_sequence_duration(
@@ -1091,13 +1297,13 @@ class TargetBPC(TypedDict):
 class PortConfigAcquirer:
     def __init__(
         self,
-        boxpool: BoxPool,
+        boxpool: BoxPoolProtocol,
         box_name: str,
         box: Quel1BoxWithRawWss,
         port: Quel1PortType,
         channel: int,
         *,
-        driver: direct.Quel1System | None = None,
+        driver: Quel1SystemProtocol | None = None,
     ):
         if driver is None:
             # boxpool にキャッシュされている box の設定を取得する
@@ -1174,7 +1380,7 @@ class Sequencer(Command):
         ],
         *,
         sysdb: SystemConfigDatabase,
-        driver: direct.Quel1System | None = None,
+        driver: Quel1SystemProtocol | None = None,
         time_offset: dict[str, int] = {},
         time_to_start: dict[str, int] = {},
         group_items_by_target: dict[str, dict[int, MutableSequence[Slot]]] = {},
@@ -1189,6 +1395,7 @@ class Sequencer(Command):
         self.timetostart_by_boxname = time_to_start  # sysref
         self.interval = interval
         self.driver = driver
+        self.sysdb = sysdb
 
         settings = sysdb._target_settings
         for target_name, gss in gen_sampled_sequence.items():
@@ -1235,7 +1442,6 @@ class Sequencer(Command):
         #   "channel_number": channel_number,
         #   "target": db._target_settings[target_name],
         # }
-        self.sysdb = sysdb
         self._sideload_settings: list[
             direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting
         ] = []  # サイドロード用の設定
@@ -1316,7 +1522,7 @@ class Sequencer(Command):
         sequence: neopulse.Sequence,
         *,
         sysdb: SystemConfigDatabase,
-        driver: direct.Quel1System | None = None,  # TODO: driver
+        driver: Quel1SystemProtocol | None = None,  # TODO: driver
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
@@ -1369,7 +1575,7 @@ class Sequencer(Command):
 
     def is_output_port(self, box_name: str, port: Quel1PortType) -> bool:
         if self.driver is None:
-            if box_name in self.sysdb._box_settings:
+            if box_name not in self.sysdb._box_settings:
                 raise ValueError(f"box({box_name}) is not defined")
             box = self.sysdb.create_box(box_name, reconnect=True)
             return port in box.get_output_ports()
@@ -1401,7 +1607,7 @@ class Sequencer(Command):
         self.line_param0 = line_param0
         self.line_param1 = line_param1
 
-    def generate_cap_resource_map(self, boxpool: BoxPool) -> dict[str, Any]:
+    def generate_cap_resource_map(self, boxpool: BoxPoolProtocol) -> dict[str, Any]:
         _cap_resource_map: dict[str, MutableSequence[dict[str, Any]]] = {}
         for target_name, ms in self.resource_map.items():
             for m in ms:
@@ -1438,7 +1644,7 @@ class Sequencer(Command):
 
     def generate_e7_settings(
         self,
-        boxpool: BoxPool,
+        boxpool: BoxPoolProtocol,
     ) -> tuple[
         dict[tuple[str, Quel1PortType, int], CaptureParam],
         dict[tuple[str, Quel1PortType, int], WaveSequence],
@@ -1660,15 +1866,16 @@ class Sequencer(Command):
         cprm: CaptureParam,
     ) -> tuple[CaptureReturnCode, list[npt.NDArray[np.complex64]]]:
         # num_expected_words = cprm.calc_capture_samples()
-        if DspUnit.INTEGRATION in cprm.dsp_units_enabled:
+        dsp_unit = _get_dsp_unit()
+        if dsp_unit.INTEGRATION in cprm.dsp_units_enabled:
             data = data.reshape(1, -1)
         else:
             data = data.reshape(cprm.num_integ_sections, -1)
-        if DspUnit.SUM in cprm.dsp_units_enabled:
+        if dsp_unit.SUM in cprm.dsp_units_enabled:
             width = len(cprm.sum_section_list)
             result = np.hsplit(data, width)
         else:
-            b = DspUnit.DECIMATION not in cprm.dsp_units_enabled
+            b = dsp_unit.DECIMATION not in cprm.dsp_units_enabled
             ssl = cprm.sum_section_list
             ws = [w if b else int(w // 4) for w, _ in ssl[:-1]]
             word = cprm.NUM_SAMPLES_IN_ADC_WORD
@@ -1676,7 +1883,7 @@ class Sequencer(Command):
             result = np.hsplit(data, width * word)
         return status, result
 
-    def create_quel1system(self, boxpool: BoxPool) -> direct.Quel1System:
+    def create_quel1system(self, boxpool: BoxPool) -> Quel1SystemProtocol:
         if boxpool._clock_master is None:
             raise ValueError("clock master is not set")
         quel1system = direct.Quel1System.create(
@@ -1726,7 +1933,7 @@ class Sequencer(Command):
 
     def select_trigger(
         self,
-        quel1system: direct.Quel1System,
+        quel1system: Quel1SystemProtocol,
         settings: list[direct.AwgSetting | direct.RunitSetting | direct.TriggerSetting],
     ) -> list[direct.TriggerSetting]:
         if not self.is_empty_trigger(settings):
@@ -1899,12 +2106,12 @@ class Executor:
         self,
         sysdb: SystemConfigDatabase,
         *,
-        quel1system: direct.Quel1System | None = None,
+        quel1system: Quel1SystemProtocol | None = None,
     ) -> None:
         self._work_queue: Final[deque] = deque()
         self._config_buffer: Final[deque] = deque()
         self.sysdb = sysdb
-        self.quel1system: Final[direct.Quel1System | None] = quel1system
+        self.quel1system: Final[Quel1SystemProtocol | None] = quel1system
         self._boxpool = BoxPool()
         self.refresh_boxpool()
 
@@ -2097,7 +2304,7 @@ class Executor:
         else:
             for box_name in self.quel1system.boxes:
                 box = self.quel1system.boxes[box_name]
-                sqc = SequencerClient(box.wss._wss_addr)
+                sqc = _create_sequencer_client(target_ipaddr=box.wss._wss_addr)
                 self._boxpool._boxes[box_name] = (box, sqc)
                 self._boxpool._linkstatus[box_name] = False
 
@@ -2152,7 +2359,7 @@ class Executor:
         self,
         sequence: neopulse.Sequence,
         *,
-        driver: direct.Quel1System | None = None,
+        driver: Quel1SystemProtocol | None = None,
         interval: Optional[float] = None,
         time_offset: dict[str, int] = {},  # {box_name: time_offset}
         time_to_start: dict[str, int] = {},  # {box_name: time_to_start}
@@ -2207,7 +2414,7 @@ class BoxPool:
         self,
         ipaddr: str,
     ) -> None:
-        self._clock_master = QuBEMasterClient(master_ipaddr=ipaddr)
+        self._clock_master = _create_master_client(master_ipaddr=ipaddr)
 
     def measure_timediff(
         self, num_iters: int = DEFAULT_NUM_SYSREF_MEASUREMENTS
@@ -2241,15 +2448,13 @@ class BoxPool:
         # config_root: Optional[Path],
         # config_options: Optional[Collection[Quel1ConfigOption]] = None,
     ) -> Quel1BoxWithRawWss:
-        box = Quel1BoxWithRawWss.create(
+        box = _create_quel1_box_with_raw_wss(
             ipaddr_wss=ipaddr_wss,
             ipaddr_sss=ipaddr_sss,
             ipaddr_css=ipaddr_css,
             boxtype=boxtype,
-            # config_root=config_root,
-            # config_options=config_options,
         )
-        sqc = SequencerClient(ipaddr_sss)
+        sqc = _create_sequencer_client(target_ipaddr=ipaddr_sss)
         self._boxes[box_name] = (box, sqc)
         self._linkstatus[box_name] = False
         return box

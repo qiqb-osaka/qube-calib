@@ -2,11 +2,9 @@
 
 __version__ = "3.1.16beta3"
 
-from . import neopulse
 from .qubecalib import QubeCalib, Sequencer
 
 __all__ = [
-    "neopulse",
     "QubeCalib",
     "Sequencer",
 ]

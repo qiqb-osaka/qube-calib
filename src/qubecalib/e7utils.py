@@ -2,18 +2,109 @@ from __future__ import annotations
 
 import math
 import sys
-from typing import Any, MutableMapping, MutableSequence
+from typing import TYPE_CHECKING, Any, MutableMapping, MutableSequence, Protocol, cast
 
 import numpy as np
 
 # from dataclasses import dataclass
-from e7awgsw import CaptureParam, DspUnit, IqWave, WaveSequence
-
 from .neopulse import CapSampledSequence, GenSampledSequence
 
 # import json
 
 SAMPLING_PERIOD = 2  # [ns]
+
+if TYPE_CHECKING:
+    from e7awgsw import CaptureParam, WaveSequence
+else:
+    CaptureParam = Any
+    WaveSequence = Any
+
+
+class DspUnitProtocol(Protocol):
+    INTEGRATION: Any
+    SUM: Any
+    DECIMATION: Any
+    COMPLEX_FIR: Any
+    COMPLEX_WINDOW: Any
+    CLASSIFICATION: Any
+
+
+class IqWaveProtocol(Protocol):
+    @staticmethod
+    def convert_to_iq_format(i: np.ndarray, q: np.ndarray, block_size: int) -> Any: ...
+
+
+class WaveSequenceClassProtocol(Protocol):
+    NUM_SAMPLES_IN_AWG_WORD: int
+    NUM_SAMPLES_IN_WAVE_BLOCK: int
+
+    def __call__(self, num_wait_words: int, num_repeats: int) -> WaveSequence: ...
+
+
+class CaptureParamClassProtocol(Protocol):
+    NUM_SAMPLES_IN_ADC_WORD: int
+    NUM_COMPLEX_FIR_COEFS: int
+    MAX_FIR_COEF_VAL: int
+    NUM_COMPLEXW_WINDOW_COEFS: int
+    MAX_WINDOW_COEF_VAL: int
+
+    def __call__(self) -> CaptureParam: ...
+
+
+_e7awgsw_overrides: dict[str, Any] = {}
+
+
+def set_e7awgsw_overrides(
+    *,
+    dsp_unit: Any | None = None,
+    iq_wave: Any | None = None,
+    wave_sequence_cls: Any | None = None,
+    capture_param_cls: Any | None = None,
+) -> None:
+    if dsp_unit is not None:
+        _e7awgsw_overrides["dsp_unit"] = dsp_unit
+    if iq_wave is not None:
+        _e7awgsw_overrides["iq_wave"] = iq_wave
+    if wave_sequence_cls is not None:
+        _e7awgsw_overrides["wave_sequence_cls"] = wave_sequence_cls
+    if capture_param_cls is not None:
+        _e7awgsw_overrides["capture_param_cls"] = capture_param_cls
+
+
+def reset_e7awgsw_overrides() -> None:
+    _e7awgsw_overrides.clear()
+
+
+def _get_dsp_unit() -> DspUnitProtocol:
+    if "dsp_unit" in _e7awgsw_overrides:
+        return cast(DspUnitProtocol, _e7awgsw_overrides["dsp_unit"])
+    from e7awgsw import DspUnit
+
+    return cast(DspUnitProtocol, DspUnit)
+
+
+def _get_iq_wave() -> IqWaveProtocol:
+    if "iq_wave" in _e7awgsw_overrides:
+        return cast(IqWaveProtocol, _e7awgsw_overrides["iq_wave"])
+    from e7awgsw import IqWave
+
+    return cast(IqWaveProtocol, IqWave)
+
+
+def _get_wave_sequence_cls() -> WaveSequenceClassProtocol:
+    if "wave_sequence_cls" in _e7awgsw_overrides:
+        return cast(WaveSequenceClassProtocol, _e7awgsw_overrides["wave_sequence_cls"])
+    from e7awgsw import WaveSequence
+
+    return cast(WaveSequenceClassProtocol, WaveSequence)
+
+
+def _get_capture_param_cls() -> CaptureParamClassProtocol:
+    if "capture_param_cls" in _e7awgsw_overrides:
+        return cast(CaptureParamClassProtocol, _e7awgsw_overrides["capture_param_cls"])
+    from e7awgsw import CaptureParam
+
+    return cast(CaptureParamClassProtocol, CaptureParam)
 
 
 class WaveSequenceTools:
@@ -52,7 +143,8 @@ class WaveSequenceTools:
         repeats: int,
         interval_samples: int,
     ) -> WaveSequence:
-        unit = WaveSequence.NUM_SAMPLES_IN_AWG_WORD
+        ws_cls = _get_wave_sequence_cls()
+        unit = ws_cls.NUM_SAMPLES_IN_AWG_WORD
         # 同一 awg に所属する target を束ねた WaveSequence を生成する
         # TODO もし sequence の geometry が e7 compatible だった場合 wave_chunk を活用して変換する
         # そうでなかったらすべての subseq を 単一の wave_chunk に入れる
@@ -128,13 +220,15 @@ class WaveSequenceTools:
             i[begin : begin + subseq.real.shape[0]] = (32767 * subseq.real).astype(int)
             q[begin : begin + subseq.imag.shape[0]] = (32767 * subseq.imag).astype(int)
         # 繰り返し周期を設定する
-        wseq = WaveSequence(
+        ws_cls = _get_wave_sequence_cls()
+        iq_wave = _get_iq_wave()
+        wseq = ws_cls(
             num_wait_words=wait_words,
             num_repeats=sequence.repeats if sequence.repeats is not None else repeats,
         )
 
-        s = IqWave.convert_to_iq_format(i, q, WaveSequence.NUM_SAMPLES_IN_WAVE_BLOCK)
-        total_duration_in_words = int(len(s) // WaveSequence.NUM_SAMPLES_IN_AWG_WORD)
+        s = iq_wave.convert_to_iq_format(i, q, ws_cls.NUM_SAMPLES_IN_WAVE_BLOCK)
+        total_duration_in_words = int(len(s) // ws_cls.NUM_SAMPLES_IN_AWG_WORD)
         wseq.add_chunk(
             iq_samples=s,
             num_blank_words=interval_words - total_duration_in_words,
@@ -164,7 +258,8 @@ class CaptureParamTools:
         repeats: int,
         interval_samples: int,
     ) -> CaptureParam:
-        unit = CaptureParam.NUM_SAMPLES_IN_ADC_WORD
+        cap_cls = _get_capture_param_cls()
+        unit = cap_cls.NUM_SAMPLES_IN_ADC_WORD
         # 市松模様チェーンを生成
         # WaveChunk に相当するものがないので subsequence はマージする
         chain = _convert_cap_sampled_sequence_to_blanks_and_durations_chain(sequence)
@@ -217,7 +312,7 @@ class CaptureParamTools:
         #     new_chain[-1] = 1
         # TODO new_chain の blank 要素が潰れることがある（capt は拡張なので潰れない）この処理を追加しないといけない
         # TODO post_blank は 1 以上の制約がある
-        capprm = CaptureParam()
+        capprm = cap_cls()
         capprm.capture_delay = capture_delay_words + new_chain[0]
         capprm.num_integ_sections = repeats
         for duration, blank in zip(new_chain[1::2], new_chain[2::2]):
@@ -233,8 +328,9 @@ class CaptureParamTools:
         cls,
         capprm: CaptureParam,
     ) -> CaptureParam:
+        dsp_unit = _get_dsp_unit()
         dsp = capprm.dsp_units_enabled
-        dsp.append(DspUnit.INTEGRATION)
+        dsp.append(dsp_unit.INTEGRATION)
         capprm.sel_dsp_units_to_enable(*dsp)
         return capprm
 
@@ -243,8 +339,9 @@ class CaptureParamTools:
         cls,
         capprm: CaptureParam,
     ) -> CaptureParam:
+        dsp_unit = _get_dsp_unit()
         dsp = capprm.dsp_units_enabled
-        dsp.append(DspUnit.SUM)
+        dsp.append(dsp_unit.SUM)
         capprm.sel_dsp_units_to_enable(*dsp)
         return capprm
 
@@ -272,10 +369,11 @@ class CaptureParamTools:
         capprm.complex_fir_coefs = cls.fir_coefficient(f_GHz)
         capprm.complex_window_coefs = cls.window_coefficient(f_GHz)
 
+        dsp_unit = _get_dsp_unit()
         dspunits = capprm.dsp_units_enabled
-        dspunits.append(DspUnit.COMPLEX_FIR)
-        dspunits.append(DspUnit.DECIMATION)
-        dspunits.append(DspUnit.COMPLEX_WINDOW)
+        dspunits.append(dsp_unit.COMPLEX_FIR)
+        dspunits.append(dsp_unit.DECIMATION)
+        dspunits.append(dsp_unit.COMPLEX_WINDOW)
         capprm.sel_dsp_units_to_enable(*dspunits)
         return capprm
 
@@ -299,8 +397,9 @@ class CaptureParamTools:
             Each part of a complex FIR coefficient must be an integer
             and in the range of [-2**15, 2**15 - 1].
         """
-        N_COEFS = CaptureParam.NUM_COMPLEX_FIR_COEFS  # 16
-        MAX_VAL = CaptureParam.MAX_FIR_COEF_VAL  # 32767
+        cap_cls = _get_capture_param_cls()
+        N_COEFS = cap_cls.NUM_COMPLEX_FIR_COEFS  # 16
+        MAX_VAL = cap_cls.MAX_FIR_COEF_VAL  # 32767
         t_ns = SAMPLING_PERIOD * np.arange(-N_COEFS + 1, 1)  # [-30, -28, ..., 0]
 
         # rect window
@@ -336,8 +435,9 @@ class CaptureParamTools:
             and in the range of [-2**31, 2**31 - 1].
         """
         N_DECIMATION = 4
-        N_COEFS = CaptureParam.NUM_COMPLEXW_WINDOW_COEFS  # 2048
-        MAX_VAL = CaptureParam.MAX_WINDOW_COEF_VAL  # 2147483647
+        cap_cls = _get_capture_param_cls()
+        N_COEFS = cap_cls.NUM_COMPLEXW_WINDOW_COEFS  # 2048
+        MAX_VAL = cap_cls.MAX_WINDOW_COEF_VAL  # 2147483647
         t_ns = N_DECIMATION * SAMPLING_PERIOD * np.arange(N_COEFS)  # [0, 8, ..., 16376]
         coefs = MAX_VAL * np.exp(-1j * 2 * np.pi * f_GHz * t_ns)
         result = coefs.round().tolist()
@@ -364,8 +464,9 @@ class CaptureParamTools:
         CaptureParam
             CaptureParam object with classification enabled.
         """
+        dsp_unit = _get_dsp_unit()
         dspunits = capprm.dsp_units_enabled
-        dspunits.append(DspUnit.CLASSIFICATION)
+        dspunits.append(dsp_unit.CLASSIFICATION)
         capprm.sel_dsp_units_to_enable(*dspunits)
         capprm.set_decision_func_params(
             func_sel=0,
