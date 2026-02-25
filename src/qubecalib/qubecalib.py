@@ -990,11 +990,22 @@ class Converter:
                 seq.sub_sequences, timing_list, offset_list
             ):
                 wave = subseq.real + 1j * subseq.imag
-                for (begin, end), (offsetb, _) in zip(timings, offsets):
-                    offset_phase = modulation_angular_frequency * offsetb
-                    b = math.floor(begin / SAMPLING_PERIOD)
-                    e = math.floor(end / SAMPLING_PERIOD)
-                    wave[b:e] = wave[b:e] * np.exp(-1j * offset_phase)
+
+                for wave_begin, wave_end in timings:
+                    for cap_begin, cap_end in offsets:
+                        # (wave_begin, wave_end) と (cap_begin, cap_end) の交差
+                        ov_begin = max(wave_begin, cap_begin)
+                        ov_end = min(wave_end, cap_end)
+                        if not (ov_begin < ov_end):
+                            continue
+
+                        offset_phase = modulation_angular_frequency * cap_begin
+
+                        b = math.floor(ov_begin / SAMPLING_PERIOD)
+                        e = math.floor(ov_end / SAMPLING_PERIOD)
+                        if b < e:
+                            wave[b:e] *= np.exp(-1j * offset_phase)
+
                 subseq.real = np.real(wave)
                 subseq.imag = np.imag(wave)
 
