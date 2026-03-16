@@ -1147,6 +1147,46 @@ class Skew:
 
         return updated
 
+    def set_skew_force(self, value: int, backup: bool = False) -> bool:
+        """
+        Set the skew configuration as value forcely.
+        The resulting wait value is clamped to a minimum of 0.
+
+        Parameters
+        ----------
+        target_value : int
+            The desired skew index.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+        # backup current skew config data when required
+        if backup:
+            skewfile = self._skew_yaml_path
+            dt = datetime.datetime.now()
+            bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
+            shutil.copy(skewfile, bak)
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        for k,v in self._estimated.items():
+            t,c = k
+            new_wait = max(0, value) # clamp to minimum 0
+            config['box_setting'][t]['port_wait'][c] = new_wait
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+
+        return True
+
     # def load(self, filename: str) -> None:
     #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
     #         config = yaml.safe_load(file)
