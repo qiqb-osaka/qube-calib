@@ -1199,12 +1199,12 @@ class Skew:
         
         key = f'{unit}_{port}'
         repeats = config['repeats'][key] = value
-        
+
         # save updated skew config data
         with open(self._skew_yaml_path, 'w') as f:
             yaml.safe_dump(config, f)
 
-    def set_repeats(self, unit: str, port: int, value: int, backup: bool) -> int:
+    def get_repeats(self, unit: str, port: int, value: int, backup: bool) -> int:
 
         # load current skew config data
         with open(self._skew_yaml_path, 'r') as f:
