@@ -1188,7 +1188,7 @@ class Skew:
 
         return True
 
-    def set_repeats(self, unit: str, port: int, value: int, backup: bool):
+    def set_repeats(self, unit: str, port: int, value: int, backup: bool = False):
         # backup current skew config data when required
         if backup:
             self._config_backup()
@@ -1197,7 +1197,7 @@ class Skew:
         with open(self._skew_yaml_path, 'r') as f:
             config = yaml.safe_load(f)
         
-        key = f'{unit}_{port}'
+        key = f'{unit}-{port}'
         repeats = config['repeats'][key] = value
 
         # save updated skew config data
@@ -1209,7 +1209,7 @@ class Skew:
         # load current skew config data
         with open(self._skew_yaml_path, 'r') as f:
             config = yaml.safe_load(f)
-        key = f'{unit}_{port}'
+        key = f'{unit}-{port}'
         return config['repeats'].get(key, Skew.DEFAULT_REPEATS)
 
     # def load(self, filename: str) -> None:
