@@ -1098,6 +1098,13 @@ class Skew:
         """
         return {k: v.idx for k, v in self._estimated.items()}
 
+    def _config_backup(self):
+        skewfile = self._skew_yaml_path
+        dt = datetime.datetime.now()
+        bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
+        shutil.copy(skewfile, bak)
+
+
     def update_skew(self, target_value: int, backup: bool = False) -> bool:
         """
         Update the skew configuration so that each PORT matches the target value.
@@ -1121,10 +1128,7 @@ class Skew:
         """
         # backup current skew config data when required
         if backup:
-            skewfile = self._skew_yaml_path
-            dt = datetime.datetime.now()
-            bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
-            shutil.copy(skewfile, bak)
+            self._config_backup()
 
         # load current skew config data
         with open(self._skew_yaml_path, 'r') as f:
@@ -1167,10 +1171,7 @@ class Skew:
         """
         # backup current skew config data when required
         if backup:
-            skewfile = self._skew_yaml_path
-            dt = datetime.datetime.now()
-            bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
-            shutil.copy(skewfile, bak)
+            self._config_backup()
 
         # load current skew config data
         with open(self._skew_yaml_path, 'r') as f:
@@ -1186,6 +1187,30 @@ class Skew:
             yaml.safe_dump(config, f)
 
         return True
+
+    def set_repeats(self, unit: str, port: int, value: int, backup: bool):
+        # backup current skew config data when required
+        if backup:
+            self._config_backup()
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        key = f'{unit}_{port}'
+        repeats = config['repeats'][key] = value
+        
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+
+    def set_repeats(self, unit: str, port: int, value: int, backup: bool) -> int:
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        key = f'{unit}_{port}'
+        return config['repeats'].get(key, Skew.DEFAULT_REPEATS)
 
     # def load(self, filename: str) -> None:
     #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
