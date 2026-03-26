@@ -1098,7 +1098,13 @@ class Skew:
         """
         return {k: v.idx for k, v in self._estimated.items()}
 
-    def update_skew(self, target_value: int, backup: bool = False) -> bool:
+    def _config_backup(self):
+        skewfile = self._skew_yaml_path
+        dt = datetime.datetime.now()
+        bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
+        shutil.copy(skewfile, bak)
+
+    def update_skew(self, target_value: int, backup: bool = False, reload_after: bool = True) -> bool:
         """
         Update the skew configuration so that each PORT matches the target value.
         
@@ -1113,6 +1119,8 @@ class Skew:
         backup : bool, optional
             If True, create a timestamped backup of the current configuration file
             before applying changes.
+        reload_after : bool, optional
+            If True, reload the configuration file after updating it.
 
         Returns
         -------
@@ -1121,10 +1129,7 @@ class Skew:
         """
         # backup current skew config data when required
         if backup:
-            skewfile = self._skew_yaml_path
-            dt = datetime.datetime.now()
-            bak = skewfile + '.bak.' + dt.strftime('%Y%m%d_%H%M%S')
-            shutil.copy(skewfile, bak)
+            self._config_backup()
 
         # load current skew config data
         with open(self._skew_yaml_path, 'r') as f:
@@ -1145,7 +1150,248 @@ class Skew:
         with open(self._skew_yaml_path, 'w') as f:
             yaml.safe_dump(config, f)
 
+        if reload_after:
+            self.reload(self._skew_yaml_path)
+
         return updated
+
+    def set_skew_force(self, value: int, backup: bool = False, reload_after: bool = True) -> bool:
+        """
+        Force all skew wait values to the specified value.
+        The resulting wait value is clamped to a minimum of 0.
+
+        Parameters
+        ----------
+        value : int
+            The wait value to apply.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+        reload_after : bool, optional
+            If True, reload the configuration file after updating it.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+        # backup current skew config data when required
+        if backup:
+            self._config_backup()
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        for k,v in self._estimated.items():
+            t,c = k
+            new_wait = max(0, value) # clamp to minimum 0
+            config['box_setting'][t]['port_wait'][c] = new_wait
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+
+        if reload_after:
+            self.reload(self._skew_yaml_path)
+
+        return True
+
+    def set_repeats(self, unit: str, port: int, value: int, backup: bool = False, reload_after: bool = True) -> bool:
+        """
+        Set the number of repetitions.
+        The value is clamped to a minimum of 0.
+
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        port : int
+            The target port ID
+        value : int
+            The desired number of repetitions.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+        reload_after : bool, optional
+            If True, reload the configuration file after updating it.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+
+        # backup current skew config data when required
+        if backup:
+            self._config_backup()
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        key = f'{unit}-{port}'
+        repeats = config['repeats'][key] = max(0, value)
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+        
+        if reload_after:
+            self.reload(self._skew_yaml_path)
+
+        return True
+
+    def get_repeats(self, unit: str, port: int) -> int:
+        """
+        Get the number of repetitions.
+        If the target unit is not found, the system default value is returned.
+        
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        port : int
+            The target port ID
+        """
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        key = f'{unit}-{port}'
+        return config['repeats'].get(key, Skew.DEFAULT_REPEATS)
+
+    def set_slot(self, unit: str, value: int, backup: bool = False, reload_after: bool = True) -> bool:
+        """
+        Set the number of delay slots.
+        The value is clamped to a minimum of 0.
+
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        value : int
+            The desired number of delay slots.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+        reload_after : bool, optional
+            If True, reload the configuration file after updating it.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        u = config['box_setting'].get(unit, None)
+        if u is None:
+            return False
+        
+        u['slot'] = max(0, value)
+
+        # backup current skew config data when required
+        if backup:
+            self._config_backup()
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+        
+        if reload_after:
+            self.reload(self._skew_yaml_path)
+
+        return True
+
+    def get_slot(self, unit: str) -> int:
+        """
+        Get the number of delay slots.
+        If the target unit is not found, -1 is returned.
+        
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        """
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        u = config['box_setting'].get(unit, None)
+        if u is None:
+            return -1
+        
+        return u['slot']
+
+    def set_wait(self, unit: str, value: int, backup: bool = False, reload_after: bool = True) -> bool:
+        """
+        Set the number of waiting samples.
+        The value is clamped to a minimum of 0.
+
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        value : int
+            The desired number of waiting samples.
+        backup : bool, optional
+            If True, create a timestamped backup of the current configuration file
+            before applying changes.
+        reload_after : bool, optional
+            If True, reload the configuration file after updating it.
+
+        Returns
+        -------
+        bool
+            True if the configuration was modified, False otherwise.
+        """
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        u = config['box_setting'].get(unit, None)
+        if u is None:
+            return False
+        
+        u['wait'] = max(0, value)
+
+        # backup current skew config data when required
+        if backup:
+            self._config_backup()
+
+        # save updated skew config data
+        with open(self._skew_yaml_path, 'w') as f:
+            yaml.safe_dump(config, f)
+        
+        if reload_after:
+            self.reload(self._skew_yaml_path)
+        
+        return True
+    
+    def get_wait(self, unit: str) -> int:
+        """
+        Get the number of waiting samples.
+        If the target unit is not found, -1 is returned.
+        
+        Parameters
+        ----------
+        unit : str
+            The target unit name
+        """
+
+        # load current skew config data
+        with open(self._skew_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        u = config['box_setting'].get(unit, None)
+        if u is None:
+            return -1
+        
+        return u['wait']
 
     # def load(self, filename: str) -> None:
     #     with open(Path(os.getcwd()) / Path(filename), "r") as file:
